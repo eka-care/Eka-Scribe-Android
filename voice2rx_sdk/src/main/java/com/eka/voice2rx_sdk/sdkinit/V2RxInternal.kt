@@ -292,6 +292,14 @@ internal class V2RxInternal : AudioCallback, UploadListener {
         )
     }
 
+    suspend fun getAllSessions()  : List<VToRxSession> {
+        return repository.getAllSessions()
+    }
+
+    suspend fun getSessionBySessionId(sessionId: String) : VToRxSession? {
+        return repository.getSessionBySessionId(sessionId)
+    }
+
     private fun saveJsonToFile(fileName: String, jsonContent: String): File {
         val file = File(app.filesDir, fileName)
         file.writeText(jsonContent)

@@ -12,7 +12,6 @@ import com.eka.voice2rx_sdk.data.repositories.VToRxRepository
 
 object Voice2Rx {
     private var configuration: Voice2RxInitConfig? = null
-    private var v2RxRepository : VToRxRepository? = null
     private var v2RxInternal : V2RxInternal? = null
 
     fun init(
@@ -39,9 +38,6 @@ object Voice2Rx {
         sessionId : String,
         onResponse : (ResponseState) -> Unit,
     ) {
-        v2RxRepository = VToRxRepository(
-            Voice2RxDatabase.getDatabase(context.applicationContext)
-        )
         v2RxInternal?.retrySession(
             context = context,
             sessionId = sessionId,
@@ -62,7 +58,11 @@ object Voice2Rx {
     }
 
     suspend fun getSessions() : List<VToRxSession>? {
-        return v2RxRepository?.getAllSessions()
+        return v2RxInternal?.getAllSessions()
+    }
+
+    suspend fun getSessionBySessionId(sessionId : String) : VToRxSession? {
+        return v2RxInternal?.getSessionBySessionId(sessionId)
     }
 
     fun isCurrentlyRecording() : Boolean {
