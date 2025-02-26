@@ -62,6 +62,16 @@ internal class VToRxRepository(
         }
     }
 
+    suspend fun updateSession(session: VToRxSession) {
+        withContext(Dispatchers.IO) {
+            try {
+                vToRxDatabase.getVoice2RxDao().updateSession(session = session)
+            }
+            catch (_ : Exception) {
+            }
+        }
+    }
+
     suspend fun getAllSessions() : List<VToRxSession> {
         return withContext(Dispatchers.IO) {
             try {
@@ -101,11 +111,15 @@ internal class VToRxRepository(
     fun retrySessionUploading(
         context : Context,
         sessionId : String,
-        s3Config : AwsS3Configuration,
+        s3Config : AwsS3Configuration?,
         onResponse : (ResponseState) -> Unit,
     ) {
         if(!Voice2RxUtils.isNetworkAvailable(context)) {
             onResponse(ResponseState.Error("Network not available!"))
+            return
+        }
+        if(s3Config == null) {
+            onResponse(ResponseState.Error("Credentials not available!"))
             return
         }
         CoroutineScope(Dispatchers.IO).launch {

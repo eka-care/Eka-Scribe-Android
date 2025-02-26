@@ -42,7 +42,7 @@ internal class V2RxInternal : AudioCallback, UploadListener {
 
     companion object {
         const val TAG = "V2RxViewModel"
-        lateinit var s3Config : AwsS3Configuration
+        var s3Config : AwsS3Configuration? = null
 
         fun uploadFileToS3(
             context: Context,
@@ -267,6 +267,17 @@ internal class V2RxInternal : AudioCallback, UploadListener {
         return combinedAudio
     }
 
+    fun updateAllSessions() {
+        getS3Config {
+            if(!it) {
+                return@getS3Config
+            }
+            coroutineScope.launch {
+                AwsS3UploadService.updateAllSession(app)
+            }
+        }
+    }
+
     fun retrySession(
         context : Context,
         sessionId : String,
@@ -348,7 +359,10 @@ internal class V2RxInternal : AudioCallback, UploadListener {
                     patientId = Voice2Rx.getVoice2RxInitConfiguration().contextData.patient?.id.toString(),
                     mode = mode,
                     updatedSessionId = sessionId.value,
-                    status = Voice2RxSessionStatus.DRAFT
+                    status = Voice2RxSessionStatus.DRAFT,
+                    structuredRx = null,
+                    transcript = null,
+                    isProcessed = false
                 )
             )
         }

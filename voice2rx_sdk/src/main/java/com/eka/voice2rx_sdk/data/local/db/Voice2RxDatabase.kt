@@ -13,7 +13,7 @@ import com.eka.voice2rx_sdk.data.local.db.entities.VToRxSession
     entities = [
         VToRxSession::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 @TypeConverters(Convertor::class)

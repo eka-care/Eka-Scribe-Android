@@ -1,14 +1,19 @@
 package com.eka.voice2rx_sdk.sdkinit
 
 import android.content.Context
+import androidx.work.Constraints
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.NetworkType
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
 import com.eka.network.ConverterFactoryType
 import com.eka.network.Networking
 import com.eka.voice2rx_sdk.common.ResponseState
-import com.eka.voice2rx_sdk.data.local.db.Voice2RxDatabase
 import com.eka.voice2rx_sdk.data.local.db.entities.VToRxSession
 import com.eka.voice2rx_sdk.data.local.models.Voice2RxSessionStatus
 import com.eka.voice2rx_sdk.data.local.models.Voice2RxType
-import com.eka.voice2rx_sdk.data.repositories.VToRxRepository
+import com.eka.voice2rx_sdk.data.workers.SyncWorker
+import java.util.concurrent.TimeUnit
 
 object Voice2Rx {
     private var configuration: Voice2RxInitConfig? = null
@@ -27,6 +32,27 @@ object Voice2Rx {
             v2RxInternal = V2RxInternal()
         }
         v2RxInternal?.initValues(context)
+        initialiseWorker(context.applicationContext)
+    }
+
+    internal fun updateAllSessions() {
+        v2RxInternal?.updateAllSessions()
+    }
+
+    private fun initialiseWorker(context: Context) {
+        val workRequest = PeriodicWorkRequestBuilder<SyncWorker>(15, TimeUnit.MINUTES)
+            .setConstraints(
+                Constraints.Builder()
+                    .setRequiredNetworkType(NetworkType.CONNECTED)
+                    .build()
+            )
+            .build()
+
+        WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+            "VOICE2RX_WORKER_2",
+            ExistingPeriodicWorkPolicy.KEEP,
+            workRequest
+        )
     }
 
     fun getVoice2RxInitConfiguration(): Voice2RxInitConfig {

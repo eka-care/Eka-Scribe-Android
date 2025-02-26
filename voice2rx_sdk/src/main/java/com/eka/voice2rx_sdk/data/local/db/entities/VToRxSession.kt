@@ -21,5 +21,8 @@ data class VToRxSession(
     @ColumnInfo(name = "caller_id") val callerId : String,
     @ColumnInfo(name = "patient_id") val patientId : String,
     @ColumnInfo(name = "mode") val mode : Voice2RxType,
+    @ColumnInfo(name = "structured_rx") val structuredRx : String?,
+    @ColumnInfo(name = "transcript") val transcript : String?,
+    @ColumnInfo(name = "is_processed") val isProcessed : Boolean,
     @ColumnInfo(name = "status") val status : Voice2RxSessionStatus = Voice2RxSessionStatus.DRAFT,
 )

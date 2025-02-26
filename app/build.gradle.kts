@@ -78,4 +78,7 @@ dependencies {
     }
     implementation(libs.retrofit.gson)
     implementation(project(":voice2rx_sdk"))
+    implementation("com.github.jeziellago:compose-markdown:0.5.4") {
+        exclude(group = "androidx.appcompat", module = "appcompat")
+    }
 }
