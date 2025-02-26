@@ -34,6 +34,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.UUID
 
@@ -164,7 +165,7 @@ internal class V2RxInternal : AudioCallback, UploadListener {
         return uploadService
     }
 
-    fun startRecording(mode : Voice2RxType) {
+    fun startRecording(mode : Voice2RxType = Voice2RxType.DICTATION) {
         coroutineScope.launch {
             currentMode = mode
             getS3Config()
@@ -241,10 +242,10 @@ internal class V2RxInternal : AudioCallback, UploadListener {
         }
     }
 
-    fun updateSession(updatedSessionId : String, status : Voice2RxSessionStatus) {
+    fun updateSession(oldSessionId : String, updatedSessionId : String, status : Voice2RxSessionStatus) {
         coroutineScope.launch(Dispatchers.IO) {
             repository.updateSession(
-                sessionId = updatedSessionId.removePrefix("P-PP-"),
+                sessionId = oldSessionId,
                 updatedSessionId = updatedSessionId,
                 status = status
             )
@@ -285,12 +286,10 @@ internal class V2RxInternal : AudioCallback, UploadListener {
         }
     }
 
-    fun getSessionsByOwnerId(ownerId : String) {
-        coroutineScope.launch(Dispatchers.IO) {
-            _sessionsByOwnerId.value = repository.getSessionsByOwnerId(
-                ownerId = ownerId,
-            )
-        }
+    suspend fun getSessionsByOwnerId(ownerId : String) : List<VToRxSession>? {
+        return repository.getSessionsByOwnerId(
+            ownerId = ownerId,
+        )
     }
 
     private fun saveJsonToFile(fileName: String, jsonContent: String): File {
