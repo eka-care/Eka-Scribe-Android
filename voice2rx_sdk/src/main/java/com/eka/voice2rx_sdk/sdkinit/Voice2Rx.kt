@@ -33,6 +33,7 @@ object Voice2Rx {
         }
         v2RxInternal?.initValues(context)
         initialiseWorker(context.applicationContext)
+        updateAllSessions()
     }
 
     internal fun updateAllSessions() {
