@@ -4,21 +4,21 @@ Voice2Rx is an Android SDK that allows voice transcription and structured prescr
 
 ## Table of Contents
 
-- [Prerequisites](/mobile-sdk/android/voice-to-rx#prerequisites)
-- [Installation](/mobile-sdk/android/voice-to-rx#installation)
-- [Initialization](/mobile-sdk/android/voice-to-rx#initialization)
-- [Basic Usage](/mobile-sdk/android/voice-to-rx#basic-usage)
-    - [Starting a Voice Session](/mobile-sdk/android/voice-to-rx#starting-a-voice-session)
-    - [Stopping a Voice Session](/mobile-sdk/android/voice-to-rx#stopping-a-voice-session)
-    - [Checking Session Status](/mobile-sdk/android/voice-to-rx#checking-session-status)
-- [Working with Sessions](/mobile-sdk/android/voice-to-rx#working-with-sessions)
-    - [Retrieving Session History](/mobile-sdk/android/voice-to-rx#retrieving-session-history)
-    - [Sample Structured Rx Data](/mobile-sdk/android/voice-to-rx#sample-structured-rx-data)
-    - [Sample Markdown Output](/mobile-sdk/android/voice-to-rx#sample-markdown-output)
-- [Advanced Features](/mobile-sdk/android/voice-to-rx#advanced-features)
-    - [Retrying a Session](/mobile-sdk/android/voice-to-rx#retrying-a-session)
-- [Cleanup](/mobile-sdk/android/voice-to-rx#cleanup)
-- [Links](/mobile-sdk/android/voice-to-rx#links)
+- [Prerequisites](#prerequisites)
+- [Installation](#installation)
+- [Initialization](#initialization)
+- [Basic Usage](#basic-usage)
+    - [Starting a Voice Session](#starting-a-voice-session)
+    - [Stopping a Voice Session](#stopping-a-voice-session)
+    - [Checking Session Status](#checking-session-status)
+- [Working with Sessions](#working-with-sessions)
+    - [Retrieving Session History](#retrieving-session-history)
+    - [Sample Structured Rx Data](#sample-structured-rx-data)
+    - [Sample Markdown Output](#sample-markdown-output)
+- [Advanced Features](#advanced-features)
+    - [Retrying a Session](#retrying-a-session)
+- [Cleanup](#cleanup)
+- [Links](#links)
 
 ## Prerequisites
 
