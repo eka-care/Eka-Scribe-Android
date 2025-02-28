@@ -10,6 +10,7 @@ import com.eka.voice2rx_sdk.common.ResponseState
 import com.eka.voice2rx_sdk.common.UploadListener
 import com.eka.voice2rx_sdk.common.Voice2RxUtils
 import com.eka.voice2rx_sdk.common.VoiceLogger
+import com.eka.voice2rx_sdk.common.models.VoiceError
 import com.eka.voice2rx_sdk.data.local.db.Voice2RxDatabase
 import com.eka.voice2rx_sdk.data.local.db.entities.VToRxSession
 import com.eka.voice2rx_sdk.data.local.models.EndOfFileMessage
@@ -167,6 +168,10 @@ internal class V2RxInternal : AudioCallback, UploadListener {
 
     fun startRecording(mode : Voice2RxType = Voice2RxType.DICTATION, session : String = Voice2RxUtils.generateNewSessionId()) {
         coroutineScope.launch {
+            if(!Voice2RxUtils.isRecordAudioPermissionGranted(app)) {
+                Voice2Rx.getVoice2RxInitConfiguration().onError.invoke(session, VoiceError.MICROPHONE_PERMISSION_NOT_GRANTED)
+                return@launch
+            }
             currentMode = mode
             getS3Config()
             sessionUploadStatus = true
@@ -217,7 +222,7 @@ internal class V2RxInternal : AudioCallback, UploadListener {
                         if(it is ResponseState.Success && it.isCompleted) {
                             config.onStop.invoke(sessionId.value, chunksInfo.size + 2)
                         } else {
-                            config.onError.invoke(sessionId.value, "Uploading failed!")
+                            config.onError.invoke(sessionId.value, VoiceError.UNKNOWN_ERROR)
                         }
                     }
                 )
@@ -334,7 +339,7 @@ internal class V2RxInternal : AudioCallback, UploadListener {
                 }
 
                 is NetworkResponse.Error -> {
-                    Voice2Rx.getVoice2RxInitConfiguration().onError.invoke("", "Error getting S3 Config")
+                    Voice2Rx.getVoice2RxInitConfiguration().onError.invoke("", VoiceError.CREDENTIAL_NOT_VALID)
                     VoiceLogger.e(TAG, "Error getting S3 Config")
                     onResponse(false)
                 }

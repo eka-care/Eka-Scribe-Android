@@ -77,8 +77,8 @@ dependencies {
 //        exclude(group = "com.google.protobuf", module = "protobuf-java")
     }
     implementation(libs.retrofit.gson)
-//    implementation(project(":voice2rx_sdk"))
-    implementation("com.github.eka-care:eka-v2rx-android:1.0.4")
+    implementation(project(":voice2rx_sdk"))
+//    implementation("com.github.eka-care:eka-v2rx-android:1.0.4")
     implementation("com.github.jeziellago:compose-markdown:0.5.4") {
         exclude(group = "androidx.appcompat", module = "appcompat")
     }

@@ -3,6 +3,7 @@ package com.eka.voice2rx_sdk.sdkinit
 import androidx.annotation.Keep
 import com.eka.network.IOkHttpSetup
 import com.eka.voice2rx_sdk.common.Voice2RxUtils
+import com.eka.voice2rx_sdk.common.models.VoiceError
 import com.eka.voice2rx_sdk.data.local.models.ContextData
 import com.konovalov.vad.silero.config.FrameSize
 import com.konovalov.vad.silero.config.SampleRate
@@ -11,7 +12,7 @@ import com.konovalov.vad.silero.config.SampleRate
 data class Voice2RxInitConfig(
     val onStart: (sessionId: String) -> Unit,
     val onStop: (sessionId: String, recordedFiles : Int) -> Unit,
-    val onError : (sessionId : String, errorMsg : String) -> Unit,
+    val onError : (sessionId : String, error : VoiceError) -> Unit,
     val docOid: String,
     val docUuid: String,
     val ownerId : String,
