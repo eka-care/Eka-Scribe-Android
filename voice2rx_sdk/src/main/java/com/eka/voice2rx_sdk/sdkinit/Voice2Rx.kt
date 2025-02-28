@@ -9,6 +9,7 @@ import androidx.work.WorkManager
 import com.eka.network.ConverterFactoryType
 import com.eka.network.Networking
 import com.eka.voice2rx_sdk.common.ResponseState
+import com.eka.voice2rx_sdk.common.Voice2RxUtils
 import com.eka.voice2rx_sdk.data.local.db.entities.VToRxSession
 import com.eka.voice2rx_sdk.data.local.models.Voice2RxSessionStatus
 import com.eka.voice2rx_sdk.data.local.models.Voice2RxType
@@ -75,8 +76,8 @@ object Voice2Rx {
         )
     }
 
-    fun startVoice2Rx(mode : Voice2RxType) {
-        v2RxInternal?.startRecording(mode)
+    fun startVoice2Rx(mode : Voice2RxType = Voice2RxType.DICTATION, session : String = Voice2RxUtils.generateNewSessionId()) {
+        v2RxInternal?.startRecording(mode = mode,session = session)
     }
 
     fun updateSessionInfo(oldSessionId : String, updatedSessionId : String, status : Voice2RxSessionStatus) {

@@ -165,12 +165,12 @@ internal class V2RxInternal : AudioCallback, UploadListener {
         return uploadService
     }
 
-    fun startRecording(mode : Voice2RxType = Voice2RxType.DICTATION) {
+    fun startRecording(mode : Voice2RxType = Voice2RxType.DICTATION, session : String = Voice2RxUtils.generateNewSessionId()) {
         coroutineScope.launch {
             currentMode = mode
             getS3Config()
             sessionUploadStatus = true
-            sessionId.value = Voice2RxUtils.generateNewSessionId()
+            sessionId.value = session
             recordedFiles.clear()
 
             vad = Vad.builder()
