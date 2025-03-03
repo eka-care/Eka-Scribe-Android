@@ -2,7 +2,6 @@ package com.eka.voice2rx_sdk.sdkinit
 
 import android.app.Application
 import android.content.Context
-import androidx.compose.runtime.mutableStateOf
 import com.eka.voice2rx_sdk.AudioHelper
 import com.eka.voice2rx_sdk.AudioRecordModel
 import com.eka.voice2rx_sdk.UploadService
@@ -85,7 +84,7 @@ internal class V2RxInternal : AudioCallback, UploadListener {
     private var recordedFiles = ArrayList<String>()
     private lateinit var app : Application
 
-    val sessionId = mutableStateOf(Voice2RxUtils.generateNewSessionId())
+    var sessionId = Voice2RxUtils.generateNewSessionId()
 
     private lateinit var recorder: VoiceRecorder
     private lateinit var audioHelper: AudioHelper
@@ -175,7 +174,7 @@ internal class V2RxInternal : AudioCallback, UploadListener {
             currentMode = mode
             getS3Config()
             sessionUploadStatus = true
-            sessionId.value = session
+            sessionId = session
             recordedFiles.clear()
 
             vad = Vad.builder()
@@ -187,16 +186,16 @@ internal class V2RxInternal : AudioCallback, UploadListener {
                 .build()
 
             recorder = VoiceRecorder(this@V2RxInternal)
-            audioHelper = AudioHelper(app, this@V2RxInternal, sessionId.value)
-            uploadService = UploadService(app, audioHelper, sessionId.value)
+            audioHelper = AudioHelper(app, this@V2RxInternal, sessionId)
+            uploadService = UploadService(app, audioHelper, sessionId)
             uploadService.FILE_INDEX = 0
 
             isRecording = true
-            fullRecordingFile = File(app.filesDir, Voice2RxUtils.getFullRecordingFileName(sessionId = sessionId.value))
+            fullRecordingFile = File(app.filesDir, Voice2RxUtils.getFullRecordingFileName(sessionId = sessionId))
             chunksInfo = mutableMapOf<String, FileInfo>()
             recorder.start(app, fullRecordingFile, vad.sampleRate.value, vad.frameSize.value)
             sendStartOfMessage(mode = mode)
-            config.onStart.invoke(sessionId.value)
+            config.onStart.invoke(sessionId)
         }
         _recordingState.value = RecordingState.STARTED
     }
@@ -212,17 +211,17 @@ internal class V2RxInternal : AudioCallback, UploadListener {
             sendEndOfMessage()
             storeSessionInDatabase(currentMode)
             if(sessionUploadStatus) {
-                config.onStop.invoke(sessionId.value, chunksInfo.size + 2)
+                config.onStop.invoke(sessionId, chunksInfo.size + 2)
             } else {
                 repository.retrySessionUploading(
                     context = app,
-                    sessionId = sessionId.value,
+                    sessionId = sessionId,
                     s3Config = s3Config,
                     onResponse = {
                         if(it is ResponseState.Success && it.isCompleted) {
-                            config.onStop.invoke(sessionId.value, chunksInfo.size + 2)
+                            config.onStop.invoke(sessionId, chunksInfo.size + 2)
                         } else {
-                            config.onError.invoke(sessionId.value, VoiceError.UNKNOWN_ERROR)
+                            config.onError.invoke(sessionId, VoiceError.UNKNOWN_ERROR)
                         }
                     }
                 )
@@ -355,15 +354,15 @@ internal class V2RxInternal : AudioCallback, UploadListener {
             VoiceLogger.d("VadViewModel", recordedFiles.toList().toString())
             repository.insertSession(
                 session = VToRxSession(
-                    sessionId = sessionId.value,
+                    sessionId = sessionId,
                     filePaths = recordedFiles.toList(),
                     createdAt = Voice2RxUtils.getCurrentUTCEpochMillis(),
-                    fullAudioPath = Voice2RxUtils.getFullRecordingFileName(sessionId = sessionId.value),
+                    fullAudioPath = Voice2RxUtils.getFullRecordingFileName(sessionId = sessionId),
                     ownerId = Voice2Rx.getVoice2RxInitConfiguration().ownerId,
                     callerId = Voice2Rx.getVoice2RxInitConfiguration().callerId,
                     patientId = Voice2Rx.getVoice2RxInitConfiguration().contextData.patient?.id.toString(),
                     mode = mode,
-                    updatedSessionId = sessionId.value,
+                    updatedSessionId = sessionId,
                     status = Voice2RxSessionStatus.DRAFT,
                     structuredRx = null,
                     transcript = null,
@@ -374,14 +373,14 @@ internal class V2RxInternal : AudioCallback, UploadListener {
     }
 
     private fun sendEndOfMessage() {
-        val s3Url = "s3://$bucketName/$folderName/${sessionId.value}/"
+        val s3Url = "s3://$bucketName/$folderName/${sessionId}/"
         val files = mutableListOf<String>()
         chunksInfo.forEach { entry ->
             files.add(entry.key)
         }
         var visitId = Voice2Rx.getVoice2RxInitConfiguration().contextData.visitid
         if(visitId.isNullOrEmpty()) {
-            visitId = sessionId.value
+            visitId = sessionId
         }
         val eof = EndOfFileMessage(
             contextData = Voice2Rx.getVoice2RxInitConfiguration().contextData.copy(
@@ -392,13 +391,13 @@ internal class V2RxInternal : AudioCallback, UploadListener {
             docUuid = Voice2Rx.getVoice2RxInitConfiguration().docUuid,
             files = files,
             s3Url = s3Url,
-            uuid = sessionId.value,
+            uuid = sessionId,
             chunksInfo = chunksInfo
         )
         VoiceLogger.d(TAG, "EOF : " + Gson().toJson(eof))
-        val eofFile = saveJsonToFile("${sessionId.value}_eof.json", Gson().toJson(eof))
+        val eofFile = saveJsonToFile("${sessionId}_eof.json", Gson().toJson(eof))
         recordedFiles.add(eofFile.name)
-        uploadFileToS3(app, "eof.json", eofFile, folderName, sessionId.value, isAudio = false)
+        uploadFileToS3(app, "eof.json", eofFile, folderName, sessionId, isAudio = false)
     }
 
     private fun uploadWholeFileData() {
@@ -408,17 +407,17 @@ internal class V2RxInternal : AudioCallback, UploadListener {
                 "full_audio.m4a_",
                 fullRecordingFile,
                 folderName,
-                sessionId.value,
+                sessionId,
                 isFullAudio = true
             )
         }
     }
 
     private fun sendStartOfMessage(mode : Voice2RxType) {
-        val s3Url = "s3://$bucketName/$folderName/${sessionId.value}/"
+        val s3Url = "s3://$bucketName/$folderName/${sessionId}/"
         var visitId = Voice2Rx.getVoice2RxInitConfiguration().contextData.visitid
         if(visitId.isNullOrEmpty()) {
-            visitId = sessionId.value
+            visitId = sessionId
         }
         val som = StartOfMessage(
             contextData = Voice2Rx.getVoice2RxInitConfiguration().contextData.copy(
@@ -430,11 +429,11 @@ internal class V2RxInternal : AudioCallback, UploadListener {
             files = listOf(),
             mode = mode.value,
             s3Url = s3Url,
-            uuid = sessionId.value
+            uuid = sessionId
         )
         VoiceLogger.d(TAG, "SOM : " + Gson().toJson(som))
-        val somFile = saveJsonToFile("${sessionId.value}_som.json", Gson().toJson(som))
+        val somFile = saveJsonToFile("${sessionId}_som.json", Gson().toJson(som))
         recordedFiles.add(somFile.name)
-        uploadFileToS3(app, "som.json", somFile, folderName, sessionId.value, isAudio = false)
+        uploadFileToS3(app, "som.json", somFile, folderName, sessionId, isAudio = false)
     }
 }
