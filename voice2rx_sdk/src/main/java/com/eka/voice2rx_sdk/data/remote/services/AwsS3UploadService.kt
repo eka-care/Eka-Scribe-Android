@@ -10,7 +10,6 @@ import com.amazonaws.mobileconnectors.s3.transferutility.TransferState
 import com.amazonaws.mobileconnectors.s3.transferutility.TransferUtility
 import com.amazonaws.services.s3.AmazonS3Client
 import com.amazonaws.services.s3.model.GetObjectRequest
-import com.amazonaws.services.s3.model.HeadBucketRequest
 import com.amazonaws.services.s3.model.ObjectMetadata
 import com.eka.voice2rx_sdk.common.ResponseState
 import com.eka.voice2rx_sdk.common.UploadListener
@@ -22,15 +21,11 @@ import com.eka.voice2rx_sdk.data.local.db.entities.VToRxSession
 import com.eka.voice2rx_sdk.data.repositories.VToRxRepository
 import com.eka.voice2rx_sdk.sdkinit.AwsS3Configuration
 import com.eka.voice2rx_sdk.sdkinit.V2RxInternal
-import com.eka.voice2rx_sdk.sdkinit.Voice2Rx
-import com.eka.voice2rx_sdk.sdkinit.Voice2RxInitConfig
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import okio.ByteString.Companion.readByteString
 import java.io.File
-import java.nio.charset.StandardCharsets
 
 object AwsS3UploadService {
 
@@ -53,13 +48,31 @@ object AwsS3UploadService {
         isFullAudio: Boolean = false,
         s3Config: AwsS3Configuration? = null,
         onResponse: (ResponseState) -> Unit = {},
+        retryCount: Int = 0
     ) {
         val config = V2RxInternal.s3Config
-        if (config == null) {
-            VoiceLogger.d("AwsS3UploadService", "Credential is null!")
-            onResponse(ResponseState.Error("Credential is null!"))
-            return
-        }
+            ?: if (retryCount > 0) {
+                VoiceLogger.d("AwsS3UploadService", "Credential is null!")
+                onResponse(ResponseState.Error("Credential is null!"))
+                return
+            } else {
+                V2RxInternal.getS3Config {
+                    if (it) {
+                        uploadFileToS3(
+                            context = context,
+                            fileName = fileName,
+                            file = file,
+                            folderName = folderName,
+                            sessionId = sessionId,
+                            isAudio = isAudio,
+                            isFullAudio = isFullAudio,
+                            onResponse = onResponse,
+                            retryCount = retryCount + 1
+                        )
+                    }
+                }
+                return
+            }
         TransferNetworkLossHandler.getInstance(context.applicationContext)
 
         if (!Voice2RxUtils.isNetworkAvailable(context)) {

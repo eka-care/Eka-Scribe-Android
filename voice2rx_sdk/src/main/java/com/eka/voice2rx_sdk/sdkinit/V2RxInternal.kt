@@ -26,15 +26,12 @@ import com.google.gson.Gson
 import com.haroldadmin.cnradapter.NetworkResponse
 import com.konovalov.vad.silero.Vad
 import com.konovalov.vad.silero.VadSilero
-import com.konovalov.vad.silero.config.FrameSize
 import com.konovalov.vad.silero.config.Mode
-import com.konovalov.vad.silero.config.SampleRate
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.UUID
 
@@ -43,6 +40,9 @@ internal class V2RxInternal : AudioCallback, UploadListener {
     companion object {
         const val TAG = "V2RxViewModel"
         var s3Config : AwsS3Configuration? = null
+        private var bucketName = ""
+        private lateinit var database: Voice2RxDatabase
+        private lateinit var repository : VToRxRepository
 
         fun uploadFileToS3(
             context: Context,
@@ -66,12 +66,41 @@ internal class V2RxInternal : AudioCallback, UploadListener {
                 onResponse = onResponse
             )
         }
-    }
-    private lateinit var database: Voice2RxDatabase
-    private lateinit var repository : VToRxRepository
-    private val coroutineScope = CoroutineScope(Dispatchers.IO)
 
-    private var bucketName = ""
+        fun getS3Config(
+            onResponse : (Boolean) -> Unit = {}
+        ) {
+            if(!::repository.isInitialized) {
+                onResponse.invoke(false)
+                return
+            }
+            CoroutineScope(Dispatchers.IO).launch {
+                val response = repository.getAwsS3Config()
+                when (response) {
+                    is NetworkResponse.Success -> {
+                        val config = response.body
+                        s3Config = AwsS3Configuration(
+                            bucketName = bucketName,
+                            accessKey = config.credentials?.accessKeyId ?: "",
+                            sessionToken = config.credentials?.sessionToken ?: "",
+                            secretKey = config.credentials?.secretKey ?: ""
+                        )
+                        onResponse(true)
+                    }
+
+                    is NetworkResponse.Error -> {
+                        Voice2Rx.getVoice2RxInitConfiguration().onError.invoke("", VoiceError.CREDENTIAL_NOT_VALID)
+                        VoiceLogger.e(TAG, "Error getting S3 Config")
+                        onResponse(false)
+                    }
+
+                    else -> {
+                    }
+                }
+            }
+        }
+    }
+    private val coroutineScope = CoroutineScope(Dispatchers.IO)
     private var folderName: String = ""
     private lateinit var config : Voice2RxInitConfig
 
@@ -319,34 +348,6 @@ internal class V2RxInternal : AudioCallback, UploadListener {
         val file = File(app.filesDir, fileName)
         file.writeText(jsonContent)
         return file
-    }
-
-    private fun getS3Config(
-        onResponse : (Boolean) -> Unit = {}
-    ) {
-        coroutineScope.launch {
-            when (val response = repository.getAwsS3Config()) {
-                is NetworkResponse.Success -> {
-                    val config = response.body
-                    s3Config = AwsS3Configuration(
-                        bucketName = bucketName,
-                        accessKey = config.credentials?.accessKeyId ?: "",
-                        sessionToken = config.credentials?.sessionToken ?: "",
-                        secretKey = config.credentials?.secretKey ?: ""
-                    )
-                    onResponse(true)
-                }
-
-                is NetworkResponse.Error -> {
-                    Voice2Rx.getVoice2RxInitConfiguration().onError.invoke("", VoiceError.CREDENTIAL_NOT_VALID)
-                    VoiceLogger.e(TAG, "Error getting S3 Config")
-                    onResponse(false)
-                }
-
-                else -> {
-                }
-            }
-        }
     }
 
     private fun storeSessionInDatabase(mode : Voice2RxType) {

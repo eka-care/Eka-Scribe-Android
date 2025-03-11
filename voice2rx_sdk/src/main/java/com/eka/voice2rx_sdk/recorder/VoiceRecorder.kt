@@ -136,7 +136,6 @@ class VoiceRecorder(val callback: AudioCallback) {
             while (!Thread.interrupted() && isListening) {
                 val read = audioRecord?.read(buffer, 0, buffer.size)
                 if (read != null && read > 0) {
-//                    VoiceLogger.d(TAG,read.toString())
                     callback.onAudio(buffer.copyOfRange(0, read), System.currentTimeMillis())
                 }
             }
