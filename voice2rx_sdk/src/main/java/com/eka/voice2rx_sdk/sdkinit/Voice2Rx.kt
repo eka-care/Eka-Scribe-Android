@@ -80,6 +80,14 @@ object Voice2Rx {
         v2RxInternal?.startRecording(mode = mode,session = session)
     }
 
+    fun pauseVoice2Rx() {
+        v2RxInternal?.pauseRecording()
+    }
+
+    fun resumeVoice2Rx() {
+        v2RxInternal?.resumeRecording()
+    }
+
     fun updateSessionInfo(oldSessionId : String, updatedSessionId : String, status : Voice2RxSessionStatus) {
         v2RxInternal?.updateSession(oldSessionId, updatedSessionId, status)
     }

@@ -21,6 +21,7 @@ import com.eka.voice2rx_sdk.data.local.models.Voice2RxType
 import com.eka.voice2rx_sdk.data.remote.services.AwsS3UploadService
 import com.eka.voice2rx_sdk.data.repositories.VToRxRepository
 import com.eka.voice2rx_sdk.recorder.AudioCallback
+import com.eka.voice2rx_sdk.recorder.AudioFocusListener
 import com.eka.voice2rx_sdk.recorder.VoiceRecorder
 import com.google.gson.Gson
 import com.haroldadmin.cnradapter.NetworkResponse
@@ -33,9 +34,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.io.File
-import java.util.UUID
 
-internal class V2RxInternal : AudioCallback, UploadListener {
+internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener {
 
     companion object {
         const val TAG = "V2RxViewModel"
@@ -130,9 +130,6 @@ internal class V2RxInternal : AudioCallback, UploadListener {
     private val _sessionsByOwnerId = MutableStateFlow<List<VToRxSession>>(emptyList())
     val sessionsByOwnerId = _sessionsByOwnerId.asStateFlow()
 
-    private val FULL_RECORDING_FILE_NAME =
-        UUID.randomUUID().toString() + "_" + "Full_Recording.m4a_"
-
     private lateinit var fullRecordingFile: File
     private var sessionUploadStatus = true
 
@@ -214,7 +211,7 @@ internal class V2RxInternal : AudioCallback, UploadListener {
                 .setSilenceDurationMs(DEFAULT_SILENCE_DURATION_MS)
                 .build()
 
-            recorder = VoiceRecorder(this@V2RxInternal)
+            recorder = VoiceRecorder(this@V2RxInternal, this@V2RxInternal)
             audioHelper = AudioHelper(app, this@V2RxInternal, sessionId)
             uploadService = UploadService(app, audioHelper, sessionId)
             uploadService.FILE_INDEX = 0
@@ -227,6 +224,14 @@ internal class V2RxInternal : AudioCallback, UploadListener {
             config.onStart.invoke(sessionId)
         }
         _recordingState.value = RecordingState.STARTED
+    }
+
+    fun pauseRecording() {
+        recorder.pauseListening()
+    }
+
+    fun resumeRecording() {
+        recorder.resumeListening()
     }
 
     fun stopRecording() {
@@ -402,14 +407,19 @@ internal class V2RxInternal : AudioCallback, UploadListener {
     }
 
     private fun uploadWholeFileData() {
-        if (fullRecordingFile != null) {
-            uploadFileToS3(
-                app,
-                "full_audio.m4a_",
-                fullRecordingFile,
-                folderName,
-                sessionId,
-                isFullAudio = true
+        CoroutineScope(Dispatchers.IO).launch {
+            audioHelper.uploadFullRecordingFile(
+                Voice2RxUtils.getFullRecordingFileName(sessionId = sessionId),
+                onFileCreated = { file ->
+                    uploadFileToS3(
+                        app,
+                        "full_audio.m4a_",
+                        file,
+                        folderName,
+                        sessionId,
+                        isFullAudio = true
+                    )
+                }
             )
         }
     }
@@ -436,5 +446,12 @@ internal class V2RxInternal : AudioCallback, UploadListener {
         val somFile = saveJsonToFile("${sessionId}_som.json", Gson().toJson(som))
         recordedFiles.add(somFile.name)
         uploadFileToS3(app, "som.json", somFile, folderName, sessionId, isAudio = false)
+    }
+
+    override fun onAudioFocusGain() {
+    }
+
+    override fun onAudioFocusGone() {
+        Voice2Rx.getVoice2RxInitConfiguration().onPaused(sessionId)
     }
 }

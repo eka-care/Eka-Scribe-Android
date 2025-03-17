@@ -45,7 +45,9 @@ internal class AudioCombiner {
         audioData: ShortArray,
         sampleRate: Int,
         folderName: String,
-        sessionId: String
+        sessionId: String,
+        onFileCreated: (File) -> Unit = {},
+        shouldUpload: Boolean = true
     ) {
 //        VoiceLogger.d(TAG,outputFile.name + " " + (audioData.size))
         val byteData = ByteArray(audioData.size * 2)
@@ -56,7 +58,17 @@ internal class AudioCombiner {
             fos.write(header)
             fos.write(byteData)
         }
-        writeM4aFile(context, inputFile, outputFile, audioData, folderName, sessionId, sampleRate)
+        writeM4aFile(
+            context,
+            inputFile,
+            outputFile,
+            audioData,
+            folderName,
+            sessionId,
+            sampleRate,
+            onFileCreated = onFileCreated,
+            shouldUpload = shouldUpload
+        )
     }
 
     fun writeM4aFile(
@@ -66,22 +78,26 @@ internal class AudioCombiner {
         audioData: ShortArray,
         folderName: String,
         sessionId: String,
-        sampleRate: Int
+        sampleRate: Int,
+        onFileCreated: (File) -> Unit = {},
+        shouldUpload: Boolean = true
     ) {
-
         val wavToM4AConverter = WAVtoM4AConverter(sampleRate, 1, 128000)
 
         wavToM4AConverter.convert(inputWavFile, outputFile) { result ->
             deleteWavFile(inputWavFile)
             if (result.convertCode == ConversionResult.ConversionCode.SUCCESS) {
                 if (outputFile.totalSpace > 0) {
-                    V2RxInternal.uploadFileToS3(
-                        context,
-                        outputFile.name.split("_").last(),
-                        outputFile,
-                        folderName,
-                        sessionId,
-                    )
+                    onFileCreated(outputFile)
+                    if (shouldUpload) {
+                        V2RxInternal.uploadFileToS3(
+                            context,
+                            outputFile.name.split("_").last(),
+                            outputFile,
+                            folderName,
+                            sessionId,
+                        )
+                    }
                 }
             } else {
                 VoiceLogger.d(TAG, "Error : ${result.errorMessage}")

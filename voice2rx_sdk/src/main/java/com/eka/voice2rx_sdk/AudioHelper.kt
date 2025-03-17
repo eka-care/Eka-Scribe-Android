@@ -6,6 +6,7 @@ import com.eka.voice2rx_sdk.common.VoiceLogger
 import com.eka.voice2rx_sdk.data.local.models.FileInfo
 import com.eka.voice2rx_sdk.sdkinit.V2RxInternal
 import com.eka.voice2rx_sdk.sdkinit.Voice2Rx
+import java.io.File
 
 internal class AudioHelper(
     private val context: Context,
@@ -103,6 +104,41 @@ internal class AudioHelper(
         currentClipIndex = audioRecordData.size - 1
         isClipping = true
         viewModel.getUploadService().processAndUpload(lastClipIndex, currentClipIndex)
+    }
+
+    fun uploadFullRecordingFile(fileName: String, onFileCreated: (File) -> Unit) {
+        val wavFileName = "${fileName}.wav"
+        val outputFile = File(context.filesDir, fileName)
+
+        AudioCombiner().writeWavFile(
+            context,
+            inputFile = File(context.filesDir, wavFileName),
+            outputFile = outputFile,
+            getFullAudioData(),
+            Voice2Rx.getVoice2RxInitConfiguration().sampleRate.value,
+            Voice2RxUtils.getCurrentDateInYYMMDD(),
+            sessionId,
+            shouldUpload = false,
+            onFileCreated = onFileCreated
+        )
+    }
+
+    private fun getFullAudioData(): ShortArray {
+        val clippedAudioData = ArrayList<ShortArray>()
+        clippedAudioData.addAll(audioRecordData.map { it.frameData }.toList())
+        return getCombinedAudio(clippedAudioData)
+    }
+
+    fun getCombinedAudio(audioChunks: ArrayList<ShortArray>): ShortArray {
+        val totalSize = audioChunks.sumOf { it.size }
+        val combinedAudio = ShortArray(totalSize)
+        var currentIndex = 0
+
+        for (chunk in audioChunks) {
+            chunk.copyInto(combinedAudio, currentIndex)
+            currentIndex += chunk.size
+        }
+        return combinedAudio
     }
 
     fun onNewFileCreated(fileName: String, endTimeStamp: Long, startTimeStamp: Long) {

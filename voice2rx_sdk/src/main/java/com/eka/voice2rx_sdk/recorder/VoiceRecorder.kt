@@ -2,17 +2,22 @@ package com.eka.voice2rx_sdk.recorder
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
 import android.media.AudioFormat
+import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.os.Build
 import android.os.Process
 import com.eka.voice2rx_sdk.common.VoiceLogger
 import java.io.File
-import java.io.FileOutputStream
 import java.io.IOException
 
-class VoiceRecorder(val callback: AudioCallback) {
+class VoiceRecorder(
+    val callback: AudioCallback,
+    private val audioFocusListener: AudioFocusListener
+) {
 
     companion object {
         const val TAG = "VoiceRecorder"
@@ -21,7 +26,7 @@ class VoiceRecorder(val callback: AudioCallback) {
 
     private var audioRecord: AudioRecord? = null
     private var thread: Thread? = null
-    private var isListening = false
+    private var listeningState = ListeningState.LISTENING
 
     private var sampleRate: Int = 0
     private var frameSize: Int = 0
@@ -30,13 +35,77 @@ class VoiceRecorder(val callback: AudioCallback) {
     private var outputFilePath: String? = null
     private var fullRecordingOutputFile: File? = null
 
+    private var audioManager: AudioManager? = null
+    private var audioFocusRequest: AudioFocusRequest? = null
+
+    // Audio focus change listener
+    private val audioFocusChangeListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
+        when (focusChange) {
+            AudioManager.AUDIOFOCUS_LOSS,
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT,
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+                VoiceLogger.d("AudioRecordManager", "Microphone focus gone.")
+                onMicrophoneFocusGone()
+            }
+
+            AudioManager.AUDIOFOCUS_GAIN -> {
+                VoiceLogger.d("AudioRecordManager", "Microphone focus gain.")
+                onMicrophoneFocusGain()
+            }
+        }
+    }
+
+    private fun requestAudioFocus() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val playbackAttributes = AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                .build()
+
+            audioFocusRequest =
+                AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
+                    .setAudioAttributes(playbackAttributes)
+                    .setOnAudioFocusChangeListener(audioFocusChangeListener)
+                    .build()
+
+            val result = audioManager?.requestAudioFocus(audioFocusRequest!!)
+            if (result != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+                VoiceLogger.d("AudioRecordManager", "Could not get audio focus")
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            val result = audioManager?.requestAudioFocus(
+                audioFocusChangeListener,
+                AudioManager.STREAM_VOICE_CALL,
+                AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE
+            )
+            if (result != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+                VoiceLogger.d("AudioRecordManager", "Could not get audio focus")
+            }
+        }
+    }
+
+    private fun onMicrophoneFocusGone() {
+        audioFocusListener.onAudioFocusGone()
+        listeningState = ListeningState.PAUSE
+    }
+
+    private fun onMicrophoneFocusGain() {
+        audioFocusListener.onAudioFocusGain()
+    }
+
+    private fun abandonAudioFocus() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            audioFocusRequest?.let { audioManager?.abandonAudioFocusRequest(it) }
+        } else {
+            @Suppress("DEPRECATION")
+            audioManager?.abandonAudioFocus(audioFocusChangeListener)
+        }
+    }
+
     fun stopRecording() {
         try {
-            mediaRecorder?.apply {
-                stop()
-                release()
-            }
-            mediaRecorder = null
+            abandonAudioFocus()
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -47,17 +116,10 @@ class VoiceRecorder(val callback: AudioCallback) {
         this.frameSize = frameSize
         stop()
 
+        audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+
         try {
-
-            mediaRecorder = createMediaRecorder(context).apply {
-                setAudioSource(MediaRecorder.AudioSource.MIC)
-                setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-                setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-                setOutputFile(FileOutputStream(fullRecordingFile).fd)
-
-                prepare()
-                start()
-            }
+            requestAudioFocus()
         } catch (e: IOException) {
             VoiceLogger.d("VoiceRecorder", e.printStackTrace().toString())
             e.printStackTrace()
@@ -65,7 +127,7 @@ class VoiceRecorder(val callback: AudioCallback) {
 
         audioRecord = createAudioRecord()
         if (audioRecord != null) {
-            isListening = true
+            listeningState = ListeningState.LISTENING
             audioRecord?.startRecording()
             startTimestamp = System.currentTimeMillis()
             thread = Thread(ProcessVoice())
@@ -81,8 +143,16 @@ class VoiceRecorder(val callback: AudioCallback) {
         }
     }
 
+    fun pauseListening() {
+        listeningState = ListeningState.PAUSE
+    }
+
+    fun resumeListening() {
+        listeningState = ListeningState.LISTENING
+    }
+
     fun stop() {
-        isListening = false
+        listeningState = ListeningState.PAUSE
         thread?.interrupt()
         thread = null
 
@@ -133,10 +203,12 @@ class VoiceRecorder(val callback: AudioCallback) {
             Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO)
 
             val buffer = ShortArray(frameSize)
-            while (!Thread.interrupted() && isListening) {
-                val read = audioRecord?.read(buffer, 0, buffer.size)
-                if (read != null && read > 0) {
-                    callback.onAudio(buffer.copyOfRange(0, read), System.currentTimeMillis())
+            while (!Thread.interrupted()) {
+                if (listeningState == ListeningState.LISTENING) {
+                    val read = audioRecord?.read(buffer, 0, buffer.size)
+                    if (read != null && read > 0) {
+                        callback.onAudio(buffer.copyOfRange(0, read), System.currentTimeMillis())
+                    }
                 }
             }
         }
