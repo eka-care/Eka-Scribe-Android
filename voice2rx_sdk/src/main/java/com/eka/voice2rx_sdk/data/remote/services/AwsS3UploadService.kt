@@ -163,7 +163,7 @@ object AwsS3UploadService {
         withContext(Dispatchers.IO) {
             val sessions = repository?.getAllSessions()
             sessions?.forEach {
-                if (it.transcript == null || it.structuredRx == null) {
+                if (!it.isProcessed) {
                     readAndUpdateSession(it)
                 }
             }
@@ -182,7 +182,7 @@ object AwsS3UploadService {
             val isStructuredRxExist =
                 checkFileExists(Voice2RxInternalUtils.BUCKET_NAME, structuredRxPath)
 
-            if (!isStructuredRxExist || !isTranscriptExist) {
+            if (!isStructuredRxExist && !isTranscriptExist) {
                 return@withContext
             }
 

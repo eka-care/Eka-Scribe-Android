@@ -35,22 +35,16 @@ internal class UploadService(
                 val clipIndex = currentClipIndex
                 val lastClipIndex = lastClipIndex1
                 if (clipIndex == -1) {
-//                    return@launch
                 } else {
                     clippedAudioData.addAll(
                         audioData.subList(lastClipIndex + 1, clipIndex + 1).map { it.frameData })
-                    var startTimeStamp = audioData.first().timeStamp
-                    if (lastClipIndex > 0) {
-                        startTimeStamp = audioData[lastClipIndex - 1].timeStamp
-                    }
-                    val endTimeStamp = audioData[clipIndex - 1].timeStamp
+
                     generateAudioFileFromAudioData(
-                        clippedAudioData,
-                        getCombinedAudio(clippedAudioData),
-                        startTimeStamp,
-                        endTimeStamp
+                        audioData = getCombinedAudio(clippedAudioData),
+                        startIndex = lastClipIndex,
+                        endIndex = clipIndex
                     )
-                    audioHelper.removeData(0, clipIndex)
+                    audioHelper.removeData()
                 }
             } catch (e: Exception) {
                 VoiceLogger.d(TAG, e.printStackTrace().toString())
@@ -72,10 +66,9 @@ internal class UploadService(
     }
 
     fun generateAudioFileFromAudioData(
-        audioDataList: List<ShortArray>,
         audioData: ShortArray,
-        start: Long,
-        end: Long
+        startIndex: Int,
+        endIndex: Int
     ) {
         if(audioData.size < 16000) {
             return
@@ -85,7 +78,11 @@ internal class UploadService(
         val wavFileName = "${sessionId + "_" + FILE_INDEX}.wav"
         val outputFile = File(context.filesDir, fileName)
 
-        audioHelper.onNewFileCreated(fileName, end, start)
+        audioHelper.onNewFileCreated(
+            fileName = fileName,
+            endTime = audioHelper.getClipTimeFromClipIndex(endIndex),
+            startTime = audioHelper.getClipTimeFromClipIndex(startIndex)
+        )
         audioCombiner.writeWavFile(
             context,
             inputFile = File(context.filesDir, wavFileName),

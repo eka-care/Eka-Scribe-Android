@@ -7,23 +7,25 @@ import com.eka.voice2rx_sdk.data.local.models.FileInfo
 import com.eka.voice2rx_sdk.sdkinit.V2RxInternal
 import com.eka.voice2rx_sdk.sdkinit.Voice2Rx
 import java.io.File
+import java.util.Collections
+import java.util.Locale
 
 internal class AudioHelper(
     private val context: Context,
     private val viewModel: V2RxInternal,
     private val sessionId: String,
-    prefLength: Int = 10,
-    despLength: Int = 20,
-    maxLength: Int = 25,
-    sampleRate: Int = 16000
+    private val prefLength: Int = 10,
+    private val despLength: Int = 20,
+    private val maxLength: Int = 25,
+    private val sampleRate: Int = 16000,
+    private val frameSize: Int = 512
 ) {
 
     companion object {
         private const val TAG = "AudioHelper"
-        private val FRAME_SIZE = Voice2Rx.getVoice2RxInitConfiguration().frameSize.value
     }
 
-    private val audioRecordData = mutableListOf<AudioRecordModel>()
+    private val audioRecordData = Collections.synchronizedList(mutableListOf<AudioRecordModel>())
     private val clipPoints = mutableListOf(0)
     private val clipTimeStamps = mutableListOf(0L)
 
@@ -38,13 +40,10 @@ internal class AudioHelper(
     private val shortThreshold = (0.1 * sampleRate).toInt()
     private val longThreshold = (0.5 * sampleRate).toInt()
 
-    var chunksInfo: Map<String, FileInfo> = mutableMapOf()
-        private set
-
     fun process(audioRecordModel: AudioRecordModel) {
         updateSilenceDuration(audioRecordModel)
 
-        val samplesPassed = (audioRecordData.size * FRAME_SIZE) - (currentClipIndex * FRAME_SIZE)
+        val samplesPassed = (audioRecordData.size * frameSize) - (currentClipIndex * frameSize)
         var isClipPointFrame = false
         var clipTime = -1L
 
@@ -75,7 +74,7 @@ internal class AudioHelper(
 
     private fun updateSilenceDuration(audioRecordModel: AudioRecordModel) {
         silenceDuration = if (audioRecordModel.isSilence) {
-            silenceDuration + FRAME_SIZE
+            silenceDuration + audioRecordModel.frameData.size
         } else {
             0
         }
@@ -92,11 +91,19 @@ internal class AudioHelper(
 
     fun isClipping() = isClipping
 
-    fun getAudioRecordData(): List<AudioRecordModel> = audioRecordData
+    fun getAudioRecordData(): List<AudioRecordModel> = audioRecordData.toList()
 
-    fun removeData(startIndex: Int, endIndex: Int) {
+    fun removeData() {
         isClipping = false
         lastClipIndex = currentClipIndex
+    }
+
+    fun getClipTimeFromClipIndex(index: Int): String {
+        if (index < 1) {
+            return "00.0000"
+        }
+        val time: Double = (index.toDouble() * frameSize) / sampleRate.toDouble()
+        return String.format(locale = Locale.ENGLISH, "%.4f", time)
     }
 
     fun uploadLastData() {
@@ -141,10 +148,7 @@ internal class AudioHelper(
         return combinedAudio
     }
 
-    fun onNewFileCreated(fileName: String, endTimeStamp: Long, startTimeStamp: Long) {
-        val firstTimeStamp = audioRecordData.firstOrNull()?.timeStamp ?: 0L
-        val startTime = Voice2RxUtils.calculateDuration(firstTimeStamp, startTimeStamp)
-        val endTime = Voice2RxUtils.calculateDuration(firstTimeStamp, endTimeStamp)
-        viewModel.addValueToChunksInfo(fileName, FileInfo(st = startTime.toString(), et = endTime.toString()))
+    fun onNewFileCreated(fileName: String, endTime: String, startTime: String) {
+        viewModel.addValueToChunksInfo(fileName, FileInfo(st = startTime, et = endTime))
     }
 }

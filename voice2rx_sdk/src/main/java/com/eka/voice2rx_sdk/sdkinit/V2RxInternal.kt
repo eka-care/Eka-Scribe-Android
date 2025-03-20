@@ -7,6 +7,7 @@ import com.eka.voice2rx_sdk.AudioRecordModel
 import com.eka.voice2rx_sdk.UploadService
 import com.eka.voice2rx_sdk.common.ResponseState
 import com.eka.voice2rx_sdk.common.UploadListener
+import com.eka.voice2rx_sdk.common.Voice2RxInternalUtils
 import com.eka.voice2rx_sdk.common.Voice2RxUtils
 import com.eka.voice2rx_sdk.common.VoiceLogger
 import com.eka.voice2rx_sdk.common.models.VoiceError
@@ -145,7 +146,6 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
     }
 
     override fun onAudio(audioData: ShortArray, timeStamp: Long) {
-//        VoiceLogger.d("ProcessVoice","onAudio")
         audioChunks.add(audioData)
         if (audioChunks.size > 300) {
             audioChunks.removeFirst()
@@ -175,7 +175,7 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
         app = context.applicationContext as Application
         database = Voice2RxDatabase.getDatabase(app)
         repository = VToRxRepository(database)
-        bucketName = "m-prod-voice2rx"
+        bucketName = Voice2RxInternalUtils.BUCKET_NAME
         folderName = Voice2RxUtils.getCurrentDateInYYMMDD()
         config = Voice2Rx.getVoice2RxInitConfiguration()
         AwsS3UploadService.setUploadListener(this)
@@ -212,7 +212,16 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
                 .build()
 
             recorder = VoiceRecorder(this@V2RxInternal, this@V2RxInternal)
-            audioHelper = AudioHelper(app, this@V2RxInternal, sessionId)
+            audioHelper = AudioHelper(
+                context = app,
+                viewModel = this@V2RxInternal,
+                sessionId = sessionId,
+                sampleRate = Voice2Rx.getVoice2RxInitConfiguration().sampleRate.value,
+                frameSize = Voice2Rx.getVoice2RxInitConfiguration().frameSize.value,
+                prefLength = Voice2Rx.getVoice2RxInitConfiguration().prefCutDuration,
+                despLength = Voice2Rx.getVoice2RxInitConfiguration().despCutDuration,
+                maxLength = Voice2Rx.getVoice2RxInitConfiguration().maxCutDuration,
+            )
             uploadService = UploadService(app, audioHelper, sessionId)
             uploadService.FILE_INDEX = 0
 
