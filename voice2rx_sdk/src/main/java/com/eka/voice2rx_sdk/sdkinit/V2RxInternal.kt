@@ -244,16 +244,29 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
     }
 
     fun stopRecording() {
+        VoiceLogger.d(TAG, "Stop Recording")
         coroutineScope.launch {
             isRecording = false
             if (::recorder.isInitialized) {
                 recorder.stop()
             }
-            audioHelper.uploadLastData()
+            audioHelper.uploadLastData(
+                onFileUploaded = { fileName, fileInfo ->
+                    VoiceLogger.d(TAG, "Last File Success!")
+                    onLastFileUploadComplete(fileName, fileInfo)
+                }
+            )
+        }
+        _recordingState.value = RecordingState.INITIAL
+    }
+
+    private fun onLastFileUploadComplete(fileName: String, fileInfo: FileInfo) {
+        coroutineScope.launch {
+            addValueToChunksInfo(fileName, fileInfo)
             uploadWholeFileData()
             sendEndOfMessage()
             storeSessionInDatabase(currentMode)
-            if(sessionUploadStatus) {
+            if (sessionUploadStatus) {
                 config.onStop.invoke(sessionId, chunksInfo.size + 2)
             } else {
                 repository.retrySessionUploading(
@@ -261,7 +274,7 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
                     sessionId = sessionId,
                     s3Config = s3Config,
                     onResponse = {
-                        if(it is ResponseState.Success && it.isCompleted) {
+                        if (it is ResponseState.Success && it.isCompleted) {
                             config.onStop.invoke(sessionId, chunksInfo.size + 2)
                         } else {
                             config.onError.invoke(sessionId, VoiceError.UNKNOWN_ERROR)
@@ -270,7 +283,6 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
                 )
             }
         }
-        _recordingState.value = RecordingState.INITIAL
     }
 
     fun isRecording() : Boolean {
@@ -297,21 +309,6 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
                 status = status
             )
         }
-    }
-
-    fun getCombinedAudio(): ShortArray {
-        VoiceLogger.d("ViewModel", "AudioChunks size : " + audioChunks.size.toString())
-        val totalSize = audioChunks.sumOf { it.size }
-        val combinedAudio = ShortArray(totalSize)
-        var currentIndex = 0
-
-
-        for (chunk in audioChunks) {
-            chunk.copyInto(combinedAudio, currentIndex)
-            currentIndex += chunk.size
-        }
-
-        return combinedAudio
     }
 
     fun updateAllSessions() {

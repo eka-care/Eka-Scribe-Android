@@ -106,11 +106,12 @@ internal class AudioHelper(
         return String.format(locale = Locale.ENGLISH, "%.4f", time)
     }
 
-    fun uploadLastData() {
+    fun uploadLastData(onFileUploaded: (String, FileInfo) -> Unit) {
         lastClipIndex = currentClipIndex
         currentClipIndex = audioRecordData.size - 1
         isClipping = true
-        viewModel.getUploadService().processAndUpload(lastClipIndex, currentClipIndex)
+        viewModel.getUploadService()
+            .processAndUpload(lastClipIndex, currentClipIndex, onFileUploaded = onFileUploaded)
     }
 
     fun uploadFullRecordingFile(fileName: String, onFileCreated: (File) -> Unit) {

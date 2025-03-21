@@ -3,6 +3,7 @@ package com.eka.voice2rx_sdk
 import android.content.Context
 import com.eka.voice2rx_sdk.common.Voice2RxUtils
 import com.eka.voice2rx_sdk.common.VoiceLogger
+import com.eka.voice2rx_sdk.data.local.models.FileInfo
 import com.eka.voice2rx_sdk.sdkinit.Voice2Rx
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -23,7 +24,11 @@ internal class UploadService(
 
     var FILE_INDEX = 0
 
-    fun processAndUpload(lastClipIndex1: Int, currentClipIndex: Int) {
+    fun processAndUpload(
+        lastClipIndex1: Int,
+        currentClipIndex: Int,
+        onFileUploaded: (String, FileInfo) -> Unit = { _, _ -> }
+    ) {
         if (!audioHelper.isClipping()) {
             return
         }
@@ -42,7 +47,8 @@ internal class UploadService(
                     generateAudioFileFromAudioData(
                         audioData = getCombinedAudio(clippedAudioData),
                         startIndex = lastClipIndex,
-                        endIndex = clipIndex
+                        endIndex = clipIndex,
+                        onFileUploaded = onFileUploaded
                     )
                     audioHelper.removeData()
                 }
@@ -68,7 +74,8 @@ internal class UploadService(
     fun generateAudioFileFromAudioData(
         audioData: ShortArray,
         startIndex: Int,
-        endIndex: Int
+        endIndex: Int,
+        onFileUploaded: (String, FileInfo) -> Unit
     ) {
         if(audioData.size < 16000) {
             return
@@ -77,6 +84,14 @@ internal class UploadService(
         val fileName = "${sessionId + "_" + FILE_INDEX}.m4a"
         val wavFileName = "${sessionId + "_" + FILE_INDEX}.wav"
         val outputFile = File(context.filesDir, fileName)
+
+        onFileUploaded(
+            fileName,
+            FileInfo(
+                st = audioHelper.getClipTimeFromClipIndex(startIndex),
+                et = audioHelper.getClipTimeFromClipIndex(endIndex)
+            )
+        )
 
         audioHelper.onNewFileCreated(
             fileName = fileName,
