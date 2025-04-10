@@ -15,6 +15,7 @@ import com.eka.voice2rx_sdk.data.local.db.Voice2RxDatabase
 import com.eka.voice2rx_sdk.data.local.db.entities.VToRxSession
 import com.eka.voice2rx_sdk.data.local.models.EndOfFileMessage
 import com.eka.voice2rx_sdk.data.local.models.FileInfo
+import com.eka.voice2rx_sdk.data.local.models.IncludeStatus
 import com.eka.voice2rx_sdk.data.local.models.RecordingState
 import com.eka.voice2rx_sdk.data.local.models.StartOfMessage
 import com.eka.voice2rx_sdk.data.local.models.Voice2RxSessionStatus
@@ -251,18 +252,28 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
                 recorder.stop()
             }
             audioHelper.uploadLastData(
-                onFileUploaded = { fileName, fileInfo ->
+                onFileUploaded = { fileName, fileInfo, includeStatus ->
                     VoiceLogger.d(TAG, "Last File Success!")
-                    onLastFileUploadComplete(fileName, fileInfo)
+                    onLastFileUploadComplete(
+                        fileName = fileName,
+                        fileInfo = fileInfo,
+                        includeStatus = includeStatus
+                    )
                 }
             )
         }
         _recordingState.value = RecordingState.INITIAL
     }
 
-    private fun onLastFileUploadComplete(fileName: String, fileInfo: FileInfo) {
+    private fun onLastFileUploadComplete(
+        fileName: String,
+        fileInfo: FileInfo,
+        includeStatus: IncludeStatus
+    ) {
         coroutineScope.launch {
-            addValueToChunksInfo(fileName, fileInfo)
+            if (includeStatus == IncludeStatus.INCLUDED) {
+                addValueToChunksInfo(fileName, fileInfo)
+            }
             uploadWholeFileData()
             sendEndOfMessage()
             storeSessionInDatabase(currentMode)

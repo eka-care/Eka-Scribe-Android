@@ -4,6 +4,7 @@ import android.content.Context
 import com.eka.voice2rx_sdk.common.Voice2RxUtils
 import com.eka.voice2rx_sdk.common.VoiceLogger
 import com.eka.voice2rx_sdk.data.local.models.FileInfo
+import com.eka.voice2rx_sdk.data.local.models.IncludeStatus
 import com.eka.voice2rx_sdk.sdkinit.Voice2Rx
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -27,7 +28,7 @@ internal class UploadService(
     fun processAndUpload(
         lastClipIndex1: Int,
         currentClipIndex: Int,
-        onFileUploaded: (String, FileInfo) -> Unit = { _, _ -> }
+        onFileUploaded: (String, FileInfo, IncludeStatus) -> Unit = { _, _, _ -> }
     ) {
         if (!audioHelper.isClipping()) {
             return
@@ -75,9 +76,10 @@ internal class UploadService(
         audioData: ShortArray,
         startIndex: Int,
         endIndex: Int,
-        onFileUploaded: (String, FileInfo) -> Unit
+        onFileUploaded: (String, FileInfo, IncludeStatus) -> Unit
     ) {
         if(audioData.size < 16000) {
+            onFileUploaded("", FileInfo(st = null, et = null), IncludeStatus.NOT_INCLUDED)
             return
         }
         FILE_INDEX += 1
@@ -90,7 +92,8 @@ internal class UploadService(
             FileInfo(
                 st = audioHelper.getClipTimeFromClipIndex(startIndex),
                 et = audioHelper.getClipTimeFromClipIndex(endIndex)
-            )
+            ),
+            IncludeStatus.INCLUDED
         )
 
         audioHelper.onNewFileCreated(
