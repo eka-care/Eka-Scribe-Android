@@ -37,7 +37,7 @@ object Voice2Rx {
         updateAllSessions()
     }
 
-    internal fun updateAllSessions() {
+    fun updateAllSessions() {
         v2RxInternal?.updateAllSessions()
     }
 
