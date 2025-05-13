@@ -9,22 +9,24 @@ import com.amazonaws.mobileconnectors.s3.transferutility.TransferNetworkLossHand
 import com.amazonaws.mobileconnectors.s3.transferutility.TransferState
 import com.amazonaws.mobileconnectors.s3.transferutility.TransferUtility
 import com.amazonaws.services.s3.AmazonS3Client
-import com.amazonaws.services.s3.model.GetObjectRequest
 import com.amazonaws.services.s3.model.ObjectMetadata
 import com.eka.voice2rx_sdk.common.ResponseState
 import com.eka.voice2rx_sdk.common.UploadListener
 import com.eka.voice2rx_sdk.common.Voice2RxInternalUtils
 import com.eka.voice2rx_sdk.common.Voice2RxUtils
-import com.eka.voice2rx_sdk.common.VoiceLogger
+import com.eka.voice2rx_sdk.common.voicelogger.EventCode
+import com.eka.voice2rx_sdk.common.voicelogger.EventLog
+import com.eka.voice2rx_sdk.common.voicelogger.VoiceLogger
 import com.eka.voice2rx_sdk.data.local.db.Voice2RxDatabase
-import com.eka.voice2rx_sdk.data.local.db.entities.VToRxSession
+import com.eka.voice2rx_sdk.data.local.db.entities.VoiceFileType
 import com.eka.voice2rx_sdk.data.repositories.VToRxRepository
-import com.eka.voice2rx_sdk.sdkinit.AwsS3Configuration
 import com.eka.voice2rx_sdk.sdkinit.V2RxInternal
+import com.eka.voice2rx_sdk.sdkinit.Voice2Rx
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 import java.io.File
 
 object AwsS3UploadService {
@@ -44,9 +46,8 @@ object AwsS3UploadService {
         file: File,
         folderName: String,
         sessionId: String,
-        isAudio: Boolean = true,
-        isFullAudio: Boolean = false,
-        s3Config: AwsS3Configuration? = null,
+        voiceFileType: VoiceFileType = VoiceFileType.CHUNK_AUDIO,
+        bid: String,
         onResponse: (ResponseState) -> Unit = {},
         retryCount: Int = 0
     ) {
@@ -64,10 +65,10 @@ object AwsS3UploadService {
                             file = file,
                             folderName = folderName,
                             sessionId = sessionId,
-                            isAudio = isAudio,
-                            isFullAudio = isFullAudio,
+                            voiceFileType = voiceFileType,
                             onResponse = onResponse,
-                            retryCount = retryCount + 1
+                            retryCount = retryCount + 1,
+                            bid = bid
                         )
                     }
                 }
@@ -100,22 +101,50 @@ object AwsS3UploadService {
         val key = "$folderName/$sessionId/${fileName}"
 
         val metadata = ObjectMetadata()
-        if (isAudio) {
-            metadata.contentType = "audio/wav"
-        } else {
-            metadata.contentType = "application/json"
-        }
+        metadata.contentType = "audio/wav"
+        metadata.addUserMetadata("bid", bid)
+        metadata.addUserMetadata("txnid", sessionId)
 
         val uploadObserver =
             transferUtility?.upload(config.bucketName, key, file, metadata)
+        Voice2Rx.logEvent(
+            EventLog.Info(
+                code = EventCode.VOICE2RX_SESSION_UPLOAD_LIFECYCLE,
+                params = JSONObject(
+                    mapOf(
+                        "sessionId" to sessionId,
+                        "fileName" to fileName,
+                        "upload" to "started"
+                    )
+                )
+            )
+        )
 
         uploadObserver?.setTransferListener(object : TransferListener {
             override fun onStateChanged(id: Int, state: TransferState?) {
+                Voice2Rx.logEvent(
+                    EventLog.Info(
+                        code = EventCode.VOICE2RX_SESSION_UPLOAD_LIFECYCLE,
+                        params = JSONObject(
+                            mapOf(
+                                "sessionId" to sessionId,
+                                "fileName" to fileName,
+                                "upload" to state?.name
+                            )
+                        )
+                    )
+                )
                 when (state) {
                     TransferState.COMPLETED -> {
-                        deleteFile(file, !isFullAudio && isAudio)
+                        deleteFile(file, voiceFileType == VoiceFileType.CHUNK_AUDIO)
                         onResponse(ResponseState.Success(true))
                         uploadListener?.onSuccess(sessionId = sessionId, fileName)
+                        updateFileStatus(
+                            context = context,
+                            fileName = fileName,
+                            sessionId = sessionId,
+                            isUploaded = true
+                        )
                     }
 
                     TransferState.FAILED -> {
@@ -156,6 +185,25 @@ object AwsS3UploadService {
         })
     }
 
+    fun updateFileStatus(
+        context: Context,
+        fileName: String,
+        sessionId: String,
+        isUploaded: Boolean
+    ) {
+        if (repository == null) {
+            repository = VToRxRepository(Voice2RxDatabase.getDatabase(context.applicationContext))
+        }
+        CoroutineScope(Dispatchers.IO).launch {
+            repository?.updateVoiceFile(
+                fileId = Voice2RxInternalUtils.getFileIdForSession(
+                    sessionId = sessionId,
+                    fileName = fileName
+                ), isUploaded = isUploaded
+            )
+        }
+    }
+
     suspend fun updateAllSession(context: Context) {
         if (repository == null) {
             repository = VToRxRepository(Voice2RxDatabase.getDatabase(context.applicationContext))
@@ -163,68 +211,14 @@ object AwsS3UploadService {
         withContext(Dispatchers.IO) {
             val sessions = repository?.getAllSessions()
             sessions?.forEach {
-                if (!it.isProcessed) {
-                    readAndUpdateSession(it)
-                }
-            }
-        }
-    }
-
-    private suspend fun readAndUpdateSession(session: VToRxSession) {
-        withContext(Dispatchers.IO) {
-            val folderPath = Voice2RxInternalUtils.getFolderPathForSession(session)
-
-            val transcriptPath = "$folderPath/clinical_notes_summary.md"
-            val structuredRxPath = "$folderPath/structured_rx_codified.json"
-
-            val isTranscriptExist =
-                checkFileExists(Voice2RxInternalUtils.BUCKET_NAME, transcriptPath)
-            val isStructuredRxExist =
-                checkFileExists(Voice2RxInternalUtils.BUCKET_NAME, structuredRxPath)
-
-            if (!isStructuredRxExist && !isTranscriptExist) {
-                return@withContext
-            }
-
-            val transcript = readFile(Voice2RxInternalUtils.BUCKET_NAME, transcriptPath)
-            val structuredRx = readFile(Voice2RxInternalUtils.BUCKET_NAME, structuredRxPath)
-
-            repository?.updateSession(
-                session = session.copy(
-                    transcript = transcript,
-                    structuredRx = structuredRx,
-                    isProcessed = true
+                repository?.retrySessionUploading(
+                    context = context,
+                    sessionId = it.sessionId,
+                    onResponse = {}
                 )
-            )
-        }
-    }
-
-
-    fun readFile(bucketName: String, key: String): String? {
-        return try {
-            val s3Client = createS3Client()
-            val request = GetObjectRequest(bucketName, key)
-            s3Client?.getObject(request).use { response ->
-                response?.objectContent?.bufferedReader()?.readText()
-            }
-        } catch (e: Exception) {
-            null
-        }
-    }
-
-    suspend fun checkFileExists(bucketName: String, objectKey: String): Boolean =
-        withContext(Dispatchers.IO) {
-            try {
-                val s3Client = createS3Client() ?: return@withContext false
-                s3Client.getObjectMetadata(bucketName, objectKey)
-                VoiceLogger.d("S3FileChecker", "File exists: $bucketName/$objectKey")
-                true
-            } catch (e: Exception) {
-                VoiceLogger.d("S3FileChecker", "File does not exist: $bucketName/$objectKey")
-                false
             }
         }
-
+    }
 
     private fun createS3Client(): AmazonS3Client? {
         val config = V2RxInternal.s3Config

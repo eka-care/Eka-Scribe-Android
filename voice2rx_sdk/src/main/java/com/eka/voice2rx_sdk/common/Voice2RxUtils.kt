@@ -61,6 +61,16 @@ object Voice2RxUtils {
         return context.applicationContext.filesDir.absolutePath + "/" + getFullRecordingFileName(sessionId)
     }
 
+    fun convertBase64IntoString(base64: String?): String {
+        if (base64 == null) {
+            return ""
+        }
+        val decodedBytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT)
+        return String(decodedBytes)
+//        val decodedBytes = Base64.decode(base64, Base64.DEFAULT)
+//        return String(decodedBytes, Charsets.UTF_8)
+    }
+
     fun isNetworkAvailable(context: Context): Boolean {
         val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {

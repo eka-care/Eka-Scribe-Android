@@ -4,7 +4,9 @@ import android.content.Context
 import android.media.MediaPlayer
 import com.eka.voice2rx_sdk.audio_converters.ConversionResult
 import com.eka.voice2rx_sdk.audio_converters.WAVtoM4AConverter
-import com.eka.voice2rx_sdk.common.VoiceLogger
+import com.eka.voice2rx_sdk.common.voicelogger.VoiceLogger
+import com.eka.voice2rx_sdk.data.local.db.entities.VoiceFileType
+import com.eka.voice2rx_sdk.data.local.models.FileInfo
 import com.eka.voice2rx_sdk.data.remote.services.AwsS3UploadService
 import com.eka.voice2rx_sdk.sdkinit.V2RxInternal
 import java.io.File
@@ -46,6 +48,7 @@ internal class AudioCombiner {
         sampleRate: Int,
         folderName: String,
         sessionId: String,
+        fileInfo: FileInfo,
         onFileCreated: (File) -> Unit = {},
         shouldUpload: Boolean = true
     ) {
@@ -67,7 +70,8 @@ internal class AudioCombiner {
             sessionId,
             sampleRate,
             onFileCreated = onFileCreated,
-            shouldUpload = shouldUpload
+            shouldUpload = shouldUpload,
+            fileInfo = fileInfo
         )
     }
 
@@ -79,6 +83,7 @@ internal class AudioCombiner {
         folderName: String,
         sessionId: String,
         sampleRate: Int,
+        fileInfo: FileInfo,
         onFileCreated: (File) -> Unit = {},
         shouldUpload: Boolean = true
     ) {
@@ -91,11 +96,13 @@ internal class AudioCombiner {
                     onFileCreated(outputFile)
                     if (shouldUpload) {
                         V2RxInternal.uploadFileToS3(
-                            context,
-                            outputFile.name.split("_").last(),
-                            outputFile,
-                            folderName,
-                            sessionId,
+                            context = context,
+                            fileName = outputFile.name.split("_").last(),
+                            file = outputFile,
+                            folderName = folderName,
+                            sessionId = sessionId,
+                            voiceFileType = VoiceFileType.CHUNK_AUDIO,
+                            fileInfo = fileInfo
                         )
                     }
                 }
@@ -123,13 +130,13 @@ internal class AudioCombiner {
             fos.write(header)
             fos.write(byteData)
         }
-        V2RxInternal.uploadFileToS3(
-            context,
-            outputFile.name,
-            outputFile,
-            folderName,
-            sessionId
-        )
+//        V2RxInternal.uploadFileToS3(
+//            context,
+//            outputFile.name,
+//            outputFile,
+//            folderName,
+//            sessionId
+//        )
     }
 
     fun createWavHeader(dataSize: Int, sampleRate: Int): ByteArray {

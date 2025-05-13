@@ -8,12 +8,16 @@ import androidx.room.TypeConverters
 import com.eka.voice2rx_sdk.data.local.convertors.Convertor
 import com.eka.voice2rx_sdk.data.local.db.daos.VToRxSessionDao
 import com.eka.voice2rx_sdk.data.local.db.entities.VToRxSession
+import com.eka.voice2rx_sdk.data.local.db.entities.VoiceFile
+import com.eka.voice2rx_sdk.data.local.db.entities.VoiceTranscriptionOutput
 
 @Database(
     entities = [
-        VToRxSession::class
+        VToRxSession::class,
+        VoiceFile::class,
+        VoiceTranscriptionOutput::class
     ],
-    version = 3,
+    version = 7,
     exportSchema = false
 )
 @TypeConverters(Convertor::class)
