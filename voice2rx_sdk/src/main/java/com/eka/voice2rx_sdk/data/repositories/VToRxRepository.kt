@@ -90,7 +90,7 @@ internal class VToRxRepository(
                         params = JSONObject(
                             mapOf(
                                 "sessionId" to sessionId,
-                                "lifecycle_event" to "commit",
+                                "lifecycle_event" to "init",
                                 "error" to "Error initializing transaction: ${e.message}",
                             )
                         )

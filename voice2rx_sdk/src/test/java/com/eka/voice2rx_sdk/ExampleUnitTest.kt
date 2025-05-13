@@ -12,9 +12,7 @@ class ExampleUnitTest {
     @Test
     fun addition_isCorrect() {
         print(
-            Voice2RxInternalUtils.getUserTokenData(
-            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJhbmRyb2lkZG9jIiwiYi1pZCI6Ijc3MjcyMzE5MTkzNjQzIiwiY2MiOnt9LCJleHAiOjE3NDY3MDMwNDIsImZuIjoiRGl2eWVzaCIsImdlbiI6Ik0iLCJpYXQiOjE3NDY2OTk0NDIsImlkcCI6Im1vYiIsImlzcyI6ImVtci5la2EuY2FyZSIsImxuIjoiSml2YW5pIiwib2lkIjoiMTczODMzMTg4OTgyNTk1IiwicHJpIjp0cnVlLCJ1dWlkIjoiZmIwMTFiMTQtNGMzMC00Y2M3LTkwOTMtZmNlZDgwZWY0OGZjIn0.0N14t1GfdHfziTVTPr--EUrxRCZvU0NDOzDr1tOLvpo"
-            )
+            Voice2RxInternalUtils.getUserTokenData("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJhbmRyb2lkZG9jIiwiYi1pZCI6ImItMTY2MzU2ODcwMjUwNTI3IiwiY2MiOnsiZG9jLWlkIjoiMTY2MzU2ODcwMjUwNTI3IiwiaXMtZCI6dHJ1ZX0sImRvYiI6IjE5ODQtMTEtMTkiLCJkb2MtaWQiOiIxNjYzNTY4NzAyNTA1MjciLCJleHAiOjE3NDcxNDI0NjcsImZuIjoiRHIiLCJnZW4iOiJNIiwiaWF0IjoxNzQ3MTM4ODY3LCJpZHAiOiJtb2IiLCJpcy1kIjp0cnVlLCJpc3MiOiJlbXIuZWthLmNhcmUiLCJsbiI6IkdlbmVyYWwgcGh5c2ljaWFuIiwibW4iOiJHcCIsIm9pZCI6IjE2NjM1Njg3MDI1MDUyNyIsInByaSI6dHJ1ZSwidXVpZCI6Ijk5NDVhYjA5LWFkODktNDI1Ny04OTJjLWFmYWUwMzI5NTNkZiJ9.8OJWj3VMkUMfTdQeh1XTgGA_qA40PhQOmiENWLPyV00")
         )
     }
 }
