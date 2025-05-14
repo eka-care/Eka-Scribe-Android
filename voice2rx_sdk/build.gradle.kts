@@ -112,7 +112,6 @@ dependencies {
     kapt(libs.room.compiler)
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)
-    implementation(libs.eka.network.android)
     implementation(libs.google.gson)
     implementation(libs.okhttp)
     implementation(libs.okhttp.urlconnection)
@@ -120,6 +119,9 @@ dependencies {
     implementation(libs.retrofit) {
         exclude(group = "com.google.protobuf", module = "protobuf-java")
     }
+    api(libs.kotlinx.coroutines)
+    api(libs.brotili)
+    implementation(libs.ok2curl)
     implementation(libs.retrofit.gson)
     implementation(libs.haroldadmin.networkresponseadapter)
     implementation(libs.androidx.work.runtime.ktx)

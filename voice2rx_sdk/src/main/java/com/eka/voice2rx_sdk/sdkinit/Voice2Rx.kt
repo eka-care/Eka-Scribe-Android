@@ -7,8 +7,6 @@ import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
-import com.eka.network.ConverterFactoryType
-import com.eka.network.Networking
 import com.eka.voice2rx_sdk.common.ResponseState
 import com.eka.voice2rx_sdk.common.SessionResponse
 import com.eka.voice2rx_sdk.common.Voice2RxUtils
@@ -25,6 +23,8 @@ import com.eka.voice2rx_sdk.data.remote.models.requests.AdditionalData
 import com.eka.voice2rx_sdk.data.remote.models.requests.SupportedLanguages
 import com.eka.voice2rx_sdk.data.remote.models.responses.TemplateId
 import com.eka.voice2rx_sdk.data.workers.SyncWorker
+import com.eka.voice2rx_sdk.networking.ConverterFactoryType
+import com.eka.voice2rx_sdk.networking.Networking
 import com.eka.voice2rx_sdk.sdkinit.ekaauth.OkHttpImpl
 import java.util.concurrent.TimeUnit
 

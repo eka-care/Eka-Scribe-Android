@@ -1,7 +1,7 @@
 package com.eka.voice2rx_sdk.sdkinit.ekaauth
 
-import com.eka.network.IOkHttpSetup
 import com.eka.voice2rx_sdk.BuildConfig
+import com.eka.voice2rx_sdk.networking.IOkHttpSetup
 import kotlinx.coroutines.runBlocking
 
 class OkHttpImpl(

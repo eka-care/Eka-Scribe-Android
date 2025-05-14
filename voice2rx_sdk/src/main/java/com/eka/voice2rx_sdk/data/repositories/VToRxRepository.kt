@@ -2,8 +2,6 @@ package com.eka.voice2rx_sdk.data.repositories
 
 import android.content.Context
 import android.util.Log
-import com.eka.network.ConverterFactoryType
-import com.eka.network.Networking
 import com.eka.voice2rx.data.remote.models.AwsS3ConfigResponse
 import com.eka.voice2rx_sdk.BuildConfig
 import com.eka.voice2rx_sdk.common.ResponseState
@@ -27,6 +25,8 @@ import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxStopTransaction
 import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxTransactionResult
 import com.eka.voice2rx_sdk.data.remote.services.AwsS3UploadService
 import com.eka.voice2rx_sdk.data.remote.services.Voice2RxService
+import com.eka.voice2rx_sdk.networking.ConverterFactoryType
+import com.eka.voice2rx_sdk.networking.Networking
 import com.eka.voice2rx_sdk.sdkinit.Voice2Rx
 import com.google.gson.Gson
 import com.haroldadmin.cnradapter.NetworkResponse
