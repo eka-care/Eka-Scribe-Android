@@ -54,7 +54,8 @@ internal class VToRxRepository(
 
     suspend fun initVoice2RxTransaction(
         sessionId: String,
-        request: Voice2RxInitTransactionRequest
+        request: Voice2RxInitTransactionRequest,
+        isForceCommit: Boolean = false
     ): NetworkResponse<Voice2RxInitTransactionResponse, Voice2RxInitTransactionResponse> {
         return withContext(Dispatchers.IO) {
             try {
@@ -80,7 +81,10 @@ internal class VToRxRepository(
                         sessionId = sessionId,
                         uploadStage = VoiceTransactionStage.STOP
                     )
-                    checkUploadingStageAndProgress(sessionId = sessionId)
+                    checkUploadingStageAndProgress(
+                        sessionId = sessionId,
+                        isForceCommit = isForceCommit
+                    )
                 }
                 response
             } catch (e: Exception) {
@@ -103,7 +107,8 @@ internal class VToRxRepository(
 
     suspend fun stopVoice2RxTransaction(
         sessionId: String,
-        request: Voice2RxStopTransactionRequest
+        request: Voice2RxStopTransactionRequest,
+        isForceCommit: Boolean = false
     ): NetworkResponse<Voice2RxStopTransactionResponse, Voice2RxStopTransactionResponse> {
         return withContext(Dispatchers.IO) {
             try {
@@ -129,7 +134,7 @@ internal class VToRxRepository(
                         sessionId = sessionId,
                         uploadStage = VoiceTransactionStage.COMMIT
                     )
-                    goToCommitStep(sessionId = sessionId)
+                    goToCommitStep(sessionId = sessionId, isForceCommit = isForceCommit)
                 }
                 response
             } catch (e: Exception) {
@@ -151,7 +156,8 @@ internal class VToRxRepository(
     }
 
     private fun checkUploadingStageAndProgress(
-        sessionId: String
+        sessionId: String,
+        isForceCommit: Boolean = false
     ) {
         CoroutineScope(Dispatchers.IO).launch {
             val session = getSessionBySessionId(sessionId = sessionId)
@@ -171,16 +177,17 @@ internal class VToRxRepository(
                     )
                     initVoice2RxTransaction(
                         sessionId = sessionId,
-                        request = request
+                        request = request,
+                        isForceCommit = isForceCommit
                     )
                 }
 
                 VoiceTransactionStage.STOP -> {
-                    goToStopStep(sessionId = sessionId)
+                    goToStopStep(sessionId = sessionId, isForceCommit = isForceCommit)
                 }
 
                 VoiceTransactionStage.COMMIT -> {
-                    goToCommitStep(sessionId = sessionId)
+                    goToCommitStep(sessionId = sessionId, isForceCommit = isForceCommit)
                 }
 
                 else -> {}
@@ -188,7 +195,7 @@ internal class VToRxRepository(
         }
     }
 
-    private fun goToStopStep(sessionId: String) {
+    private fun goToStopStep(sessionId: String, isForceCommit: Boolean = false) {
         CoroutineScope(Dispatchers.IO).launch {
             val voiceFiles = getAllFiles(sessionId = sessionId)
             if (voiceFiles.isEmpty()) {
@@ -212,6 +219,7 @@ internal class VToRxRepository(
             }
             stopVoice2RxTransaction(
                 sessionId = sessionId,
+                isForceCommit = isForceCommit,
                 request = Voice2RxStopTransactionRequest(
                     audioFiles = voiceFiles.filter { it.fileType == VoiceFileType.CHUNK_AUDIO }
                         .map { it.fileName }
@@ -222,7 +230,7 @@ internal class VToRxRepository(
         }
     }
 
-    private fun goToCommitStep(sessionId: String) {
+    private fun goToCommitStep(sessionId: String, isForceCommit: Boolean = false) {
         CoroutineScope(Dispatchers.IO).launch {
             val session = getSessionBySessionId(sessionId = sessionId)
             if (session == null) {
@@ -250,11 +258,12 @@ internal class VToRxRepository(
             }
             val isAllUploaded =
                 voiceFiles.filter { it.fileType == VoiceFileType.CHUNK_AUDIO }.all { it.isUploaded }
-            if (isAllUploaded) {
+            if (isAllUploaded || isForceCommit) {
                 commitVoice2RxTransaction(
                     sessionId = sessionId,
                     request = Voice2RxStopTransactionRequest(
                         audioFiles = voiceFiles.filter { it.fileType == VoiceFileType.CHUNK_AUDIO }
+                            .filter { it.isUploaded }
                             .map { it.fileName }
                             .toList(),
                         chunksInfo = emptyList()
@@ -652,7 +661,7 @@ internal class VToRxRepository(
                     }.flatten()
 
                 if (results.all { it }) {
-                    checkUploadingStageAndProgress(sessionId = sessionId)
+                    checkUploadingStageAndProgress(sessionId = sessionId, isForceCommit = true)
                     onResponse(ResponseState.Success(true))
                 } else {
                     onResponse(ResponseState.Error("Audio file upload failed!"))

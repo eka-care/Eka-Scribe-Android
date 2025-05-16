@@ -136,7 +136,6 @@ object AwsS3UploadService {
                 )
                 when (state) {
                     TransferState.COMPLETED -> {
-                        deleteFile(file, voiceFileType == VoiceFileType.CHUNK_AUDIO)
                         onResponse(ResponseState.Success(true))
                         uploadListener?.onSuccess(sessionId = sessionId, fileName)
                         updateFileStatus(
@@ -145,6 +144,7 @@ object AwsS3UploadService {
                             sessionId = sessionId,
                             isUploaded = true
                         )
+                        deleteFile(file, voiceFileType == VoiceFileType.CHUNK_AUDIO)
                     }
 
                     TransferState.FAILED -> {

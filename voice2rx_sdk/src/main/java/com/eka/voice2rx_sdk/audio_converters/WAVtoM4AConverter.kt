@@ -31,7 +31,7 @@ class WAVtoM4AConverter(
         val muxer = MediaMuxer(
             destinationM4aFile.absolutePath,
             MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4
-        );
+        )
         val wavFileInputStream = FileInputStream(inputWavFile)
         wavFileInputStream.skip(wavFileHeaderSize)
 
