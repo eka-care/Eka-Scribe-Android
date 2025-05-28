@@ -1,24 +1,32 @@
 # Voice2Rx Android SDK
 
-Voice2Rx is an Android SDK that allows voice transcription and structured prescription data generation for healthcare applications.
+[![](https://jitpack.io/v/eka-care/eka-v2rx-android.svg)](https://jitpack.io/#eka-care/eka-v2rx-android/latest)
 
 ## Table of Contents
 
-- [Prerequisites](#prerequisites)
-- [Installation](#installation)
-- [Initialization](#initialization)
-- [Basic Usage](#basic-usage)
+1. [Overview](#overview)
+2. [Prerequisites](#prerequisites)
+3. [Installation](#installation)
+4. [Initialization](#initialization)
+    - [Set up logging callbacks for SDK events](#set-up-logging-callbacks-for-sdk-events)
+5. [Basic Usage](#basic-usage)
     - [Starting a Voice Session](#starting-a-voice-session)
     - [Stopping a Voice Session](#stopping-a-voice-session)
     - [Checking Session Status](#checking-session-status)
-- [Working with Sessions](#working-with-sessions)
+6. [Working with Sessions](#working-with-sessions)
     - [Retrieving Session History](#retrieving-session-history)
     - [Sample Structured Rx Data](#sample-structured-rx-data)
-    - [Sample Markdown Output](#sample-markdown-output)
-- [Advanced Features](#advanced-features)
+    - [Sample Clinical Notes Output](#sample-clinical-notes-output)
+7. [Advanced Features](#advanced-features)
     - [Retrying a Session](#retrying-a-session)
-- [Cleanup](#cleanup)
-- [Links](#links)
+8. [Cleanup](#cleanup)
+9. [Links](#links)
+
+---
+
+## Overview
+
+Voice2Rx is an Android SDK that allows voice transcription and structured prescription data generation for healthcare applications.
 
 ## Prerequisites
 
@@ -41,8 +49,7 @@ Before integrating the Voice2Rx SDK, ensure that your Android project meets the 
 Add the following dependency to your `app/build.gradle.kts` file:
 
 ```kotlin
-implementation("com.github.eka-care:eka-v2rx-android:1.0.5")
-
+implementation("com.github.eka-care:eka-v2rx-android:2.0.3")
 ```
 
 ## Initialization
@@ -51,21 +58,13 @@ To initialize the SDK, you need to implement the `IOkHttpSetup` interface and pr
 
 ```kotlin
 // Create object implementing IOkHttpSetup interface to provide auth tokens
-class OkHttpImpl : IOkHttpSetup {
-    // Provide headers which are necessary for authentication
-    override fun getDefaultHeaders(url: String): Map<String, String> {
-        val headers = HashMap<String, String>()
-        headers["auth"] = // provide session token here for authentication
-        return headers
+class EkaAuthConfigImpl : EkaAuthConfig {
+    override suspend fun refreshToken(): String {
+        // return new auth token after refresh
     }
 
-    override fun refreshAuthToken(url: String): Map<String, String>? {
-        // refresh auth token here
-        return null
-    }
-
-    override fun onSessionExpire() {
-        // handle token expiration
+    override fun sessionExpired() {
+				// callback function for session expired
     }
 }
 
@@ -73,28 +72,54 @@ class OkHttpImpl : IOkHttpSetup {
 Voice2Rx.init(
     context = context,
     config = Voice2RxInitConfig(
-        onStart = {
-            // Code to execute when recording starts
+        voice2RxLifecycle = object : Voice2RxLifecycleCallbacks {
+            override fun onStartSession(sessionId: String) {
+            }
+
+            override fun onStopSession(
+                sessionId: String,
+                recordedFiles: Int
+            ) {
+            }
+
+            override fun onPauseSession(sessionId: String) {
+            }
+
+            override fun onResumeSession(sessionId: String) {
+            }
+
+            override fun onError(
+                sessionId: String,
+                error: VoiceError
+            ) {
+            }
         },
-        onStop = { sessionId, recordedFiles ->
-            // Code to execute when recording stops
-        },
-        onError = { sessionId, errorMsg ->
-            // Handle errors
-        },
-        docOid = "",       // Doctor oid
-        docUuid = "",      // Doctor UUID
-        ownerId = "",      // Owner ID
-        contextData = ContextData(
-            doctor = null,
-            patient = null,
-            visitid = sessionId
-        ),
-        okHttpSetup = OkHttpImpl(),
-        callerId = "",     // Caller ID
+        authorizationToken = // provide eka auth token,
+        ekaAuthConfig = EkaAuthConfigImpl(),
     )
 )
+```
 
+### Set up logging callbacks for SDK events
+
+```kotlin
+Voice2Rx.setEventLogger(
+    object : LogInterceptor {
+        override fun logEvent(eventLog: EventLog) {
+            when(eventLog) {
+                is EventLog.Error -> {
+
+                }
+                is EventLog.Warning -> {
+
+                }
+                is EventLog.Info -> {
+
+                }
+            }
+        }
+    }
+)
 ```
 
 ## Basic Usage
@@ -105,9 +130,11 @@ To start a voice recording session:
 
 ```kotlin
 // Start a voice session in DICTATION or CONSULTATION mode
-Voice2Rx.startVoice2Rx(mode = Voice2RxType.DICTATION)
+Voice2Rx.startVoice2Rx(
+    mode = Voice2RxType.DICTATION,
+    onError = {}
+)
 // The onStart callback (defined in init) will be triggered when the session begins
-
 ```
 
 ### Stopping a Voice Session
@@ -118,7 +145,6 @@ To stop a voice recording session:
 // Stop the current voice session
 Voice2Rx.stopVoice2Rx()
 // The onStop callback will be triggered with the sessionId
-
 ```
 
 ### Checking Session Status
@@ -128,7 +154,6 @@ To check if a recording session is currently active:
 ```kotlin
 // Returns true if a recording session is in progress
 val isRecording = Voice2Rx.isCurrentlyRecording()
-
 ```
 
 ## Working with Sessions
@@ -143,12 +168,8 @@ val sessions = Voice2Rx.getSessions()
 
 // Access a specific session (example using the first session)
 val session = sessions.firstOrNull()
-
-// Access session data
-session?.let {
-    val transcript = it.transcript       // Raw transcript text
-    val structuredRx = it.structuredRx   // Structured prescription data
-}
+val sessionProcessingStatus = Voice2Rx.getVoice2RxSessionStatus(sessionId = session.sessionId)
+val sessionOutput = Voice2Rx.getVoiceSessionData(sessionId = session.sessionId)
 
 ```
 
@@ -246,7 +267,7 @@ The SDK returns structured prescription data in JSON format:
 
 ```
 
-### Sample Markdown Output
+### Sample Clinical Notes Output
 
 The SDK can also generate a formatted markdown output:
 
@@ -293,7 +314,6 @@ Voice2Rx.retrySession(
         // Indicates whether retry was successful or not
     }
 )
-
 ```
 
 ## Cleanup
@@ -305,3 +325,7 @@ When you're done using the SDK, free up resources:
 Voice2Rx.dispose()
 
 ```
+
+## Links
+
+- [GitHub Repository](https://github.com/eka-care/eka-v2rx-android)
