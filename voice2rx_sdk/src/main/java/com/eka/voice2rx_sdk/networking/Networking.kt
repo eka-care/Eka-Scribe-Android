@@ -49,9 +49,6 @@ class Networking private constructor() {
         okHttpSetup: IOkHttpSetup,
         converterFactoryType: ConverterFactoryType
     ) {
-        if (this::baseUrl.isInitialized) {
-            throw Exception("Networking is already initialised. Check if you are calling from multiple places")
-        }
         this.baseUrl = baseUrl
         this.okHttpSetup = okHttpSetup
         retrofit = createClient(this.baseUrl, converterFactoryType)

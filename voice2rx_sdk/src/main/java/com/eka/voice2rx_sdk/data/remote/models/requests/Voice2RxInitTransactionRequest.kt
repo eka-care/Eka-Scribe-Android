@@ -25,6 +25,18 @@ data class Voice2RxInitTransactionRequest(
     var transfer: String = "vaded"
 )
 
+//{ id: 'en-IN', name: 'English (India)' },
+//{ id: 'en-US', name: 'English (United States)' },
+//{ id: 'hi', name: 'Hindi' },
+//{ id: 'gu', name: 'Gujarati' },
+//{ id: 'kn', name: 'Kannada' },
+//{ id: 'ml', name: 'Malayalam' },
+//{ id: 'ta', name: 'Tamil' },
+//{ id: 'te', name: 'Telugu' },
+//{ id: 'bn', name: 'Bengali' },
+//{ id: 'mr', name: 'Marathi' },
+//{ id: 'pa', name: 'Punjabi' },
+
 @Keep
 enum class SupportedLanguages(val value: String) {
     // English (India)
@@ -36,16 +48,40 @@ enum class SupportedLanguages(val value: String) {
     EN_US("en-US"),
 
     // Hindi
-    @SerializedName("hi-IN")
-    HI_IN("hi-IN"),
+    @SerializedName("hi")
+    HI_IN("hi"),
 
     // Gujarati
-    @SerializedName("gu-IN")
-    GU_IN("gu-IN"),
+    @SerializedName("gu")
+    GU_IN("gu"),
 
     // Kannada
-    @SerializedName("kn-IN")
-    KN_IN("kn-IN");
+    @SerializedName("kn")
+    KN_IN("kn"),
+
+    // Malayalam
+    @SerializedName("ml")
+    ML_IN("ml"),
+
+    // Tamil
+    @SerializedName("ta")
+    TA_IN("ta"),
+
+    // Telugu
+    @SerializedName("te")
+    TE_IN("te"),
+
+    // Bengali
+    @SerializedName("bn")
+    BN_IN("bn"),
+
+    // Marathi
+    @SerializedName("mr")
+    MR_IN("mr"),
+
+    // Punjabi
+    @SerializedName("pa")
+    PA_IN("pa");
 
     companion object {
         fun fromValue(value: String): SupportedLanguages? {
