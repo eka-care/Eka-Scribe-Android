@@ -14,6 +14,7 @@ import com.eka.voice2rx_sdk.common.models.VoiceError
 import com.eka.voice2rx_sdk.common.voicelogger.EventCode
 import com.eka.voice2rx_sdk.common.voicelogger.EventLog
 import com.eka.voice2rx_sdk.common.voicelogger.LogInterceptor
+import com.eka.voice2rx_sdk.common.voicelogger.VoiceLogger
 import com.eka.voice2rx_sdk.data.local.db.entities.VToRxSession
 import com.eka.voice2rx_sdk.data.local.models.Voice2RxSessionStatus
 import com.eka.voice2rx_sdk.data.local.models.Voice2RxType
@@ -73,6 +74,10 @@ object Voice2Rx {
         v2RxInternal?.initValues(context)
         initialiseWorker(context.applicationContext)
         updateAllSessions()
+    }
+
+    fun setEnableDebugLogs() {
+        VoiceLogger.enableDebugLogs = true
     }
 
     fun setEventLogger(logInterceptor: LogInterceptor) {
