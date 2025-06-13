@@ -80,6 +80,14 @@ object Voice2Rx {
         VoiceLogger.enableDebugLogs = true
     }
 
+    fun updateAuthToken(newAuthToken: String?) {
+        newAuthToken?.let {
+            configuration = configuration?.copy(
+                authorizationToken = newAuthToken
+            )
+        }
+    }
+
     fun setEventLogger(logInterceptor: LogInterceptor) {
         logger = logInterceptor
     }

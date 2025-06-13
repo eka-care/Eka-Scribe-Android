@@ -26,7 +26,7 @@ class OkHttpImpl(
     override fun refreshAuthToken(url: String): Map<String, String>? {
         return runBlocking {
             val sessionToken = ekaAuthConfig?.refreshToken()
-            authorizationToken = sessionToken ?: authorizationToken
+            Voice2Rx.updateAuthToken(sessionToken)
             if (sessionToken.isNullOrBlank()) {
                 null
             } else {
