@@ -28,7 +28,6 @@ import com.eka.voice2rx_sdk.data.remote.services.Voice2RxService
 import com.eka.voice2rx_sdk.networking.ConverterFactoryType
 import com.eka.voice2rx_sdk.networking.Networking
 import com.eka.voice2rx_sdk.sdkinit.Voice2Rx
-import com.google.gson.Gson
 import com.haroldadmin.cnradapter.NetworkResponse
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -55,7 +54,8 @@ internal class VToRxRepository(
     suspend fun initVoice2RxTransaction(
         sessionId: String,
         request: Voice2RxInitTransactionRequest,
-        isForceCommit: Boolean = false
+        isForceCommit: Boolean = false,
+        onError: (Voice2RxInitTransactionResponse?) -> Unit = {},
     ): NetworkResponse<Voice2RxInitTransactionResponse, Voice2RxInitTransactionResponse> {
         return withContext(Dispatchers.IO) {
             try {
@@ -85,6 +85,20 @@ internal class VToRxRepository(
                         sessionId = sessionId,
                         isForceCommit = isForceCommit
                     )
+                } else if (response is NetworkResponse.Error) {
+                    Voice2Rx.logEvent(
+                        EventLog.Info(
+                            code = EventCode.VOICE2RX_SESSION_ERROR,
+                            params = JSONObject(
+                                mapOf(
+                                    "sessionId" to sessionId,
+                                    "lifecycle_event" to "init",
+                                    "error" to "Error initializing transaction: ${response.body.toString()} :: ${response.error.toString()}"
+                                )
+                            )
+                        )
+                    )
+                    onError(response.body)
                 }
                 response
             } catch (e: Exception) {
@@ -171,15 +185,11 @@ internal class VToRxRepository(
             }
             when (session.uploadStage) {
                 VoiceTransactionStage.INIT -> {
-                    val request = Gson().fromJson<Voice2RxInitTransactionRequest>(
-                        session.sessionMetadata,
-                        Voice2RxInitTransactionRequest::class.java
-                    )
-                    initVoice2RxTransaction(
+                    updateSessionUploadStage(
                         sessionId = sessionId,
-                        request = request,
-                        isForceCommit = isForceCommit
+                        uploadStage = VoiceTransactionStage.ERROR
                     )
+                    return@launch
                 }
 
                 VoiceTransactionStage.STOP -> {
