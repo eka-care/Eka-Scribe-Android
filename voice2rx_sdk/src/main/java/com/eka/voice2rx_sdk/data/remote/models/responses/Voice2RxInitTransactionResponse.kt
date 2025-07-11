@@ -13,5 +13,17 @@ data class Voice2RxInitTransactionResponse(
     @SerializedName("status")
     var status: String?,
     @SerializedName("txn_id")
-    var txnId: String?
+    var txnId: String?,
+    @SerializedName("error")
+    var error: EkaScribeErrorDetails?
+)
+
+@Keep
+data class EkaScribeErrorDetails(
+    @SerializedName("code")
+    var code: String?,
+    @SerializedName("display_message")
+    var displayMessage: String?,
+    @SerializedName("message")
+    var message: String?
 )
