@@ -636,6 +636,7 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
                 )
             },
         )
+        storeSessionInDatabase(mode = mode, metadata = Gson().toJson(request))
         val response = repository.initVoice2RxTransaction(
             sessionId = sessionId,
             request = request,
@@ -643,7 +644,6 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
             }
         )
         if (response is NetworkResponse.Success) {
-            storeSessionInDatabase(mode = mode, metadata = Gson().toJson(request))
             onSuccess()
         } else if (response is NetworkResponse.Error) {
             onError(
