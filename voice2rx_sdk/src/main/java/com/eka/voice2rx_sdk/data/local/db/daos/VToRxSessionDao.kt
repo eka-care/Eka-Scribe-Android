@@ -61,4 +61,7 @@ interface VToRxSessionDao {
 
     @Query("SELECT * FROM ${DatabaseConstants.V2RX_VOICE_TRANSCRIPTION_OUTPUT} WHERE foreign_key = :sessionId")
     suspend fun getOutputsBySessionId(sessionId: String): List<VoiceTranscriptionOutput>
+
+    @Query("SELECT * FROM ${DatabaseConstants.V2RX_SESSION_TABLE_NAME} WHERE session_id = :sessionId")
+    fun getSessionAsFlow(sessionId: String): Flow<VToRxSession>
 }
