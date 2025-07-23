@@ -47,6 +47,7 @@ import com.konovalov.vad.silero.VadSilero
 import com.konovalov.vad.silero.config.Mode
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -659,6 +660,10 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
                 voiceError = VoiceError.EKA_SCRIBE_INIT_ERROR
             )
         }
+    }
+
+    suspend fun getSessionInfoAsFlow(sessionId: String): Flow<VToRxSession> {
+        return repository.getSessionInfoAsFlow(sessionId = sessionId)
     }
 
     override fun onAudioFocusGain() {
