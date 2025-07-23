@@ -2,11 +2,6 @@ package com.eka.voice2rx_sdk.sdkinit
 
 import android.content.Context
 import android.util.Log
-import androidx.work.Constraints
-import androidx.work.ExistingPeriodicWorkPolicy
-import androidx.work.NetworkType
-import androidx.work.PeriodicWorkRequestBuilder
-import androidx.work.WorkManager
 import com.eka.voice2rx_sdk.common.ResponseState
 import com.eka.voice2rx_sdk.common.SessionResponse
 import com.eka.voice2rx_sdk.common.Voice2RxUtils
@@ -16,6 +11,7 @@ import com.eka.voice2rx_sdk.common.voicelogger.EventLog
 import com.eka.voice2rx_sdk.common.voicelogger.LogInterceptor
 import com.eka.voice2rx_sdk.common.voicelogger.VoiceLogger
 import com.eka.voice2rx_sdk.data.local.db.entities.VToRxSession
+import com.eka.voice2rx_sdk.data.local.db.entities.VoiceTransactionStage
 import com.eka.voice2rx_sdk.data.local.models.Voice2RxSessionStatus
 import com.eka.voice2rx_sdk.data.local.models.Voice2RxType
 import com.eka.voice2rx_sdk.data.remote.models.Error
@@ -23,11 +19,11 @@ import com.eka.voice2rx_sdk.data.remote.models.SessionStatus
 import com.eka.voice2rx_sdk.data.remote.models.requests.AdditionalData
 import com.eka.voice2rx_sdk.data.remote.models.requests.SupportedLanguages
 import com.eka.voice2rx_sdk.data.remote.models.responses.TemplateId
-import com.eka.voice2rx_sdk.data.workers.SyncWorker
 import com.eka.voice2rx_sdk.networking.ConverterFactoryType
 import com.eka.voice2rx_sdk.networking.Networking
 import com.eka.voice2rx_sdk.sdkinit.ekaauth.OkHttpImpl
-import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 
 object Voice2Rx {
     private var configuration: Voice2RxInitConfig? = null
@@ -72,8 +68,6 @@ object Voice2Rx {
             v2RxInternal = V2RxInternal()
         }
         v2RxInternal?.initValues(context)
-        initialiseWorker(context.applicationContext)
-        updateAllSessions()
     }
 
     fun setEnableDebugLogs() {
@@ -100,27 +94,18 @@ object Voice2Rx {
         v2RxInternal?.updateAllSessions()
     }
 
-    private fun initialiseWorker(context: Context) {
-        val workRequest = PeriodicWorkRequestBuilder<SyncWorker>(30, TimeUnit.SECONDS)
-            .setConstraints(
-                Constraints.Builder()
-                    .setRequiredNetworkType(NetworkType.CONNECTED)
-                    .build()
-            )
-            .build()
-
-        WorkManager.getInstance(context).enqueueUniquePeriodicWork(
-            "VOICE2RX_WORKER_2",
-            ExistingPeriodicWorkPolicy.KEEP,
-            workRequest
-        )
-    }
-
     fun getVoice2RxInitConfiguration(): Voice2RxInitConfig {
         if (configuration == null) {
             throw IllegalStateException("Voice2Rx SDK not initialized with configuration")
         }
         return configuration!!
+    }
+
+    suspend fun getSessionUploadInfoAsFlow(sessionId: String): Flow<VoiceTransactionStage>? {
+        if (v2RxInternal == null) {
+            throw IllegalStateException("Voice2Rx SDK not initialized")
+        }
+        return v2RxInternal?.getSessionInfoAsFlow(sessionId = sessionId)?.map { it.uploadStage }
     }
 
     fun retrySession(
