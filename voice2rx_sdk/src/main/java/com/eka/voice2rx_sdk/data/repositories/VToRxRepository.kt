@@ -181,7 +181,7 @@ internal class VToRxRepository(
                         sessionId = sessionId,
                         uploadStage = VoiceTransactionStage.COMMIT
                     )
-                    goToCommitStep(sessionId = sessionId, isForceCommit = isForceCommit)
+                    goToCommitStep(sessionId = sessionId, isForceCommit = true)
                 }
                 response
             } catch (e: Exception) {
@@ -284,21 +284,6 @@ internal class VToRxRepository(
                 VoiceLogger.e("Voice2Rx", "Session not found for sessionId: $sessionId")
                 return@launch
             }
-            if (session.uploadStage != VoiceTransactionStage.COMMIT) {
-                Voice2Rx.logEvent(
-                    EventLog.Info(
-                        code = EventCode.VOICE2RX_SESSION_ERROR,
-                        params = JSONObject(
-                            mapOf(
-                                "sessionId" to sessionId,
-                                "upload_stage" to "commit",
-                                "error" to "Upload stage is not commit",
-                            )
-                        )
-                    )
-                )
-                return@launch
-            }
             val voiceFiles = getAllFiles(sessionId = sessionId)
             if (voiceFiles.isEmpty()) {
                 Voice2Rx.logEvent(
@@ -329,6 +314,18 @@ internal class VToRxRepository(
                     )
                 )
             } else {
+                Voice2Rx.logEvent(
+                    EventLog.Info(
+                        code = EventCode.VOICE2RX_SESSION_LIFECYCLE,
+                        params = JSONObject(
+                            mapOf(
+                                "sessionId" to sessionId,
+                                "lifecycle_event" to "commit",
+                                "error" to "Not all audio files are uploaded"
+                            )
+                        )
+                    )
+                )
                 VoiceLogger.e("Voice2Rx", "Not all audio files are uploaded")
             }
         }
