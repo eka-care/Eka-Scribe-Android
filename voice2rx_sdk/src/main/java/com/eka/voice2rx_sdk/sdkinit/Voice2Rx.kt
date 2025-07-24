@@ -2,6 +2,7 @@ package com.eka.voice2rx_sdk.sdkinit
 
 import android.content.Context
 import android.util.Log
+import androidx.work.WorkManager
 import com.eka.voice2rx_sdk.common.ResponseState
 import com.eka.voice2rx_sdk.common.SessionResponse
 import com.eka.voice2rx_sdk.common.Voice2RxUtils
@@ -68,6 +69,14 @@ object Voice2Rx {
             v2RxInternal = V2RxInternal()
         }
         v2RxInternal?.initValues(context)
+        cancelWorker(context)
+    }
+
+    private fun cancelWorker(context: Context) {
+        try {
+            WorkManager.getInstance(context).cancelAllWorkByTag("VOICE2RX_WORKER_2")
+        } catch (e: Exception) {
+        }
     }
 
     fun setEnableDebugLogs() {
