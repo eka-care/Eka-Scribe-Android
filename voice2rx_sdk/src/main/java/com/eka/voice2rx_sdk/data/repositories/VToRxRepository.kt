@@ -181,7 +181,7 @@ internal class VToRxRepository(
                         sessionId = sessionId,
                         uploadStage = VoiceTransactionStage.COMMIT
                     )
-                    goToCommitStep(sessionId = sessionId, isForceCommit = true)
+                    goToCommitStep(sessionId = sessionId, isForceCommit = isForceCommit)
                 }
                 response
             } catch (e: Exception) {
