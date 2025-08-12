@@ -21,5 +21,7 @@
 #-renamesourcefileattribute SourceFile
 # Keep model classes
 -keep class com.eka.voice2rx.data.remote.models.** { *; }
-
 -keep class com.eka.voice2rx.data.local.models.** { *; }
+-dontwarn proguard.annotation.Keep
+-dontwarn proguard.annotation.KeepClassMembers
+-keep class com.haroldadmin.cnradapter.** { *; }

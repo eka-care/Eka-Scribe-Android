@@ -4,7 +4,7 @@ import android.media.MediaCodec
 import android.media.MediaCodecInfo
 import android.media.MediaFormat
 import android.media.MediaMuxer
-import com.eka.voice2rx_sdk.common.VoiceLogger
+import com.eka.voice2rx_sdk.common.voicelogger.VoiceLogger
 import java.io.File
 import java.io.FileInputStream
 import java.nio.ByteBuffer
@@ -31,7 +31,7 @@ class WAVtoM4AConverter(
         val muxer = MediaMuxer(
             destinationM4aFile.absolutePath,
             MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4
-        );
+        )
         val wavFileInputStream = FileInputStream(inputWavFile)
         wavFileInputStream.skip(wavFileHeaderSize)
 

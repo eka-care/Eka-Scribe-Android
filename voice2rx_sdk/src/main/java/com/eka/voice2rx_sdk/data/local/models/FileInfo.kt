@@ -11,3 +11,8 @@ data class FileInfo(
     @SerializedName("st")
     var st: String?
 )
+
+enum class IncludeStatus {
+    INCLUDED,
+    NOT_INCLUDED,
+}
