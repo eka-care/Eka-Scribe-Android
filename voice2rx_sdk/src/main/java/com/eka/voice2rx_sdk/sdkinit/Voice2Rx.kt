@@ -6,6 +6,7 @@ import androidx.work.WorkManager
 import com.eka.voice2rx_sdk.common.ResponseState
 import com.eka.voice2rx_sdk.common.SessionResponse
 import com.eka.voice2rx_sdk.common.Voice2RxUtils
+import com.eka.voice2rx_sdk.common.models.EkaScribeError
 import com.eka.voice2rx_sdk.common.models.VoiceError
 import com.eka.voice2rx_sdk.common.voicelogger.EventCode
 import com.eka.voice2rx_sdk.common.voicelogger.EventLog
@@ -19,6 +20,7 @@ import com.eka.voice2rx_sdk.data.remote.models.Error
 import com.eka.voice2rx_sdk.data.remote.models.SessionStatus
 import com.eka.voice2rx_sdk.data.remote.models.requests.AdditionalData
 import com.eka.voice2rx_sdk.data.remote.models.requests.SupportedLanguages
+import com.eka.voice2rx_sdk.data.remote.models.responses.EkaScribeErrorDetails
 import com.eka.voice2rx_sdk.data.remote.models.responses.TemplateId
 import com.eka.voice2rx_sdk.networking.ConverterFactoryType
 import com.eka.voice2rx_sdk.networking.Networking
@@ -144,29 +146,70 @@ object Voice2Rx {
             SupportedLanguages.EN_IN,
             SupportedLanguages.HI_IN
         ),
-        onError: (VoiceError) -> Unit,
+        onError: (EkaScribeError) -> Unit,
     ) {
         if (v2RxInternal == null) {
             throw IllegalStateException("Voice2Rx SDK not initialized")
         }
         if (outputFormats.size > 2) {
-            return onError.invoke(VoiceError.SUPPORTED_OUTPUT_FORMATS_COUNT_EXCEEDED)
+            return onError.invoke(
+                EkaScribeError(
+                    sessionId = "",
+                    errorDetails = EkaScribeErrorDetails(
+                        code = VoiceError.SUPPORTED_OUTPUT_FORMATS_COUNT_EXCEEDED.name,
+                        displayMessage = "Supported output formats count exceeded. Maximum 2 formats are allowed.",
+                        message = "Supported output formats count exceeded. Maximum 2 formats are allowed.",
+                    ),
+                    voiceError = VoiceError.SUPPORTED_OUTPUT_FORMATS_COUNT_EXCEEDED
+                )
+            )
         }
         if (languages.size > 2) {
-            return onError.invoke(VoiceError.SUPPORTED_LANGUAGES_COUNT_EXCEEDED)
+            return onError.invoke(
+                EkaScribeError(
+                    sessionId = "",
+                    errorDetails = EkaScribeErrorDetails(
+                        code = VoiceError.SUPPORTED_LANGUAGES_COUNT_EXCEEDED.name,
+                        displayMessage = "Supported languages count exceeded. Maximum 2 languages are allowed.",
+                        message = "Supported languages count exceeded. Maximum 2 languages are allowed.",
+                    ),
+                    voiceError = VoiceError.SUPPORTED_LANGUAGES_COUNT_EXCEEDED
+                )
+            )
         }
         if (languages.isEmpty()) {
-            return onError.invoke(VoiceError.LANGUAGE_LIST_CAN_NOT_BE_EMPTY)
+            return onError(
+                EkaScribeError(
+                    sessionId = "",
+                    errorDetails = EkaScribeErrorDetails(
+                        code = VoiceError.LANGUAGE_LIST_CAN_NOT_BE_EMPTY.name,
+                        displayMessage = "Language list can not be empty.",
+                        message = "Language list can not be empty."
+                    ),
+                    voiceError = VoiceError.LANGUAGE_LIST_CAN_NOT_BE_EMPTY
+                )
+            )
         }
         if (outputFormats.isEmpty()) {
-            return onError.invoke(VoiceError.OUTPUT_FORMAT_LIST_CAN_NOT_BE_EMPTY)
+            return onError(
+                EkaScribeError(
+                    sessionId = "",
+                    errorDetails = EkaScribeErrorDetails(
+                        code = VoiceError.OUTPUT_FORMAT_LIST_CAN_NOT_BE_EMPTY.name,
+                        displayMessage = "Output format list can not be empty.",
+                        message = "Output format list can not be empty."
+                    ),
+                    voiceError = VoiceError.OUTPUT_FORMAT_LIST_CAN_NOT_BE_EMPTY
+                )
+            )
         }
         v2RxInternal?.startRecording(
             mode = mode,
             additionalData = additionalData,
             session = session,
             outputFormats = outputFormats,
-            languages = languages
+            languages = languages,
+            onError = onError
         )
     }
 

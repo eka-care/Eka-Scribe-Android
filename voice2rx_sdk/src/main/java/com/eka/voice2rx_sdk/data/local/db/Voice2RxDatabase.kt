@@ -30,16 +30,17 @@ abstract class Voice2RxDatabase : RoomDatabase() {
         private var INSTANCE : Voice2RxDatabase? = null
 
         fun getDatabase(context: Context) : Voice2RxDatabase {
-            return (INSTANCE ?: synchronized(this) {
-                val instance = Room.databaseBuilder(
+            return INSTANCE ?: synchronized(this) {
+                // Second check (with locking)
+                INSTANCE ?: Room.databaseBuilder(
                     context.applicationContext,
                     Voice2RxDatabase::class.java,
                     VOICE_TO_RX_DATABASE_NAME
                 ).fallbackToDestructiveMigration()
-                    .build()
-                INSTANCE = instance
-                instance
-            })
+                    .build().also {
+                        INSTANCE = it
+                    }
+            }
         }
     }
 
