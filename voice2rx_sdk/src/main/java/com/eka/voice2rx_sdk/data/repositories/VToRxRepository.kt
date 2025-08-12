@@ -155,6 +155,11 @@ internal class VToRxRepository(
                                 )
                             )
                         )
+                        updateSessionUploadStage(
+                            sessionId = sessionId,
+                            uploadStage = VoiceTransactionStage.COMMIT
+                        )
+                        goToCommitStep(sessionId = sessionId, isForceCommit = isForceCommit)
                     }
 
                     is NetworkResponse.Error -> {
@@ -176,13 +181,6 @@ internal class VToRxRepository(
                     "Voice2Rx",
                     "Stop Transaction: $sessionId request: $request response : $response"
                 )
-                if (response is NetworkResponse.Success) {
-                    updateSessionUploadStage(
-                        sessionId = sessionId,
-                        uploadStage = VoiceTransactionStage.COMMIT
-                    )
-                    goToCommitStep(sessionId = sessionId, isForceCommit = isForceCommit)
-                }
                 response
             } catch (e: Exception) {
                 Voice2Rx.logEvent(
@@ -202,7 +200,7 @@ internal class VToRxRepository(
         }
     }
 
-    private fun checkUploadingStageAndProgress(
+    internal fun checkUploadingStageAndProgress(
         sessionId: String,
         isForceCommit: Boolean = false
     ) {
@@ -300,13 +298,13 @@ internal class VToRxRepository(
                 )
                 return@launch
             }
-            val isAllUploaded =
-                voiceFiles.filter { it.fileType == VoiceFileType.CHUNK_AUDIO }.all { it.isUploaded }
+            val filteredFiles = voiceFiles.filter { it.fileType == VoiceFileType.CHUNK_AUDIO }
+            val isAllUploaded = filteredFiles.all { it.isUploaded }
             if (isAllUploaded || isForceCommit) {
                 commitVoice2RxTransaction(
                     sessionId = sessionId,
                     request = Voice2RxStopTransactionRequest(
-                        audioFiles = voiceFiles.filter { it.fileType == VoiceFileType.CHUNK_AUDIO }
+                        audioFiles = filteredFiles
                             .filter { it.isUploaded }
                             .map { it.fileName }
                             .toList(),
@@ -364,6 +362,10 @@ internal class VToRxRepository(
                                 )
                             )
                         )
+                        updateSessionUploadStage(
+                            sessionId = sessionId,
+                            uploadStage = VoiceTransactionStage.COMPLETED
+                        )
                     }
 
                     is NetworkResponse.Error -> {
@@ -385,12 +387,6 @@ internal class VToRxRepository(
                     "Voice2Rx",
                     "Commit Transaction: $sessionId request: $request response : $response"
                 )
-                if (response is NetworkResponse.Success) {
-                    updateSessionUploadStage(
-                        sessionId = sessionId,
-                        uploadStage = VoiceTransactionStage.COMPLETED
-                    )
-                }
                 response
             } catch (e: Exception) {
                 Voice2Rx.logEvent(
