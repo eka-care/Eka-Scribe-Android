@@ -8,9 +8,6 @@ import com.eka.voice2rx_sdk.data.local.models.FileInfo
 import com.eka.voice2rx_sdk.data.local.models.IncludeStatus
 import com.eka.voice2rx_sdk.sdkinit.V2RxInternal
 import com.eka.voice2rx_sdk.sdkinit.Voice2Rx
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import java.io.File
 
 internal class UploadService(
@@ -23,10 +20,9 @@ internal class UploadService(
         const val TAG = "UploadService"
     }
 
-    private val coroutineScope = CoroutineScope(Dispatchers.IO)
     private val audioCombiner = AudioCombiner()
 
-    var FILE_INDEX = 0
+    private var FILE_INDEX = 0
 
     fun processAndUpload(
         lastClipIndex1: Int,
@@ -36,28 +32,26 @@ internal class UploadService(
         if (!audioHelper.isClipping()) {
             return
         }
-        coroutineScope.launch {
-            try {
-                val audioData = audioHelper.getAudioRecordData()
-                val clippedAudioData = ArrayList<ShortArray>()
+        try {
+            val audioData = audioHelper.getAudioRecordData()
+            val clippedAudioData = ArrayList<ShortArray>()
 
-                val clipIndex = currentClipIndex
-                val lastClipIndex = lastClipIndex1
-                if (clipIndex != -1) {
-                    clippedAudioData.addAll(
-                        audioData.subList(lastClipIndex + 1, clipIndex + 1).map { it.frameData })
+            val clipIndex = currentClipIndex
+            val lastClipIndex = lastClipIndex1
+            if (clipIndex != -1) {
+                clippedAudioData.addAll(
+                    audioData.subList(lastClipIndex + 1, clipIndex + 1).map { it.frameData })
 
-                    generateAudioFileFromAudioData(
-                        audioData = getCombinedAudio(clippedAudioData),
-                        startIndex = lastClipIndex,
-                        endIndex = clipIndex,
-                        onFileUploaded = onFileUploaded
-                    )
-                    audioHelper.removeData()
-                }
-            } catch (e: Exception) {
-                VoiceLogger.d(TAG, e.printStackTrace().toString())
+                generateAudioFileFromAudioData(
+                    audioData = getCombinedAudio(clippedAudioData),
+                    startIndex = lastClipIndex,
+                    endIndex = clipIndex,
+                    onFileUploaded = onFileUploaded
+                )
+                audioHelper.removeData()
             }
+        } catch (e: Exception) {
+            VoiceLogger.d(TAG, e.printStackTrace().toString())
         }
     }
 
@@ -80,7 +74,7 @@ internal class UploadService(
         endIndex: Int,
         onFileUploaded: (String, FileInfo, IncludeStatus) -> Unit
     ) {
-        if(audioData.size < 16000) {
+        if (audioData.size < 16000) {
             onFileUploaded("", FileInfo(st = null, et = null), IncludeStatus.NOT_INCLUDED)
             return
         }
