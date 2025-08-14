@@ -73,9 +73,11 @@ data class VoiceFile(
 data class VoiceTranscriptionOutput(
     @PrimaryKey
     @SerializedName("output_id")
-    @ColumnInfo("output_id") val outputId: String,
+    @ColumnInfo("output_id")
+    val outputId: String,
     @SerializedName("session_id")
-    @ColumnInfo(name = "foreign_key") val foreignKey: String,
+    @ColumnInfo(name = "foreign_key")
+    val foreignKey: String,
     @SerializedName("name")
     @ColumnInfo(name = "name")
     val name: String?,
@@ -99,7 +101,8 @@ enum class VoiceFileType {
 @Keep
 enum class VoiceTransactionState {
     STARTED,
-    STOPPED
+    STOPPED,
+    CANCELLED,
 }
 
 @Keep
@@ -107,6 +110,7 @@ enum class VoiceTransactionStage {
     INIT,
     STOP,
     COMMIT,
+    ANALYZING,
     COMPLETED,
     ERROR
 }
