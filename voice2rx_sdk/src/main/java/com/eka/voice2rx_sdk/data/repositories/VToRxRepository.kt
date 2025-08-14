@@ -5,6 +5,7 @@ import android.util.Log
 import com.eka.voice2rx.data.remote.models.AwsS3ConfigResponse
 import com.eka.voice2rx_sdk.BuildConfig
 import com.eka.voice2rx_sdk.common.ResponseState
+import com.eka.voice2rx_sdk.common.UploadServiceConstants
 import com.eka.voice2rx_sdk.common.Voice2RxInternalUtils
 import com.eka.voice2rx_sdk.common.Voice2RxUtils
 import com.eka.voice2rx_sdk.common.voicelogger.EventCode
@@ -21,6 +22,7 @@ import com.eka.voice2rx_sdk.data.local.models.Voice2RxSessionStatus
 import com.eka.voice2rx_sdk.data.remote.models.requests.Voice2RxInitTransactionRequest
 import com.eka.voice2rx_sdk.data.remote.models.requests.Voice2RxStopTransactionRequest
 import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxInitTransactionResponse
+import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxStatus
 import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxStopTransactionResponse
 import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxTransactionResult
 import com.eka.voice2rx_sdk.data.remote.services.AwsS3UploadService
@@ -235,6 +237,12 @@ internal class VToRxRepository(
                     goToCommitStep(sessionId = sessionId, isForceCommit = isForceCommit)
                 }
 
+                VoiceTransactionStage.ANALYZING -> {
+                    fetchVoice2RxTransactionResult(
+                        sessionId = sessionId
+                    )
+                }
+
                 else -> {}
             }
         }
@@ -364,7 +372,7 @@ internal class VToRxRepository(
                         )
                         updateSessionUploadStage(
                             sessionId = sessionId,
-                            uploadStage = VoiceTransactionStage.COMPLETED
+                            uploadStage = VoiceTransactionStage.ANALYZING
                         )
                     }
 
@@ -406,10 +414,83 @@ internal class VToRxRepository(
         }
     }
 
+    fun fetchVoice2RxTransactionResult(sessionId: String) {
+        CoroutineScope(Dispatchers.IO).launch {
+            val successStates = setOf(
+                Voice2RxStatus.SUCCESS,
+                Voice2RxStatus.PARTIAL_COMPLETED
+            )
+            var retryCount = 0
+            while (retryCount < UploadServiceConstants.RESULT_FETCH_MAX_RETRY_COUNT) {
+                val session = getSessionBySessionId(sessionId = sessionId)
+                if (session == null) {
+                    VoiceLogger.e("Voice2Rx", "Session not found for sessionId: $sessionId")
+                    return@launch
+                }
+                retryCount += 1
+                if (session.uploadStage != VoiceTransactionStage.ANALYZING) {
+                    break
+                }
+                val response = getVoice2RxStatus(sessionId = sessionId)
+                when (response) {
+                    is NetworkResponse.Success -> {
+                        Voice2Rx.logEvent(
+                            EventLog.Info(
+                                code = EventCode.VOICE2RX_SESSION_LIFECYCLE,
+                                params = JSONObject(
+                                    mapOf(
+                                        "sessionId" to sessionId,
+                                        "lifecycle_event" to "result_fetch",
+                                        "retry_count" to retryCount,
+                                        "response_status" to "success",
+                                        "status" to (response.body.status?.name ?: "UNKNOWN"),
+                                    )
+                                )
+                            )
+                        )
+                        if (response.body.status == Voice2RxStatus.IN_PROGRESS) {
+                            VoiceLogger.d("Voice2Rx", "Transaction is still in progress")
+                            continue
+                        }
+                        if (response.body.status in successStates) {
+                            updateSessionUploadStage(
+                                sessionId = sessionId,
+                                uploadStage = VoiceTransactionStage.COMPLETED
+                            )
+                            break
+                        }
+                    }
+
+                    is NetworkResponse.Error -> {
+                        val errorType: String = when (response) {
+                            is NetworkResponse.NetworkError -> "Network Error"
+                            is NetworkResponse.ServerError -> "Server Error"
+                            is NetworkResponse.UnknownError -> "Unknown Error"
+                        }
+                        Voice2Rx.logEvent(
+                            EventLog.Info(
+                                code = EventCode.VOICE2RX_SESSION_ERROR,
+                                params = JSONObject(
+                                    mapOf(
+                                        "sessionId" to sessionId,
+                                        "lifecycle_event" to "result_fetch",
+                                        "response_status" to "error",
+                                        "retry_count" to retryCount,
+                                        "error_type" to errorType,
+                                        "error" to "Error fetching transaction result: ${response.body.toString()} :: ${response.error.toString()}"
+                                    )
+                                )
+                            )
+                        )
+                    }
+                }
+            }
+        }
+    }
+
     suspend fun getVoice2RxStatus(sessionId: String): NetworkResponse<Voice2RxTransactionResult, Voice2RxTransactionResult> {
         return withContext(Dispatchers.IO) {
             try {
-                checkUploadingStageAndProgress(sessionId = sessionId)
                 val response = remoteDataSource.getVoice2RxTransactionResult(sessionId = sessionId)
                 if (response is NetworkResponse.Success) {
                     saveSessionOutput(sessionId = sessionId, result = response.body)
