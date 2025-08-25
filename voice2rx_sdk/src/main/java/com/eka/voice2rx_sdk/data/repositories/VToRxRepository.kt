@@ -21,10 +21,9 @@ import com.eka.voice2rx_sdk.data.local.db.entities.VoiceTranscriptionOutput
 import com.eka.voice2rx_sdk.data.local.models.Voice2RxSessionStatus
 import com.eka.voice2rx_sdk.data.remote.models.requests.Voice2RxInitTransactionRequest
 import com.eka.voice2rx_sdk.data.remote.models.requests.Voice2RxStopTransactionRequest
+import com.eka.voice2rx_sdk.data.remote.models.responses.EkaScribeResult
 import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxInitTransactionResponse
-import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxStatus
 import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxStopTransactionResponse
-import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxTransactionResult
 import com.eka.voice2rx_sdk.data.remote.services.AwsS3UploadService
 import com.eka.voice2rx_sdk.data.remote.services.Voice2RxService
 import com.eka.voice2rx_sdk.networking.ConverterFactoryType
@@ -416,10 +415,8 @@ internal class VToRxRepository(
 
     fun fetchVoice2RxTransactionResult(sessionId: String) {
         CoroutineScope(Dispatchers.IO).launch {
-            val successStates = setOf(
-                Voice2RxStatus.SUCCESS,
-                Voice2RxStatus.PARTIAL_COMPLETED
-            )
+            val successStates = Voice2RxUtils.getOutputSuccessStates()
+            val failureStates = Voice2RxUtils.getOutputFailureState()
             var retryCount = 0
             while (retryCount < UploadServiceConstants.RESULT_FETCH_MAX_RETRY_COUNT) {
                 val session = getSessionBySessionId(sessionId = sessionId)
@@ -434,6 +431,10 @@ internal class VToRxRepository(
                 val response = getVoice2RxStatus(sessionId = sessionId)
                 when (response) {
                     is NetworkResponse.Success -> {
+                        val responseStatusList =
+                            response.body.data?.output?.map { it?.status ?: "UNKNOWN" }?.toString()
+                                ?: "UNKNOWN"
+                        val outputStatues = response.body.data?.output?.map { it?.status }
                         Voice2Rx.logEvent(
                             EventLog.Info(
                                 code = EventCode.VOICE2RX_SESSION_LIFECYCLE,
@@ -443,19 +444,26 @@ internal class VToRxRepository(
                                         "lifecycle_event" to "result_fetch",
                                         "retry_count" to retryCount,
                                         "response_status" to "success",
-                                        "status" to (response.body.status?.name ?: "UNKNOWN"),
+                                        "status" to responseStatusList,
                                     )
                                 )
                             )
                         )
-                        if (response.body.status == Voice2RxStatus.IN_PROGRESS) {
+                        if (outputStatues?.any { (it in successStates) || (it in failureStates) } != true) {
                             VoiceLogger.d("Voice2Rx", "Transaction is still in progress")
                             continue
                         }
-                        if (response.body.status in successStates) {
+                        if (outputStatues.any { it in successStates } == true) {
                             updateSessionUploadStage(
                                 sessionId = sessionId,
                                 uploadStage = VoiceTransactionStage.COMPLETED
+                            )
+                            break
+                        }
+                        if (outputStatues.all { it in failureStates }) {
+                            updateSessionUploadStage(
+                                sessionId = sessionId,
+                                uploadStage = VoiceTransactionStage.FAILURE
                             )
                             break
                         }
@@ -488,10 +496,11 @@ internal class VToRxRepository(
         }
     }
 
-    suspend fun getVoice2RxStatus(sessionId: String): NetworkResponse<Voice2RxTransactionResult, Voice2RxTransactionResult> {
+    suspend fun getVoice2RxStatus(sessionId: String): NetworkResponse<EkaScribeResult, EkaScribeResult> {
         return withContext(Dispatchers.IO) {
             try {
-                val response = remoteDataSource.getVoice2RxTransactionResult(sessionId = sessionId)
+                val response =
+                    remoteDataSource.getVoice2RxTransactionResultV3(sessionId = sessionId)
                 if (response is NetworkResponse.Success) {
                     saveSessionOutput(sessionId = sessionId, result = response.body)
                 } else if (response is NetworkResponse.Error) {
@@ -527,7 +536,7 @@ internal class VToRxRepository(
         }
     }
 
-    fun saveSessionOutput(sessionId: String, result: Voice2RxTransactionResult) {
+    fun saveSessionOutput(sessionId: String, result: EkaScribeResult) {
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 result.data?.output?.forEachIndexed { idx, it ->

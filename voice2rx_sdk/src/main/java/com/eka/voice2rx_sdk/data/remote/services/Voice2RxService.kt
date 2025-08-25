@@ -3,6 +3,7 @@ package com.eka.voice2rx_sdk.data.remote.services
 import com.eka.voice2rx.data.remote.models.AwsS3ConfigResponse
 import com.eka.voice2rx_sdk.data.remote.models.requests.Voice2RxInitTransactionRequest
 import com.eka.voice2rx_sdk.data.remote.models.requests.Voice2RxStopTransactionRequest
+import com.eka.voice2rx_sdk.data.remote.models.responses.EkaScribeResult
 import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxInitTransactionResponse
 import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxStopTransactionResponse
 import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxTransactionResult
@@ -23,6 +24,11 @@ interface Voice2RxService {
     suspend fun getVoice2RxTransactionResult(
         @Path("session_id") sessionId: String,
     ): NetworkResponse<Voice2RxTransactionResult, Voice2RxTransactionResult>
+
+    @GET("voice/api/v3/status/{session_id}")
+    suspend fun getVoice2RxTransactionResultV3(
+        @Path("session_id") sessionId: String,
+    ): NetworkResponse<EkaScribeResult, EkaScribeResult>
 
     @POST("voice/api/v2/transaction/init/{session_id}")
     suspend fun initTransaction(

@@ -112,5 +112,6 @@ enum class VoiceTransactionStage {
     COMMIT,
     ANALYZING,
     COMPLETED,
+    FAILURE,
     ERROR
 }
