@@ -31,22 +31,13 @@ enum class Voice2RxStatus {
     @SerializedName("in-progress")
     IN_PROGRESS,
 
-    @SerializedName("init")
-    INIT,
-
-    @SerializedName("stop")
-    STOP,
-
-    @SerializedName("commit")
-    COMMIT,
-
     @SerializedName("success")
     SUCCESS,
 
     @SerializedName("failure")
     FAILURE,
 
-    @SerializedName("partial_complete")
+    @SerializedName("partial_success")
     PARTIAL_COMPLETED;
 
     companion object {

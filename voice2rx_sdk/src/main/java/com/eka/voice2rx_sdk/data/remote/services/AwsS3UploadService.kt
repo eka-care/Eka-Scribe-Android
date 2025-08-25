@@ -12,6 +12,7 @@ import com.amazonaws.services.s3.AmazonS3Client
 import com.amazonaws.services.s3.model.ObjectMetadata
 import com.eka.voice2rx_sdk.common.ResponseState
 import com.eka.voice2rx_sdk.common.UploadListener
+import com.eka.voice2rx_sdk.common.UploadServiceConstants
 import com.eka.voice2rx_sdk.common.Voice2RxInternalUtils
 import com.eka.voice2rx_sdk.common.Voice2RxUtils
 import com.eka.voice2rx_sdk.common.voicelogger.EventCode
@@ -52,26 +53,22 @@ object AwsS3UploadService {
         retryCount: Int = 0
     ) {
         val config = V2RxInternal.s3Config
-            ?: if (retryCount > 0) {
+            ?: if (retryCount > UploadServiceConstants.MAX_UPLOAD_RETRY_COUNT) {
                 VoiceLogger.d("AwsS3UploadService", "Credential is null!")
                 onResponse(ResponseState.Error("Credential is null!"))
                 return
             } else {
-                V2RxInternal.getS3Config {
-                    if (it) {
-                        uploadFileToS3(
-                            context = context,
-                            fileName = fileName,
-                            file = file,
-                            folderName = folderName,
-                            sessionId = sessionId,
-                            voiceFileType = voiceFileType,
-                            onResponse = onResponse,
-                            retryCount = retryCount + 1,
-                            bid = bid
-                        )
-                    }
-                }
+                retryFileUpload(
+                    context = context,
+                    fileName = fileName,
+                    file = file,
+                    folderName = folderName,
+                    sessionId = sessionId,
+                    voiceFileType = voiceFileType,
+                    onResponse = onResponse,
+                    retryCount = retryCount,
+                    bid = bid
+                )
                 return
             }
         TransferNetworkLossHandler.getInstance(context.applicationContext)
@@ -114,7 +111,8 @@ object AwsS3UploadService {
                     mapOf(
                         "sessionId" to sessionId,
                         "fileName" to fileName,
-                        "upload" to "started"
+                        "upload" to "started",
+                        "retryCount" to retryCount,
                     )
                 )
             )
@@ -129,7 +127,8 @@ object AwsS3UploadService {
                             mapOf(
                                 "sessionId" to sessionId,
                                 "fileName" to fileName,
-                                "upload" to state?.name
+                                "upload" to state?.name,
+                                "retryCount" to retryCount,
                             )
                         )
                     )
@@ -148,11 +147,25 @@ object AwsS3UploadService {
                     }
 
                     TransferState.FAILED -> {
-                        onResponse(ResponseState.Error("FAILED"))
-                        uploadListener?.onError(
-                            sessionId = sessionId,
+                        if (retryCount > UploadServiceConstants.MAX_UPLOAD_RETRY_COUNT) {
+                            onResponse(ResponseState.Error("FAILED"))
+                            uploadListener?.onError(
+                                sessionId = sessionId,
+                                fileName = fileName,
+                                errorMsg = "FAILED"
+                            )
+                            return
+                        }
+                        retryFileUpload(
+                            context = context,
                             fileName = fileName,
-                            errorMsg = "FAILED"
+                            file = file,
+                            folderName = folderName,
+                            sessionId = sessionId,
+                            voiceFileType = voiceFileType,
+                            onResponse = onResponse,
+                            retryCount = retryCount,
+                            bid = bid
                         )
                     }
 
@@ -175,12 +188,27 @@ object AwsS3UploadService {
             }
 
             override fun onError(id: Int, ex: Exception?) {
-                uploadListener?.onError(
-                    sessionId = sessionId,
+                if (retryCount > UploadServiceConstants.MAX_UPLOAD_RETRY_COUNT) {
+                    onResponse(ResponseState.Error("FAILED"))
+                    uploadListener?.onError(
+                        sessionId = sessionId,
+                        fileName = fileName,
+                        errorMsg = "FAILED"
+                    )
+                    return
+                }
+                VoiceLogger.d(TAG, "Upload failed, retrying... Retry count: $retryCount")
+                retryFileUpload(
+                    context = context,
                     fileName = fileName,
-                    errorMsg = "CANCELED"
+                    file = file,
+                    folderName = folderName,
+                    sessionId = sessionId,
+                    voiceFileType = voiceFileType,
+                    onResponse = onResponse,
+                    retryCount = retryCount,
+                    bid = bid
                 )
-                onResponse(ResponseState.Error("FAILED"))
             }
         })
     }
@@ -250,6 +278,34 @@ object AwsS3UploadService {
                     file.delete()
                 } catch (e: Exception) {
                 }
+            }
+        }
+    }
+
+    private fun retryFileUpload(
+        context: Context,
+        fileName: String,
+        file: File,
+        folderName: String,
+        sessionId: String,
+        voiceFileType: VoiceFileType,
+        onResponse: (ResponseState) -> Unit,
+        retryCount: Int,
+        bid: String
+    ) {
+        V2RxInternal.getS3Config {
+            if (it) {
+                uploadFileToS3(
+                    context = context,
+                    fileName = fileName,
+                    file = file,
+                    folderName = folderName,
+                    sessionId = sessionId,
+                    voiceFileType = voiceFileType,
+                    onResponse = onResponse,
+                    retryCount = retryCount + 1,
+                    bid = bid
+                )
             }
         }
     }
