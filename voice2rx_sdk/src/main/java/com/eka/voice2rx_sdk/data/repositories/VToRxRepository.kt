@@ -449,18 +449,18 @@ internal class VToRxRepository(
                                 )
                             )
                         )
-                        if (outputStatues?.any { (it in successStates) || (it in failureStates) } != true) {
+                        if (response.code == 202) {
                             VoiceLogger.d("Voice2Rx", "Transaction is still in progress")
                             continue
                         }
-                        if (outputStatues.any { it in successStates } == true) {
+                        if (outputStatues?.any { it in successStates } == true) {
                             updateSessionUploadStage(
                                 sessionId = sessionId,
                                 uploadStage = VoiceTransactionStage.COMPLETED
                             )
                             break
                         }
-                        if (outputStatues.all { it in failureStates }) {
+                        if (outputStatues?.all { it in failureStates } == true) {
                             updateSessionUploadStage(
                                 sessionId = sessionId,
                                 uploadStage = VoiceTransactionStage.FAILURE
