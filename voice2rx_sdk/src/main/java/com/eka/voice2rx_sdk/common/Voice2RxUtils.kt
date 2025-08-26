@@ -7,6 +7,7 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.Build
 import androidx.core.content.ContextCompat
+import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxStatus
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -88,5 +89,13 @@ object Voice2RxUtils {
             }
         }
         return false
+    }
+
+    fun getOutputSuccessStates(): Set<Voice2RxStatus> {
+        return setOf(Voice2RxStatus.SUCCESS, Voice2RxStatus.PARTIAL_COMPLETED)
+    }
+
+    fun getOutputFailureState(): Set<Voice2RxStatus> {
+        return setOf(Voice2RxStatus.FAILURE)
     }
 }

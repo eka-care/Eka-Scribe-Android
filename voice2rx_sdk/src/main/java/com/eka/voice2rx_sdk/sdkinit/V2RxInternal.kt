@@ -36,6 +36,7 @@ import com.eka.voice2rx_sdk.data.remote.models.requests.Voice2RxInitTransactionR
 import com.eka.voice2rx_sdk.data.remote.models.requests.Voice2RxStopTransactionRequest
 import com.eka.voice2rx_sdk.data.remote.models.responses.EkaScribeErrorDetails
 import com.eka.voice2rx_sdk.data.remote.models.responses.TemplateId
+import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxStatus
 import com.eka.voice2rx_sdk.data.remote.services.AwsS3UploadService
 import com.eka.voice2rx_sdk.data.repositories.VToRxRepository
 import com.eka.voice2rx_sdk.recorder.AudioCallback
@@ -388,11 +389,21 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
     suspend fun getVoice2RxStatus(sessionId: String): SessionStatus {
         val response = repository.getVoice2RxStatus(sessionId)
         VoiceLogger.d(TAG, "Session Status : ${response.toString()}")
+        val successStates = Voice2RxUtils.getOutputSuccessStates()
+        val failureStates = Voice2RxUtils.getOutputFailureState()
         return when (response) {
             is NetworkResponse.Success -> {
+                val sessionResult = response.body.data?.output?.map { it?.status }
+                var sessionStatus = Voice2RxStatus.IN_PROGRESS
+                if (sessionResult?.any { it in successStates } == true) {
+                    sessionStatus = Voice2RxStatus.SUCCESS
+                }
+                if (sessionResult?.all { it in failureStates } == true) {
+                    sessionStatus = Voice2RxStatus.FAILURE
+                }
                 SessionStatus(
                     sessionId = sessionId,
-                    status = response.body.status,
+                    status = sessionStatus,
                     error = null
                 )
             }
