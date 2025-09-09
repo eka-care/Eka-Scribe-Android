@@ -22,6 +22,7 @@ import com.eka.voice2rx_sdk.data.local.models.Voice2RxSessionStatus
 import com.eka.voice2rx_sdk.data.remote.models.requests.Voice2RxInitTransactionRequest
 import com.eka.voice2rx_sdk.data.remote.models.requests.Voice2RxStopTransactionRequest
 import com.eka.voice2rx_sdk.data.remote.models.responses.EkaScribeResult
+import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxHistoryResponse
 import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxInitTransactionResponse
 import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxStopTransactionResponse
 import com.eka.voice2rx_sdk.data.remote.services.AwsS3UploadService
@@ -777,6 +778,66 @@ internal class VToRxRepository(
             }
             catch (_ : Exception) {
                 emptyList<VToRxSession>()
+            }
+        }
+    }
+
+    suspend fun getVoice2RxHistory(queries: Int?): Voice2RxHistoryResponse {
+        return withContext(Dispatchers.IO) {
+            val queryMap = if (queries != null) {
+                mapOf("count" to queries.toString())
+            } else {
+                emptyMap()
+            }
+            try {
+                Voice2Rx.logEvent(
+                    EventLog.Info(
+                        code = EventCode.VOICE2RX_SESSION_LIFECYCLE,
+                        params = JSONObject(
+                            mapOf(
+                                "lifecycle_event" to "get_history",
+                                "queries" to queryMap.toString()
+                            )
+                        )
+                    )
+                )
+                val response = remoteDataSource.getHistory(queries = queryMap)
+                VoiceLogger.d(
+                    "Voice2Rx",
+                    "Get History request: $queries response : $response"
+                )
+                when (response) {
+                    is NetworkResponse.Success -> {
+                        response.body
+                    }
+                    is NetworkResponse.Error -> {
+                        Voice2Rx.logEvent(
+                            EventLog.Info(
+                                code = EventCode.VOICE2RX_SESSION_ERROR,
+                                params = JSONObject(
+                                    mapOf(
+                                        "lifecycle_event" to "get_history",
+                                        "error" to "Error getting history: ${response.body.toString()} :: ${response.error.toString()}"
+                                    )
+                                )
+                            )
+                        )
+                        Voice2RxHistoryResponse(data = null)
+                    }
+                }
+            } catch (e: Exception) {
+                Voice2Rx.logEvent(
+                    EventLog.Info(
+                        code = EventCode.VOICE2RX_SESSION_ERROR,
+                        params = JSONObject(
+                            mapOf(
+                                "lifecycle_event" to "get_history",
+                                "error" to "Error getting history: ${e.message}",
+                            )
+                        )
+                    )
+                )
+                Voice2RxHistoryResponse(data = null)
             }
         }
     }
