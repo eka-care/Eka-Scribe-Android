@@ -234,6 +234,13 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
     ) {
         coroutineScope.launch {
             if (!Voice2RxUtils.isRecordAudioPermissionGranted(app)) {
+                onError(
+                    EkaScribeError(
+                        sessionId = session,
+                        errorDetails = null,
+                        voiceError = VoiceError.MICROPHONE_PERMISSION_NOT_GRANTED
+                    )
+                )
                 Voice2Rx.getVoice2RxInitConfiguration().voice2RxLifecycle.onError(
                     EkaScribeError(
                         sessionId = session,
@@ -278,9 +285,8 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
             initVoice2RxTransaction(
                 mode = mode,
                 onError = {
-                    Voice2Rx.getVoice2RxInitConfiguration().voice2RxLifecycle.onError(
-                        it
-                    )
+                    onError(it)
+                    Voice2Rx.getVoice2RxInitConfiguration().voice2RxLifecycle.onError(it)
                 },
                 onSuccess = {
                     vad = Vad.builder()
@@ -393,8 +399,15 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
         val failureStates = Voice2RxUtils.getOutputFailureState()
         return when (response) {
             is NetworkResponse.Success -> {
-                val sessionResult = response.body.data?.output?.map { it?.status }
                 var sessionStatus = Voice2RxStatus.IN_PROGRESS
+                if (response.code == 202) {
+                    SessionStatus(
+                        sessionId = sessionId,
+                        status = sessionStatus,
+                        error = null
+                    )
+                }
+                val sessionResult = response.body.data?.output?.map { it?.status }
                 if (sessionResult?.any { it in successStates } == true) {
                     sessionStatus = Voice2RxStatus.SUCCESS
                 }
