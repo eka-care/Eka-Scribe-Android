@@ -22,6 +22,7 @@ import com.eka.voice2rx_sdk.data.remote.models.requests.AdditionalData
 import com.eka.voice2rx_sdk.data.remote.models.requests.SupportedLanguages
 import com.eka.voice2rx_sdk.data.remote.models.responses.EkaScribeErrorDetails
 import com.eka.voice2rx_sdk.data.remote.models.responses.TemplateId
+import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxHistoryResponse
 import com.eka.voice2rx_sdk.networking.ConverterFactoryType
 import com.eka.voice2rx_sdk.networking.Networking
 import com.eka.voice2rx_sdk.sdkinit.ekaauth.OkHttpImpl
@@ -233,6 +234,10 @@ object Voice2Rx {
 
     suspend fun getSessionsByOwnerId(ownerId : String) : List<VToRxSession>? {
         return v2RxInternal?.getSessionsByOwnerId(ownerId)
+    }
+
+    suspend fun getHistoryVoice2Rx(count: Int ?= null): Voice2RxHistoryResponse? {
+        return v2RxInternal?.getHistory(count)
     }
 
     suspend fun getSessions() : List<VToRxSession>? {
