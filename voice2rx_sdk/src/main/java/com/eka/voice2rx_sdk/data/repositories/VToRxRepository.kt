@@ -790,53 +790,16 @@ internal class VToRxRepository(
                 emptyMap()
             }
             try {
-                Voice2Rx.logEvent(
-                    EventLog.Info(
-                        code = EventCode.VOICE2RX_SESSION_LIFECYCLE,
-                        params = JSONObject(
-                            mapOf(
-                                "lifecycle_event" to "get_history",
-                                "queries" to queryMap.toString()
-                            )
-                        )
-                    )
-                )
                 val response = remoteDataSource.getHistory(queries = queryMap)
-                VoiceLogger.d(
-                    "Voice2Rx",
-                    "Get History request: $queries response : $response"
-                )
                 when (response) {
                     is NetworkResponse.Success -> {
                         response.body
                     }
                     is NetworkResponse.Error -> {
-                        Voice2Rx.logEvent(
-                            EventLog.Info(
-                                code = EventCode.VOICE2RX_SESSION_ERROR,
-                                params = JSONObject(
-                                    mapOf(
-                                        "lifecycle_event" to "get_history",
-                                        "error" to "Error getting history: ${response.body.toString()} :: ${response.error.toString()}"
-                                    )
-                                )
-                            )
-                        )
                         Voice2RxHistoryResponse(data = null)
                     }
                 }
             } catch (e: Exception) {
-                Voice2Rx.logEvent(
-                    EventLog.Info(
-                        code = EventCode.VOICE2RX_SESSION_ERROR,
-                        params = JSONObject(
-                            mapOf(
-                                "lifecycle_event" to "get_history",
-                                "error" to "Error getting history: ${e.message}",
-                            )
-                        )
-                    )
-                )
                 Voice2RxHistoryResponse(data = null)
             }
         }

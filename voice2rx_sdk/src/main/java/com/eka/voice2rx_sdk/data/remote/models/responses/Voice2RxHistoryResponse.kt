@@ -1,6 +1,7 @@
 package com.eka.voice2rx_sdk.data.remote.models.responses
 
 import androidx.annotation.Keep
+import com.eka.voice2rx_sdk.data.local.models.Voice2RxType
 import com.google.gson.annotations.SerializedName
 
 @Keep
@@ -18,7 +19,7 @@ data class Voice2RxHistoryItem(
     @SerializedName("flavour")
     var flavour: String?,
     @SerializedName("mode")
-    var mode: String?,
+    var mode: Voice2RxType?,
     @SerializedName("oid")
     var oid: String?,
     @SerializedName("processing_status")
