@@ -404,7 +404,8 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
                     SessionStatus(
                         sessionId = sessionId,
                         status = sessionStatus,
-                        error = null
+                        error = null,
+                        ekaScribeResult = null
                     )
                 }
                 val sessionResult = response.body.data?.output?.map { it?.status }
@@ -417,7 +418,8 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
                 SessionStatus(
                     sessionId = sessionId,
                     status = sessionStatus,
-                    error = null
+                    error = null,
+                    ekaScribeResult = response.body.data?.output
                 )
             }
 
