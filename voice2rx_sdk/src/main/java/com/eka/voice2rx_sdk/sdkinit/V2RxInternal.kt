@@ -395,13 +395,42 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
     suspend fun getVoice2RxStatus(sessionId: String): SessionStatus {
         val response = repository.getVoice2RxStatus(sessionId)
         VoiceLogger.d(TAG, "Session Status : ${response.toString()}")
+        Voice2Rx.logEvent(
+            EventLog.Info(
+                code = EventCode.VOICE2RX_SESSION_STATUS,
+                params = JSONObject(
+                    mapOf(
+                        "sessionId" to sessionId,
+                        "lifecycle_event" to "session_result",
+                        "response" to response
+                    )
+                )
+            )
+        )
         val successStates = Voice2RxUtils.getOutputSuccessStates()
         val failureStates = Voice2RxUtils.getOutputFailureState()
         return when (response) {
             is NetworkResponse.Success -> {
                 var sessionStatus = Voice2RxStatus.IN_PROGRESS
                 if (response.code == 202) {
-                    SessionStatus(
+                    Voice2Rx.logEvent(
+                        EventLog.Info(
+                            code = EventCode.VOICE2RX_SESSION_STATUS,
+                            params = JSONObject(
+                                mapOf(
+                                    "sessionId" to sessionId,
+                                    "lifecycle_event" to "session_result",
+                                    "response_code" to response.code,
+                                    "response" to response
+                                )
+                            )
+                        )
+                    )
+                    VoiceLogger.d(
+                        TAG,
+                        "Session Status response code 202 : $response ${response.code}"
+                    )
+                    return SessionStatus(
                         sessionId = sessionId,
                         status = sessionStatus,
                         error = null,
@@ -424,6 +453,7 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
             }
 
             is NetworkResponse.NetworkError -> {
+                VoiceLogger.d(TAG, "Network Error Session Status response code 202 : $response")
                 SessionStatus(
                     sessionId = sessionId,
                     status = null,
@@ -435,6 +465,18 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
             }
 
             is NetworkResponse.ServerError -> {
+                if (response.code == 202) {
+                    VoiceLogger.d(
+                        TAG,
+                        "ServerError Session Status response code 202 : $response ${response.code}"
+                    )
+                    SessionStatus(
+                        sessionId = sessionId,
+                        status = Voice2RxStatus.IN_PROGRESS,
+                        error = null,
+                        ekaScribeResult = null
+                    )
+                }
                 SessionStatus(
                     sessionId = sessionId,
                     status = null,
