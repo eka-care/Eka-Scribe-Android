@@ -4,7 +4,8 @@ plugins {
     id("com.android.library")
     id("org.jetbrains.kotlin.android")
     id("maven-publish")
-    id("kotlin-kapt")
+    id("com.google.devtools.ksp")
+    kotlin("kapt")
 }
 
 val config =
@@ -86,8 +87,13 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
+    publishing {
+        singleVariant("release") {
+            withSourcesJar()
+            withJavadocJar()
+        }
+    }
 }
-
 
 afterEvaluate {
     publishing {
@@ -109,7 +115,7 @@ dependencies {
     api(libs.silero)
     implementation(libs.aws.android.sdk.s3)
     implementation(libs.aws.android.sdk.core)
-    kapt(libs.room.compiler)
+    ksp(libs.room.compiler)
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)
     implementation(libs.google.gson)
