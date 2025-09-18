@@ -4,7 +4,6 @@ plugins {
     id("com.android.library")
     id("org.jetbrains.kotlin.android")
     id("maven-publish")
-    id("kotlin-parcelize")
     id("com.google.devtools.ksp")
     kotlin("kapt")
 }
