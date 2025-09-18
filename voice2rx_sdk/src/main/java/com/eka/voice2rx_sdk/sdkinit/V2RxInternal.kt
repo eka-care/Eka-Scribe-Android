@@ -235,6 +235,13 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
     ) {
         coroutineScope.launch {
             if (!Voice2RxUtils.isRecordAudioPermissionGranted(app)) {
+                onError(
+                    EkaScribeError(
+                        sessionId = session,
+                        errorDetails = null,
+                        voiceError = VoiceError.MICROPHONE_PERMISSION_NOT_GRANTED
+                    )
+                )
                 Voice2Rx.getVoice2RxInitConfiguration().voice2RxLifecycle.onError(
                     EkaScribeError(
                         sessionId = session,
@@ -279,9 +286,8 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
             initVoice2RxTransaction(
                 mode = mode,
                 onError = {
-                    Voice2Rx.getVoice2RxInitConfiguration().voice2RxLifecycle.onError(
-                        it
-                    )
+                    onError(it)
+                    Voice2Rx.getVoice2RxInitConfiguration().voice2RxLifecycle.onError(it)
                 },
                 onSuccess = {
                     vad = Vad.builder()
@@ -390,12 +396,49 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
     suspend fun getVoice2RxStatus(sessionId: String): SessionStatus {
         val response = repository.getVoice2RxStatus(sessionId)
         VoiceLogger.d(TAG, "Session Status : ${response.toString()}")
+        Voice2Rx.logEvent(
+            EventLog.Info(
+                code = EventCode.VOICE2RX_SESSION_STATUS,
+                params = JSONObject(
+                    mapOf(
+                        "sessionId" to sessionId,
+                        "lifecycle_event" to "session_result",
+                        "response" to response
+                    )
+                )
+            )
+        )
         val successStates = Voice2RxUtils.getOutputSuccessStates()
         val failureStates = Voice2RxUtils.getOutputFailureState()
         return when (response) {
             is NetworkResponse.Success -> {
-                val sessionResult = response.body.data?.output?.map { it?.status }
                 var sessionStatus = Voice2RxStatus.IN_PROGRESS
+                if (response.code == 202) {
+                    Voice2Rx.logEvent(
+                        EventLog.Info(
+                            code = EventCode.VOICE2RX_SESSION_STATUS,
+                            params = JSONObject(
+                                mapOf(
+                                    "sessionId" to sessionId,
+                                    "lifecycle_event" to "session_result",
+                                    "response_code" to response.code,
+                                    "response" to response
+                                )
+                            )
+                        )
+                    )
+                    VoiceLogger.d(
+                        TAG,
+                        "Session Status response code 202 : $response ${response.code}"
+                    )
+                    return SessionStatus(
+                        sessionId = sessionId,
+                        status = sessionStatus,
+                        error = null,
+                        ekaScribeResult = null
+                    )
+                }
+                val sessionResult = response.body.data?.output?.map { it?.status }
                 if (sessionResult?.any { it in successStates } == true) {
                     sessionStatus = Voice2RxStatus.SUCCESS
                 }
@@ -405,11 +448,13 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
                 SessionStatus(
                     sessionId = sessionId,
                     status = sessionStatus,
-                    error = null
+                    error = null,
+                    ekaScribeResult = response.body.data?.output
                 )
             }
 
             is NetworkResponse.NetworkError -> {
+                VoiceLogger.d(TAG, "Network Error Session Status response code 202 : $response")
                 SessionStatus(
                     sessionId = sessionId,
                     status = null,
@@ -421,6 +466,18 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
             }
 
             is NetworkResponse.ServerError -> {
+                if (response.code == 202) {
+                    VoiceLogger.d(
+                        TAG,
+                        "ServerError Session Status response code 202 : $response ${response.code}"
+                    )
+                    SessionStatus(
+                        sessionId = sessionId,
+                        status = Voice2RxStatus.IN_PROGRESS,
+                        error = null,
+                        ekaScribeResult = null
+                    )
+                }
                 SessionStatus(
                     sessionId = sessionId,
                     status = null,
