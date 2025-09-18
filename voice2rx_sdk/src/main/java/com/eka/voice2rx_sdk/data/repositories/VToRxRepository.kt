@@ -22,6 +22,7 @@ import com.eka.voice2rx_sdk.data.local.models.Voice2RxSessionStatus
 import com.eka.voice2rx_sdk.data.remote.models.requests.Voice2RxInitTransactionRequest
 import com.eka.voice2rx_sdk.data.remote.models.requests.Voice2RxStopTransactionRequest
 import com.eka.voice2rx_sdk.data.remote.models.responses.EkaScribeResult
+import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxHistoryResponse
 import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxInitTransactionResponse
 import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxStopTransactionResponse
 import com.eka.voice2rx_sdk.data.remote.services.AwsS3UploadService
@@ -777,6 +778,29 @@ internal class VToRxRepository(
             }
             catch (_ : Exception) {
                 emptyList<VToRxSession>()
+            }
+        }
+    }
+
+    suspend fun getVoice2RxHistory(queries: Int?): Voice2RxHistoryResponse {
+        return withContext(Dispatchers.IO) {
+            val queryMap = if (queries != null) {
+                mapOf("count" to queries.toString())
+            } else {
+                emptyMap()
+            }
+            try {
+                val response = remoteDataSource.getHistory(queries = queryMap)
+                when (response) {
+                    is NetworkResponse.Success -> {
+                        response.body
+                    }
+                    is NetworkResponse.Error -> {
+                        Voice2RxHistoryResponse(data = null)
+                    }
+                }
+            } catch (e: Exception) {
+                Voice2RxHistoryResponse(data = null)
             }
         }
     }
