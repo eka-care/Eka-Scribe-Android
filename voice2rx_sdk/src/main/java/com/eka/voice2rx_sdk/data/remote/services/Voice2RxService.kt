@@ -4,6 +4,7 @@ import com.eka.voice2rx.data.remote.models.AwsS3ConfigResponse
 import com.eka.voice2rx_sdk.data.remote.models.requests.Voice2RxInitTransactionRequest
 import com.eka.voice2rx_sdk.data.remote.models.requests.Voice2RxStopTransactionRequest
 import com.eka.voice2rx_sdk.data.remote.models.responses.EkaScribeResult
+import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxHistoryResponse
 import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxInitTransactionResponse
 import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxStopTransactionResponse
 import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxTransactionResult
@@ -12,6 +13,7 @@ import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.POST
 import retrofit2.http.Path
+import retrofit2.http.QueryMap
 import retrofit2.http.Url
 
 interface Voice2RxService {
@@ -47,4 +49,9 @@ interface Voice2RxService {
         @Path("session_id") sessionId: String,
         @Body request: Voice2RxStopTransactionRequest
     ): NetworkResponse<Voice2RxStopTransactionResponse, Voice2RxStopTransactionResponse>
+
+    @GET("voice/api/v2/transaction/history")
+    suspend fun getHistory(
+        @QueryMap queries: Map<String, String>
+    ): NetworkResponse<Voice2RxHistoryResponse, Voice2RxHistoryResponse>
 }

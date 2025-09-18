@@ -36,6 +36,7 @@ import com.eka.voice2rx_sdk.data.remote.models.requests.Voice2RxInitTransactionR
 import com.eka.voice2rx_sdk.data.remote.models.requests.Voice2RxStopTransactionRequest
 import com.eka.voice2rx_sdk.data.remote.models.responses.EkaScribeErrorDetails
 import com.eka.voice2rx_sdk.data.remote.models.responses.TemplateId
+import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxHistoryResponse
 import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxStatus
 import com.eka.voice2rx_sdk.data.remote.services.AwsS3UploadService
 import com.eka.voice2rx_sdk.data.repositories.VToRxRepository
@@ -587,6 +588,10 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
         return repository.getSessionsByOwnerId(
             ownerId = ownerId,
         )
+    }
+
+    suspend fun getHistory(count : Int ?= null): Voice2RxHistoryResponse {
+        return repository.getVoice2RxHistory(queries = count)
     }
 
     suspend fun getAllSessions(): List<VToRxSession> {
