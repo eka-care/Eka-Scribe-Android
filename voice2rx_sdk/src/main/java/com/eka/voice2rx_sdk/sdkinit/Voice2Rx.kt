@@ -19,6 +19,7 @@ import com.eka.voice2rx_sdk.data.local.models.Voice2RxType
 import com.eka.voice2rx_sdk.data.remote.models.Error
 import com.eka.voice2rx_sdk.data.remote.models.SessionStatus
 import com.eka.voice2rx_sdk.data.remote.models.requests.AdditionalData
+import com.eka.voice2rx_sdk.data.remote.models.requests.ModelType
 import com.eka.voice2rx_sdk.data.remote.models.requests.SupportedLanguages
 import com.eka.voice2rx_sdk.data.remote.models.responses.EkaScribeErrorDetails
 import com.eka.voice2rx_sdk.data.remote.models.responses.TemplateId
@@ -147,6 +148,7 @@ object Voice2Rx {
             SupportedLanguages.EN_IN,
             SupportedLanguages.HI_IN
         ),
+        modelType: ModelType = ModelType.PRO,
         onError: (EkaScribeError) -> Unit,
     ) {
         if (v2RxInternal == null) {
@@ -206,11 +208,12 @@ object Voice2Rx {
         }
         v2RxInternal?.startRecording(
             mode = mode,
+            modelType = modelType,
             additionalData = additionalData,
             session = session,
             outputFormats = outputFormats,
             languages = languages,
-            onError = onError
+            onError = onError,
         )
     }
 
