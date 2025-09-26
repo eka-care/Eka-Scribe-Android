@@ -233,7 +233,8 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
             SupportedLanguages.HI_IN
         ),
         modelType: ModelType = ModelType.PRO,
-        onError: (EkaScribeError) -> Unit = {}
+        onError: (EkaScribeError) -> Unit = {},
+        onStart: (String) -> Unit
     ) {
         coroutineScope.launch {
             if (!Voice2RxUtils.isRecordAudioPermissionGranted(app)) {
@@ -331,6 +332,7 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
                         vad.sampleRate.value,
                         vad.frameSize.value
                     )
+                    onStart(sessionId)
                     config.voice2RxLifecycle.onStartSession(sessionId)
                 }
             )
@@ -350,6 +352,7 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
             )
         )
         recorder.pauseListening()
+        Voice2Rx.getVoice2RxInitConfiguration().voice2RxLifecycle.onPauseSession(sessionId)
     }
 
     fun resumeRecording() {
@@ -365,6 +368,7 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
             )
         )
         recorder.resumeListening()
+        Voice2Rx.getVoice2RxInitConfiguration().voice2RxLifecycle.onResumeSession(sessionId)
     }
 
     fun stopRecording() {
