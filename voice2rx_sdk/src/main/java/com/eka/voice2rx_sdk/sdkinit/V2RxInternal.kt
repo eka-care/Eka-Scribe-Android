@@ -30,6 +30,7 @@ import com.eka.voice2rx_sdk.data.local.models.VoiceSessionData
 import com.eka.voice2rx_sdk.data.remote.models.Error
 import com.eka.voice2rx_sdk.data.remote.models.SessionStatus
 import com.eka.voice2rx_sdk.data.remote.models.requests.AdditionalData
+import com.eka.voice2rx_sdk.data.remote.models.requests.ModelType
 import com.eka.voice2rx_sdk.data.remote.models.requests.OutputFormatTemplate
 import com.eka.voice2rx_sdk.data.remote.models.requests.SupportedLanguages
 import com.eka.voice2rx_sdk.data.remote.models.requests.Voice2RxInitTransactionRequest
@@ -231,7 +232,9 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
             SupportedLanguages.EN_IN,
             SupportedLanguages.HI_IN
         ),
-        onError: (EkaScribeError) -> Unit = {}
+        modelType: ModelType = ModelType.PRO,
+        onError: (EkaScribeError) -> Unit = {},
+        onStart: (String) -> Unit
     ) {
         coroutineScope.launch {
             if (!Voice2RxUtils.isRecordAudioPermissionGranted(app)) {
@@ -289,6 +292,7 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
                     onError(it)
                     Voice2Rx.getVoice2RxInitConfiguration().voice2RxLifecycle.onError(it)
                 },
+                modelType = modelType,
                 onSuccess = {
                     vad = Vad.builder()
                         .setContext(app)
@@ -328,6 +332,7 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
                         vad.sampleRate.value,
                         vad.frameSize.value
                     )
+                    onStart(sessionId)
                     config.voice2RxLifecycle.onStartSession(sessionId)
                 }
             )
@@ -347,6 +352,7 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
             )
         )
         recorder.pauseListening()
+        Voice2Rx.getVoice2RxInitConfiguration().voice2RxLifecycle.onPauseSession(sessionId)
     }
 
     fun resumeRecording() {
@@ -362,6 +368,7 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
             )
         )
         recorder.resumeListening()
+        Voice2Rx.getVoice2RxInitConfiguration().voice2RxLifecycle.onResumeSession(sessionId)
     }
 
     fun stopRecording() {
@@ -699,6 +706,7 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
 
     private suspend fun initVoice2RxTransaction(
         mode: Voice2RxType,
+        modelType: ModelType,
         onError: (EkaScribeError) -> Unit,
         onSuccess: () -> Unit
     ) {
@@ -714,6 +722,7 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
                 patient = currentAdditionalData?.patient,
                 visitid = visitId,
             ),
+            modelType = modelType,
             inputLanguage = currentlySelectedLanguage.map { it.value },
             mode = mode,
             s3Url = s3Url,

@@ -22,8 +22,19 @@ data class Voice2RxInitTransactionRequest(
     @SerializedName("speciality")
     var speciality: String?,
     @SerializedName("transfer")
-    var transfer: String = "vaded"
+    var transfer: String = "vaded",
+    @SerializedName("model_type")
+    var modelType: ModelType = ModelType.PRO
 )
+
+@Keep
+enum class ModelType(val value: String) {
+    @SerializedName("pro")
+    PRO("pro"),
+
+    @SerializedName("lite")
+    LITE("lite")
+}
 
 //{ id: 'en-IN', name: 'English (India)' },
 //{ id: 'en-US', name: 'English (United States)' },
