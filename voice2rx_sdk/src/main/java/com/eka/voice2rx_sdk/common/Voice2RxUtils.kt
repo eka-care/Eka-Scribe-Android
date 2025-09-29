@@ -51,7 +51,7 @@ object Voice2RxUtils {
     }
 
     fun generateNewSessionId() : String {
-        return UUID.randomUUID().toString() + "_" + System.currentTimeMillis()
+        return "a-" + UUID.randomUUID().toString()
     }
 
     fun getFullRecordingFileName(sessionId : String) : String {
