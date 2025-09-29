@@ -97,6 +97,17 @@ object AwsS3UploadService {
 
         val key = "$folderName/$sessionId/${fileName}"
 
+        if (!file.exists()) {
+            VoiceLogger.e(TAG, "File does not exist: ${file.absolutePath}")
+            onResponse(ResponseState.Error("File does not exist"))
+            uploadListener?.onError(
+                sessionId = sessionId,
+                fileName = fileName,
+                errorMsg = "File does not exist"
+            )
+            return
+        }
+
         val metadata = ObjectMetadata()
         metadata.contentType = "audio/wav"
         metadata.addUserMetadata("bid", bid)
