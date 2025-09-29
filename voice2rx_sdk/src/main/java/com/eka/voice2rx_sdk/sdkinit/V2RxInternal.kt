@@ -139,6 +139,7 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
     private lateinit var uploadService: UploadService
     private lateinit var vad: VadSilero
     private var isRecording = false
+    private var isVadActive = false
 
     private lateinit var fullRecordingFile: File
     private var sessionUploadStatus = true
@@ -301,6 +302,7 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
                         .setMode(DEFAULT_MODE)
                         .setSilenceDurationMs(DEFAULT_SILENCE_DURATION_MS)
                         .build()
+                    isVadActive = true
 
                     recorder = VoiceRecorder(this@V2RxInternal, this@V2RxInternal)
                     audioHelper = AudioHelper(
@@ -542,8 +544,9 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
             if (::recorder.isInitialized) {
                 recorder.stop()
             }
-            if (::vad.isInitialized) {
+            if (::vad.isInitialized && isVadActive) {
                 vad.close()
+                isVadActive = false
             }
         }
     }
