@@ -5,7 +5,6 @@ import android.util.Log
 import androidx.work.WorkManager
 import com.eka.voice2rx_sdk.common.ResponseState
 import com.eka.voice2rx_sdk.common.SessionResponse
-import com.eka.voice2rx_sdk.common.Voice2RxUtils
 import com.eka.voice2rx_sdk.common.models.EkaScribeError
 import com.eka.voice2rx_sdk.common.models.VoiceError
 import com.eka.voice2rx_sdk.common.voicelogger.EventCode
@@ -19,6 +18,7 @@ import com.eka.voice2rx_sdk.data.local.models.Voice2RxType
 import com.eka.voice2rx_sdk.data.remote.models.Error
 import com.eka.voice2rx_sdk.data.remote.models.SessionStatus
 import com.eka.voice2rx_sdk.data.remote.models.requests.AdditionalData
+import com.eka.voice2rx_sdk.data.remote.models.requests.ModelType
 import com.eka.voice2rx_sdk.data.remote.models.requests.SupportedLanguages
 import com.eka.voice2rx_sdk.data.remote.models.responses.EkaScribeErrorDetails
 import com.eka.voice2rx_sdk.data.remote.models.responses.TemplateId
@@ -137,7 +137,6 @@ object Voice2Rx {
 
     fun startVoice2Rx(
         mode: Voice2RxType = Voice2RxType.DICTATION,
-        session: String = Voice2RxUtils.generateNewSessionId(),
         additionalData: AdditionalData?,
         outputFormats: List<TemplateId> = listOf(
             TemplateId.CLINICAL_NOTE_TEMPLATE,
@@ -147,7 +146,9 @@ object Voice2Rx {
             SupportedLanguages.EN_IN,
             SupportedLanguages.HI_IN
         ),
+        modelType: ModelType = ModelType.PRO,
         onError: (EkaScribeError) -> Unit,
+        onStart: (String) -> Unit
     ) {
         if (v2RxInternal == null) {
             throw IllegalStateException("Voice2Rx SDK not initialized")
@@ -206,11 +207,12 @@ object Voice2Rx {
         }
         v2RxInternal?.startRecording(
             mode = mode,
+            modelType = modelType,
             additionalData = additionalData,
-            session = session,
             outputFormats = outputFormats,
             languages = languages,
-            onError = onError
+            onError = onError,
+            onStart = onStart
         )
     }
 
