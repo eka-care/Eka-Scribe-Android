@@ -7,8 +7,6 @@ import com.google.gson.annotations.SerializedName
 
 @Keep
 data class Voice2RxInitTransactionRequest(
-    @SerializedName("additional_data")
-    var additionalData: AdditionalData?,
     @SerializedName("input_language")
     var inputLanguage: List<String?>?,
     @SerializedName("mode")
@@ -24,7 +22,29 @@ data class Voice2RxInitTransactionRequest(
     @SerializedName("transfer")
     var transfer: String = "vaded",
     @SerializedName("model_type")
-    var modelType: ModelType = ModelType.PRO
+    var modelType: ModelType = ModelType.PRO,
+    @SerializedName("patient_details")
+    var patientDetails: PatientDetails? = null
+)
+//
+//"biologicalSex": "M",
+//"oid": "17561874762081290",
+//"visit_id": "visitid",
+//"age": 50,
+//"username": "username"
+
+@Keep
+data class PatientDetails(
+    @SerializedName("age")
+    var age: Int?,
+    @SerializedName("biologicalSex")
+    var biologicalSex: String?,
+    @SerializedName("username")
+    var name: String? = null,
+    @SerializedName("oid")
+    var patientId: String? = null,
+    @SerializedName("visit_id")
+    var visitId: String? = null,
 )
 
 @Keep
