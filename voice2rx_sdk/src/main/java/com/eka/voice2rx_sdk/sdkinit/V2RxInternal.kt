@@ -545,8 +545,13 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
                 recorder.stop()
             }
             if (::vad.isInitialized && isVadActive) {
-                vad.close()
-                isVadActive = false
+                try {
+                    vad.close()
+                    isVadActive = false
+                } catch (e: Exception) {
+                    VoiceLogger.d(TAG, "VAD close exception: ${e.message}")
+                    isVadActive = false
+                }
             }
         }
     }
