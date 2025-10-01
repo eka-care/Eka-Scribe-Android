@@ -29,9 +29,9 @@ import com.eka.voice2rx_sdk.data.local.models.VoiceOutput
 import com.eka.voice2rx_sdk.data.local.models.VoiceSessionData
 import com.eka.voice2rx_sdk.data.remote.models.Error
 import com.eka.voice2rx_sdk.data.remote.models.SessionStatus
-import com.eka.voice2rx_sdk.data.remote.models.requests.AdditionalData
 import com.eka.voice2rx_sdk.data.remote.models.requests.ModelType
 import com.eka.voice2rx_sdk.data.remote.models.requests.OutputFormatTemplate
+import com.eka.voice2rx_sdk.data.remote.models.requests.PatientDetails
 import com.eka.voice2rx_sdk.data.remote.models.requests.SupportedLanguages
 import com.eka.voice2rx_sdk.data.remote.models.requests.Voice2RxInitTransactionRequest
 import com.eka.voice2rx_sdk.data.remote.models.requests.Voice2RxStopTransactionRequest
@@ -219,12 +219,11 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
 
     var currentlySelectedLanguage: List<SupportedLanguages> = listOf()
     var currentlySelectedOutputFormat: List<TemplateId> = listOf()
-    var currentAdditionalData: AdditionalData? = null
 
     fun startRecording(
         mode: Voice2RxType = Voice2RxType.DICTATION,
         session: String = Voice2RxUtils.generateNewSessionId(),
-        additionalData: AdditionalData?,
+        patientDetails: PatientDetails?,
         outputFormats: List<TemplateId> = listOf(
             TemplateId.CLINICAL_NOTE_TEMPLATE,
             TemplateId.TRANSCRIPT_TEMPLATE
@@ -279,7 +278,6 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
                     )
                 )
             )
-            currentAdditionalData = additionalData
             currentlySelectedLanguage = languages
             currentlySelectedOutputFormat = outputFormats
             currentMode = mode
@@ -289,6 +287,7 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
             recordedFiles.clear()
             initVoice2RxTransaction(
                 mode = mode,
+                patientDetails = patientDetails,
                 onError = {
                     onError(it)
                     Voice2Rx.getVoice2RxInitConfiguration().voice2RxLifecycle.onError(it)
@@ -714,22 +713,14 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
 
     private suspend fun initVoice2RxTransaction(
         mode: Voice2RxType,
+        patientDetails: PatientDetails?,
         modelType: ModelType,
         onError: (EkaScribeError) -> Unit,
         onSuccess: () -> Unit
     ) {
         val s3Url = "s3://$bucketName/$folderName/${sessionId}"
-        var visitId = currentAdditionalData?.visitid
-        if (visitId.isNullOrEmpty()) {
-            visitId = sessionId
-        }
-        //TODO Remove this when we have a proper visitId
         val request = Voice2RxInitTransactionRequest(
-            additionalData = AdditionalData(
-                doctor = currentAdditionalData?.doctor,
-                patient = currentAdditionalData?.patient,
-                visitid = visitId,
-            ),
+            patientDetails = patientDetails,
             modelType = modelType,
             inputLanguage = currentlySelectedLanguage.map { it.value },
             mode = mode,

@@ -2,6 +2,7 @@ package com.eka.voice2rx_sdk.data.remote.models.responses
 
 import androidx.annotation.Keep
 import com.eka.voice2rx_sdk.data.local.models.Voice2RxType
+import com.eka.voice2rx_sdk.data.remote.models.requests.PatientDetails
 import com.google.gson.annotations.SerializedName
 
 @Keep
@@ -31,7 +32,9 @@ data class Voice2RxHistoryItem(
     @SerializedName("uuid")
     var uuid: String?,
     @SerializedName("version")
-    var version: String?
+    var version: String?,
+    @SerializedName("patient_details")
+    var patientDetails: PatientDetails?
 )
 
 @Keep
