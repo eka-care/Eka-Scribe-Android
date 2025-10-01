@@ -17,8 +17,8 @@ import com.eka.voice2rx_sdk.data.local.models.Voice2RxSessionStatus
 import com.eka.voice2rx_sdk.data.local.models.Voice2RxType
 import com.eka.voice2rx_sdk.data.remote.models.Error
 import com.eka.voice2rx_sdk.data.remote.models.SessionStatus
-import com.eka.voice2rx_sdk.data.remote.models.requests.AdditionalData
 import com.eka.voice2rx_sdk.data.remote.models.requests.ModelType
+import com.eka.voice2rx_sdk.data.remote.models.requests.PatientDetails
 import com.eka.voice2rx_sdk.data.remote.models.requests.SupportedLanguages
 import com.eka.voice2rx_sdk.data.remote.models.responses.EkaScribeErrorDetails
 import com.eka.voice2rx_sdk.data.remote.models.responses.TemplateId
@@ -137,7 +137,7 @@ object Voice2Rx {
 
     fun startVoice2Rx(
         mode: Voice2RxType = Voice2RxType.DICTATION,
-        additionalData: AdditionalData?,
+        patientDetails: PatientDetails? = null,
         outputFormats: List<TemplateId> = listOf(
             TemplateId.CLINICAL_NOTE_TEMPLATE,
             TemplateId.TRANSCRIPT_TEMPLATE
@@ -208,7 +208,7 @@ object Voice2Rx {
         v2RxInternal?.startRecording(
             mode = mode,
             modelType = modelType,
-            additionalData = additionalData,
+            patientDetails = patientDetails,
             outputFormats = outputFormats,
             languages = languages,
             onError = onError,
