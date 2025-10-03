@@ -6,6 +6,7 @@ import androidx.work.WorkManager
 import com.eka.voice2rx_sdk.common.ResponseState
 import com.eka.voice2rx_sdk.common.SessionResponse
 import com.eka.voice2rx_sdk.common.models.EkaScribeError
+import com.eka.voice2rx_sdk.common.models.VoiceActivityData
 import com.eka.voice2rx_sdk.common.models.VoiceError
 import com.eka.voice2rx_sdk.common.voicelogger.EventCode
 import com.eka.voice2rx_sdk.common.voicelogger.EventLog
@@ -260,6 +261,8 @@ object Voice2Rx {
         }
         v2RxInternal?.stopRecording()
     }
+
+    fun getVoiceActivityFlow(): Flow<VoiceActivityData>? = v2RxInternal?.voiceActivityFlow
 
     suspend fun getVoice2RxSessionStatus(sessionId: String): SessionStatus {
         return v2RxInternal?.getVoice2RxStatus(sessionId) ?: SessionStatus(

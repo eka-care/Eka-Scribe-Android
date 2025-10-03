@@ -11,6 +11,7 @@ import com.eka.voice2rx_sdk.common.UploadListener
 import com.eka.voice2rx_sdk.common.Voice2RxInternalUtils
 import com.eka.voice2rx_sdk.common.Voice2RxUtils
 import com.eka.voice2rx_sdk.common.models.EkaScribeError
+import com.eka.voice2rx_sdk.common.models.VoiceActivityData
 import com.eka.voice2rx_sdk.common.models.VoiceError
 import com.eka.voice2rx_sdk.common.voicelogger.EventCode
 import com.eka.voice2rx_sdk.common.voicelogger.EventLog
@@ -52,6 +53,8 @@ import com.konovalov.vad.silero.config.Mode
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -134,6 +137,9 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
 
     var sessionId = Voice2RxUtils.generateNewSessionId()
 
+    private val _voiceActivityFlow = MutableStateFlow(VoiceActivityData())
+    val voiceActivityFlow = _voiceActivityFlow.asStateFlow()
+
     private lateinit var recorder: VoiceRecorder
     private lateinit var audioHelper: AudioHelper
     private lateinit var uploadService: UploadService
@@ -155,10 +161,17 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
         sessionUploadStatus = false
     }
 
-    override fun onAudio(audioData: ShortArray, timeStamp: Long) {
+    override fun onAudio(audioData: ShortArray, timeStamp: Long, amplitude: Float) {
         var isSpeech = false
         if (audioData.size == 512) {
             isSpeech = vad.isSpeech(audioData)
+            addAudioActivityData(
+                VoiceActivityData(
+                    isSpeech = isSpeech,
+                    amplitude = amplitude,
+                    timeStamp = timeStamp
+                )
+            )
         }
 
         audioHelper.process(
@@ -169,6 +182,10 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
                 timeStamp = timeStamp
             )
         )
+    }
+
+    private fun addAudioActivityData(voiceActivityData: VoiceActivityData) {
+        _voiceActivityFlow.value = voiceActivityData
     }
 
     fun initValues(context: Context) {
