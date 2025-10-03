@@ -48,9 +48,7 @@ Before integrating the Voice2Rx SDK, ensure that your Android project meets the 
 
 Add the following dependency to your `app/build.gradle.kts` file:
 
-```kotlin
-implementation("com.github.eka-care:eka-v2rx-android:2.0.3")
-```
+implementation("com.github.eka-care:eka-v2rx-android:LATEST_VERSION")
 
 ## Initialization
 
