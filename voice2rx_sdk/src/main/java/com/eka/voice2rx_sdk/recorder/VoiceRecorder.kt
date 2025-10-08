@@ -207,14 +207,33 @@ class VoiceRecorder(
                 if (listeningState == ListeningState.LISTENING) {
                     val read = audioRecord?.read(buffer, 0, buffer.size)
                     if (read != null && read > 0) {
-                        callback.onAudio(buffer.copyOfRange(0, read), System.currentTimeMillis())
+                        val amplitude = getAudioAmplitude(read, buffer)
+                        callback.onAudio(
+                            audioData = buffer.copyOfRange(0, read),
+                            timeStamp = System.currentTimeMillis(),
+                            amplitude = amplitude
+                        )
                     }
                 }
             }
         }
     }
+
+    // This code do not take much time it takes 0 seconds
+    // I measured it with measureTime function
+    private fun getAudioAmplitude(read: Int, buffer: ShortArray): Float {
+        Short
+        if (read <= 0 || buffer.isEmpty()) return 0f
+
+        val maxAmplitude = 32767f // Max value for 16-bit audio
+
+        // Get the maximum absolute value from the buffer
+        val maxValue = buffer.take(read).maxOfOrNull { kotlin.math.abs(it.toInt()) } ?: 0
+
+        return (maxValue / maxAmplitude).coerceIn(0f, 1f)
+    }
 }
 
 interface AudioCallback {
-    fun onAudio(audioData: ShortArray, timeStamp: Long)
+    fun onAudio(audioData: ShortArray, timeStamp: Long, amplitude: Float)
 }
