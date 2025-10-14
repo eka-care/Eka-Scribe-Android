@@ -924,7 +924,6 @@ internal class VToRxRepository(
                 file = file,
                 sessionId = sessionId,
                 voiceFileType = VoiceFileType.CHUNK_AUDIO,
-                bid = bid,
                 onResponse = { response ->
                     if (response is ResponseState.Success && response.isCompleted) {
                         trySend(true)

@@ -11,4 +11,14 @@ data class VoiceActivityData(
     val amplitude: Float = 0f,
     @SerializedName("timeStamp")
     val timeStamp: Long = 0L,
+    @SerializedName("signalToNoiseRatio")
+    val signalToNoiseRatio: Float = 0f,
+    @SerializedName("clippingDetected")
+    val clippingDetected: Boolean = false,
+    @SerializedName("rmsLevel")
+    val rmsLevel: Float = 0f,
+    @SerializedName("peakLevel")
+    val peakLevel: Float = 0f,
+    @SerializedName("zeroCrossingRate")
+    val zeroCrossingRate: Float = 0f
 )
