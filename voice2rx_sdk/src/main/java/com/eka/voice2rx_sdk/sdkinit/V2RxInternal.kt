@@ -161,7 +161,12 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
         sessionUploadStatus = false
     }
 
-    override fun onAudio(audioData: ShortArray, timeStamp: Long, amplitude: Float) {
+    override fun onAudio(
+        audioData: ShortArray,
+        timeStamp: Long,
+        amplitude: Float,
+        qualityMetrics: com.eka.voice2rx_sdk.common.models.AudioQualityMetrics
+    ) {
         var isSpeech = false
         if (audioData.size == 512) {
             isSpeech = vad.isSpeech(audioData)
@@ -169,7 +174,12 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
                 VoiceActivityData(
                     isSpeech = isSpeech,
                     amplitude = amplitude,
-                    timeStamp = timeStamp
+                    timeStamp = timeStamp,
+                    signalToNoiseRatio = qualityMetrics.signalToNoiseRatio,
+                    clippingDetected = qualityMetrics.clippingDetected,
+                    rmsLevel = qualityMetrics.rmsLevel,
+                    peakLevel = qualityMetrics.peakLevel,
+                    zeroCrossingRate = qualityMetrics.zeroCrossingRate
                 )
             )
         }

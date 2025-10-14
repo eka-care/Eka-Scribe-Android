@@ -10,6 +10,7 @@ import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.os.Build
 import android.os.Process
+import com.eka.voice2rx_sdk.AudioQualityAnalyzer
 import com.eka.voice2rx_sdk.common.voicelogger.VoiceLogger
 import java.io.File
 import java.io.IOException
@@ -37,6 +38,8 @@ class VoiceRecorder(
 
     private var audioManager: AudioManager? = null
     private var audioFocusRequest: AudioFocusRequest? = null
+
+    private val qualityAnalyzer = AudioQualityAnalyzer()
 
     // Audio focus change listener
     private val audioFocusChangeListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
@@ -208,10 +211,12 @@ class VoiceRecorder(
                     val read = audioRecord?.read(buffer, 0, buffer.size)
                     if (read != null && read > 0) {
                         val amplitude = getAudioAmplitude(read, buffer)
+                        val qualityMetrics = qualityAnalyzer.analyzeFrame(buffer, read)
                         callback.onAudio(
                             audioData = buffer.copyOfRange(0, read),
                             timeStamp = System.currentTimeMillis(),
-                            amplitude = amplitude
+                            amplitude = amplitude,
+                            qualityMetrics = qualityMetrics
                         )
                     }
                 }
@@ -235,5 +240,10 @@ class VoiceRecorder(
 }
 
 interface AudioCallback {
-    fun onAudio(audioData: ShortArray, timeStamp: Long, amplitude: Float)
+    fun onAudio(
+        audioData: ShortArray,
+        timeStamp: Long,
+        amplitude: Float,
+        qualityMetrics: com.eka.voice2rx_sdk.common.models.AudioQualityMetrics
+    )
 }
