@@ -1,14 +1,12 @@
 package com.eka.voice2rx_sdk.sdkinit
 
 import android.content.Context
-import android.util.Log
 import androidx.work.WorkManager
 import com.eka.voice2rx_sdk.common.ResponseState
 import com.eka.voice2rx_sdk.common.SessionResponse
 import com.eka.voice2rx_sdk.common.models.EkaScribeError
 import com.eka.voice2rx_sdk.common.models.VoiceActivityData
 import com.eka.voice2rx_sdk.common.models.VoiceError
-import com.eka.voice2rx_sdk.common.voicelogger.EventCode
 import com.eka.voice2rx_sdk.common.voicelogger.EventLog
 import com.eka.voice2rx_sdk.common.voicelogger.LogInterceptor
 import com.eka.voice2rx_sdk.common.voicelogger.VoiceLogger
@@ -41,24 +39,8 @@ object Voice2Rx {
         context: Context,
     ) {
         configuration = config
-        if (config.authorizationToken.isEmpty()) {
-            throw IllegalStateException("Voice2Rx SDK not initialized with authorization token")
-        }
-        if (config.ekaAuthConfig == null) {
-            logger?.logEvent(
-                EventLog.Warning(
-                    warningCode = EventCode.VOICE2RX_SESSION_WARNING,
-                    message = "EkaAuthConfig is null. Please provide EkaAuthConfig for refreshing authentication!"
-                )
-            )
-            Log.w(
-                "Voice2RxSDK",
-                "EkaAuthConfig is null. Please provide EkaAuthConfig for refreshing authentication!"
-            )
-        }
         try {
             val okHttp = OkHttpImpl(
-                authorizationToken = config.authorizationToken,
                 defaultHeaders = defaultHeaders,
                 ekaAuthConfig = config.ekaAuthConfig
             )
@@ -85,14 +67,6 @@ object Voice2Rx {
 
     fun setEnableDebugLogs() {
         VoiceLogger.enableDebugLogs = true
-    }
-
-    fun updateAuthToken(newAuthToken: String?) {
-        newAuthToken?.let {
-            configuration = configuration?.copy(
-                authorizationToken = newAuthToken
-            )
-        }
     }
 
     fun setEventLogger(logInterceptor: LogInterceptor) {

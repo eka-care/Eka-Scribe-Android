@@ -76,7 +76,6 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
             folderName: String,
             sessionId: String,
             voiceFileType: VoiceFileType = VoiceFileType.CHUNK_AUDIO,
-            fileInfo: FileInfo,
             onResponse: (ResponseState) -> Unit = {},
         ) {
             AwsS3UploadService.uploadFileToS3(
@@ -87,7 +86,6 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
                 sessionId = sessionId,
                 voiceFileType = voiceFileType,
                 onResponse = onResponse,
-                bid = Voice2RxInternalUtils.getUserTokenData(sessionToken = Voice2Rx.getVoice2RxInitConfiguration().authorizationToken)?.businessId.toString(),
             )
         }
 
@@ -206,6 +204,7 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
         folderName = Voice2RxUtils.getCurrentDateInYYMMDD()
         config = Voice2Rx.getVoice2RxInitConfiguration()
         AwsS3UploadService.setUploadListener(this)
+        AwsS3UploadService.initRepository(context = context)
         getS3Config()
     }
 
@@ -651,22 +650,28 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
 
     private suspend fun storeSessionInDatabase(mode: Voice2RxType, metadata: String?) {
         VoiceLogger.d("VadViewModel", recordedFiles.toList().toString())
-        repository.insertSession(
-            session = VToRxSession(
-                sessionId = sessionId,
-                createdAt = Voice2RxUtils.getCurrentUTCEpochMillis(),
-                updatedAt = Voice2RxUtils.getCurrentUTCEpochMillis(),
-                fullAudioPath = Voice2RxUtils.getFullRecordingFileName(sessionId = sessionId),
-                ownerId = "",
-                bid = Voice2RxInternalUtils.getUserTokenData(Voice2Rx.getVoice2RxInitConfiguration().authorizationToken)?.businessId.toString(),
-                mode = mode,
-                updatedSessionId = sessionId,
-                status = Voice2RxSessionStatus.DRAFT,
-                voiceTransactionState = VoiceTransactionState.STARTED,
-                sessionMetadata = metadata,
-                uploadStage = VoiceTransactionStage.INIT
-            )
+        val voiceSession = VToRxSession(
+            sessionId = sessionId,
+            createdAt = Voice2RxUtils.getCurrentUTCEpochMillis(),
+            updatedAt = Voice2RxUtils.getCurrentUTCEpochMillis(),
+            fullAudioPath = Voice2RxUtils.getFullRecordingFileName(sessionId = sessionId),
+            ownerId = "",
+            bid = getBusinessId(),
+            mode = mode,
+            updatedSessionId = sessionId,
+            status = Voice2RxSessionStatus.DRAFT,
+            voiceTransactionState = VoiceTransactionState.STARTED,
+            sessionMetadata = metadata,
+            uploadStage = VoiceTransactionStage.INIT
         )
+        VoiceLogger.d(TAG, voiceSession.toString())
+        repository.insertSession(
+            session = voiceSession
+        )
+    }
+
+    private fun getBusinessId(): String {
+        return Voice2RxInternalUtils.getUserTokenData(Voice2Rx.getVoice2RxInitConfiguration().ekaAuthConfig.getAuthToken())?.businessId.toString()
     }
 
     private fun stopVoiceTransaction() {
@@ -730,8 +735,7 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
                         file = file,
                         folderName = folderName,
                         sessionId = sessionId,
-                        voiceFileType = VoiceFileType.FULL_AUDIO,
-                        fileInfo = FileInfo(st = "0", et = "0")
+                        voiceFileType = VoiceFileType.FULL_AUDIO
                     )
                 }
             )

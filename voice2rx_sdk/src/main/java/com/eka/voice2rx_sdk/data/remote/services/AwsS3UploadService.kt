@@ -41,6 +41,12 @@ object AwsS3UploadService {
         uploadListener = listener
     }
 
+    fun initRepository(context: Context) {
+        if (repository == null) {
+            repository = VToRxRepository(Voice2RxDatabase.getDatabase(context.applicationContext))
+        }
+    }
+
     fun uploadFileToS3(
         context: Context,
         fileName: String,
@@ -48,180 +54,196 @@ object AwsS3UploadService {
         folderName: String,
         sessionId: String,
         voiceFileType: VoiceFileType = VoiceFileType.CHUNK_AUDIO,
-        bid: String,
         onResponse: (ResponseState) -> Unit = {},
         retryCount: Int = 0
     ) {
-        val config = V2RxInternal.s3Config
-            ?: if (retryCount > UploadServiceConstants.MAX_UPLOAD_RETRY_COUNT) {
-                VoiceLogger.d("AwsS3UploadService", "Credential is null!")
-                onResponse(ResponseState.Error("Credential is null!"))
-                return
-            } else {
-                retryFileUpload(
-                    context = context,
-                    fileName = fileName,
-                    file = file,
-                    folderName = folderName,
-                    sessionId = sessionId,
-                    voiceFileType = voiceFileType,
-                    onResponse = onResponse,
-                    retryCount = retryCount,
-                    bid = bid
-                )
-                return
-            }
-        TransferNetworkLossHandler.getInstance(context.applicationContext)
-
-        if (!Voice2RxUtils.isNetworkAvailable(context)) {
-            onResponse(ResponseState.Error("No Internet!"))
-            uploadListener?.onError(
-                sessionId = sessionId,
-                fileName = fileName,
-                errorMsg = "No Internet!"
-            )
-            return
-        }
-
-        val s3Client = createS3Client()
-        if (s3Client == null) {
-            VoiceLogger.d("AwsS3UploadService", "Credential is null!")
-            onResponse(ResponseState.Error("Credential is null!"))
-            return
-        }
-
-        transferUtility = TransferUtility.builder()
-            .context(context)
-            .s3Client(s3Client)
-            .build()
-
-        val key = "$folderName/$sessionId/${fileName}"
-
-        if (!file.exists()) {
-            VoiceLogger.e(TAG, "File does not exist: ${file.absolutePath}")
-            onResponse(ResponseState.Error("File does not exist"))
-            uploadListener?.onError(
-                sessionId = sessionId,
-                fileName = fileName,
-                errorMsg = "File does not exist"
-            )
-            return
-        }
-
-        val metadata = ObjectMetadata()
-        metadata.contentType = "audio/wav"
-        metadata.addUserMetadata("bid", bid)
-        metadata.addUserMetadata("txnid", sessionId)
-
-        val uploadObserver =
-            transferUtility?.upload(config.bucketName, key, file, metadata)
-        Voice2Rx.logEvent(
-            EventLog.Info(
-                code = EventCode.VOICE2RX_SESSION_UPLOAD_LIFECYCLE,
-                params = JSONObject(
-                    mapOf(
-                        "sessionId" to sessionId,
-                        "fileName" to fileName,
-                        "upload" to "started",
-                        "retryCount" to retryCount,
-                    )
-                )
-            )
-        )
-
-        uploadObserver?.setTransferListener(object : TransferListener {
-            override fun onStateChanged(id: Int, state: TransferState?) {
+        CoroutineScope(Dispatchers.IO).launch {
+            val sessionData = repository?.getSessionBySessionId(sessionId)
+            val bid = sessionData?.bid
+            if (bid.isNullOrBlank()) {
                 Voice2Rx.logEvent(
                     EventLog.Info(
-                        code = EventCode.VOICE2RX_SESSION_UPLOAD_LIFECYCLE,
+                        code = EventCode.VOICE2RX_SESSION_LIFECYCLE,
                         params = JSONObject(
                             mapOf(
                                 "sessionId" to sessionId,
-                                "fileName" to fileName,
-                                "upload" to state?.name,
-                                "retryCount" to retryCount,
+                                "session_data" to sessionData,
+                                "lifecycle" to "uploadFileToS3",
                             )
                         )
                     )
                 )
-                when (state) {
-                    TransferState.COMPLETED -> {
-                        onResponse(ResponseState.Success(true))
-                        uploadListener?.onSuccess(sessionId = sessionId, fileName)
-                        updateFileStatus(
-                            context = context,
-                            fileName = fileName,
-                            sessionId = sessionId,
-                            isUploaded = true
-                        )
-                        deleteFile(file, voiceFileType == VoiceFileType.CHUNK_AUDIO)
-                    }
+                onResponse(ResponseState.Error(error = "Business Id not found!"))
+                return@launch
+            }
+            val config = V2RxInternal.s3Config
+                ?: if (retryCount > UploadServiceConstants.MAX_UPLOAD_RETRY_COUNT) {
+                    VoiceLogger.d("AwsS3UploadService", "Credential is null!")
+                    onResponse(ResponseState.Error("Credential is null!"))
+                    return@launch
+                } else {
+                    retryFileUpload(
+                        context = context,
+                        fileName = fileName,
+                        file = file,
+                        folderName = folderName,
+                        sessionId = sessionId,
+                        voiceFileType = voiceFileType,
+                        onResponse = onResponse,
+                        retryCount = retryCount,
+                    )
+                    return@launch
+                }
+            TransferNetworkLossHandler.getInstance(context.applicationContext)
 
-                    TransferState.FAILED -> {
-                        if (retryCount > UploadServiceConstants.MAX_UPLOAD_RETRY_COUNT) {
-                            onResponse(ResponseState.Error("FAILED"))
+            if (!Voice2RxUtils.isNetworkAvailable(context)) {
+                onResponse(ResponseState.Error("No Internet!"))
+                uploadListener?.onError(
+                    sessionId = sessionId,
+                    fileName = fileName,
+                    errorMsg = "No Internet!"
+                )
+                return@launch
+            }
+
+            val s3Client = createS3Client()
+            if (s3Client == null) {
+                VoiceLogger.d("AwsS3UploadService", "Credential is null!")
+                onResponse(ResponseState.Error("Credential is null!"))
+                return@launch
+            }
+
+            transferUtility = TransferUtility.builder()
+                .context(context)
+                .s3Client(s3Client)
+                .build()
+
+            val key = "$folderName/$sessionId/${fileName}"
+
+            if (!file.exists()) {
+                VoiceLogger.e(TAG, "File does not exist: ${file.absolutePath}")
+                onResponse(ResponseState.Error("File does not exist"))
+                uploadListener?.onError(
+                    sessionId = sessionId,
+                    fileName = fileName,
+                    errorMsg = "File does not exist"
+                )
+                return@launch
+            }
+
+            val metadata = ObjectMetadata()
+            metadata.contentType = "audio/wav"
+            metadata.addUserMetadata("bid", bid)
+            metadata.addUserMetadata("txnid", sessionId)
+
+            val uploadObserver =
+                transferUtility?.upload(config.bucketName, key, file, metadata)
+            Voice2Rx.logEvent(
+                EventLog.Info(
+                    code = EventCode.VOICE2RX_SESSION_UPLOAD_LIFECYCLE,
+                    params = JSONObject(
+                        mapOf(
+                            "sessionId" to sessionId,
+                            "fileName" to fileName,
+                            "upload" to "started",
+                            "retryCount" to retryCount,
+                        )
+                    )
+                )
+            )
+
+            uploadObserver?.setTransferListener(object : TransferListener {
+                override fun onStateChanged(id: Int, state: TransferState?) {
+                    Voice2Rx.logEvent(
+                        EventLog.Info(
+                            code = EventCode.VOICE2RX_SESSION_UPLOAD_LIFECYCLE,
+                            params = JSONObject(
+                                mapOf(
+                                    "sessionId" to sessionId,
+                                    "fileName" to fileName,
+                                    "upload" to state?.name,
+                                    "retryCount" to retryCount,
+                                )
+                            )
+                        )
+                    )
+                    when (state) {
+                        TransferState.COMPLETED -> {
+                            onResponse(ResponseState.Success(true))
+                            uploadListener?.onSuccess(sessionId = sessionId, fileName)
+                            updateFileStatus(
+                                context = context,
+                                fileName = fileName,
+                                sessionId = sessionId,
+                                isUploaded = true
+                            )
+                            deleteFile(file, voiceFileType == VoiceFileType.CHUNK_AUDIO)
+                        }
+
+                        TransferState.FAILED -> {
+                            if (retryCount > UploadServiceConstants.MAX_UPLOAD_RETRY_COUNT) {
+                                onResponse(ResponseState.Error("FAILED"))
+                                uploadListener?.onError(
+                                    sessionId = sessionId,
+                                    fileName = fileName,
+                                    errorMsg = "FAILED"
+                                )
+                                return
+                            }
+                            retryFileUpload(
+                                context = context,
+                                fileName = fileName,
+                                file = file,
+                                folderName = folderName,
+                                sessionId = sessionId,
+                                voiceFileType = voiceFileType,
+                                onResponse = onResponse,
+                                retryCount = retryCount,
+                            )
+                        }
+
+                        TransferState.CANCELED -> {
+                            onResponse(ResponseState.Error("CANCELED"))
                             uploadListener?.onError(
                                 sessionId = sessionId,
                                 fileName = fileName,
-                                errorMsg = "FAILED"
+                                errorMsg = "CANCELED"
                             )
-                            return
                         }
-                        retryFileUpload(
-                            context = context,
-                            fileName = fileName,
-                            file = file,
-                            folderName = folderName,
-                            sessionId = sessionId,
-                            voiceFileType = voiceFileType,
-                            onResponse = onResponse,
-                            retryCount = retryCount,
-                            bid = bid
-                        )
-                    }
 
-                    TransferState.CANCELED -> {
-                        onResponse(ResponseState.Error("CANCELED"))
+                        else -> {
+                        }
+                    }
+                }
+
+                override fun onProgressChanged(id: Int, bytesCurrent: Long, bytesTotal: Long) {
+                    val percentDone = (bytesCurrent.toFloat() / bytesTotal.toFloat() * 100).toInt()
+                }
+
+                override fun onError(id: Int, ex: Exception?) {
+                    if (retryCount > UploadServiceConstants.MAX_UPLOAD_RETRY_COUNT) {
+                        onResponse(ResponseState.Error("FAILED"))
                         uploadListener?.onError(
                             sessionId = sessionId,
                             fileName = fileName,
-                            errorMsg = "CANCELED"
+                            errorMsg = "FAILED"
                         )
+                        return
                     }
-
-                    else -> {
-                    }
-                }
-            }
-
-            override fun onProgressChanged(id: Int, bytesCurrent: Long, bytesTotal: Long) {
-                val percentDone = (bytesCurrent.toFloat() / bytesTotal.toFloat() * 100).toInt()
-            }
-
-            override fun onError(id: Int, ex: Exception?) {
-                if (retryCount > UploadServiceConstants.MAX_UPLOAD_RETRY_COUNT) {
-                    onResponse(ResponseState.Error("FAILED"))
-                    uploadListener?.onError(
-                        sessionId = sessionId,
+                    VoiceLogger.d(TAG, "Upload failed, retrying... Retry count: $retryCount")
+                    retryFileUpload(
+                        context = context,
                         fileName = fileName,
-                        errorMsg = "FAILED"
+                        file = file,
+                        folderName = folderName,
+                        sessionId = sessionId,
+                        voiceFileType = voiceFileType,
+                        onResponse = onResponse,
+                        retryCount = retryCount,
                     )
-                    return
                 }
-                VoiceLogger.d(TAG, "Upload failed, retrying... Retry count: $retryCount")
-                retryFileUpload(
-                    context = context,
-                    fileName = fileName,
-                    file = file,
-                    folderName = folderName,
-                    sessionId = sessionId,
-                    voiceFileType = voiceFileType,
-                    onResponse = onResponse,
-                    retryCount = retryCount,
-                    bid = bid
-                )
-            }
-        })
+            })
+        }
     }
 
     fun updateFileStatus(
@@ -301,8 +323,7 @@ object AwsS3UploadService {
         sessionId: String,
         voiceFileType: VoiceFileType,
         onResponse: (ResponseState) -> Unit,
-        retryCount: Int,
-        bid: String
+        retryCount: Int
     ) {
         V2RxInternal.getS3Config {
             if (it) {
@@ -315,7 +336,6 @@ object AwsS3UploadService {
                     voiceFileType = voiceFileType,
                     onResponse = onResponse,
                     retryCount = retryCount + 1,
-                    bid = bid
                 )
             }
         }

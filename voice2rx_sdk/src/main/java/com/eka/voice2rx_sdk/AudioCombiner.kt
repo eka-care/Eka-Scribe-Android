@@ -101,8 +101,7 @@ internal class AudioCombiner {
                             file = outputFile,
                             folderName = folderName,
                             sessionId = sessionId,
-                            voiceFileType = VoiceFileType.CHUNK_AUDIO,
-                            fileInfo = fileInfo
+                            voiceFileType = VoiceFileType.CHUNK_AUDIO
                         )
                     }
                 }
