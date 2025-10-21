@@ -5,6 +5,7 @@ import android.content.Context
 import com.eka.voice2rx_sdk.AudioHelper
 import com.eka.voice2rx_sdk.AudioRecordModel
 import com.eka.voice2rx_sdk.UploadService
+import com.eka.voice2rx_sdk.common.AudioQualityMetrics
 import com.eka.voice2rx_sdk.common.ResponseState
 import com.eka.voice2rx_sdk.common.SessionResponse
 import com.eka.voice2rx_sdk.common.UploadListener
@@ -140,6 +141,9 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
     private val _voiceActivityFlow = MutableStateFlow(VoiceActivityData())
     val voiceActivityFlow = _voiceActivityFlow.asStateFlow()
 
+    private val _audioQualityFlow = MutableStateFlow<AudioQualityMetrics?>(null)
+    val audioQualityFlow = _audioQualityFlow.asStateFlow()
+
     private lateinit var recorder: VoiceRecorder
     private lateinit var audioHelper: AudioHelper
     private lateinit var uploadService: UploadService
@@ -202,6 +206,11 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
     fun addValueToChunksInfo(fileName: String, fileInfo: FileInfo) {
         chunksInfo[fileName.split("_").last()] = fileInfo
         recordedFiles.add(fileName)
+    }
+
+    fun updateAudioQualityMetrics(audioQualityMetrics: AudioQualityMetrics?) {
+        if (audioQualityMetrics == null) return
+        _audioQualityFlow.value = audioQualityMetrics
     }
 
     fun onNewFileCreated(
@@ -323,7 +332,7 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
                     recorder = VoiceRecorder(this@V2RxInternal, this@V2RxInternal)
                     audioHelper = AudioHelper(
                         context = app,
-                        viewModel = this@V2RxInternal,
+                        v2RxInternal = this@V2RxInternal,
                         sessionId = sessionId,
                         sampleRate = Voice2Rx.getVoice2RxInitConfiguration().sampleRate.value,
                         frameSize = Voice2Rx.getVoice2RxInitConfiguration().frameSize.value,
@@ -345,10 +354,10 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
                     )
                     chunksInfo = mutableMapOf<String, FileInfo>()
                     recorder.start(
-                        app,
-                        fullRecordingFile,
-                        vad.sampleRate.value,
-                        vad.frameSize.value
+                        context = app,
+                        fullRecordingFile = fullRecordingFile,
+                        sampleRate = vad.sampleRate.value,
+                        frameSize = vad.frameSize.value
                     )
                     onStart(sessionId)
                     config.voice2RxLifecycle.onStartSession(sessionId)
