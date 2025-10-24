@@ -283,7 +283,7 @@ object Voice2Rx {
         )
     }
 
-    fun dispose() {
-        v2RxInternal?.dispose()
+    fun releaseResources() {
+        v2RxInternal?.releaseResources()
     }
 }

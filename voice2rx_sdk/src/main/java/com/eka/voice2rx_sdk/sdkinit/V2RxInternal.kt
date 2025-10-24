@@ -5,6 +5,7 @@ import android.content.Context
 import com.eka.voice2rx_sdk.AudioHelper
 import com.eka.voice2rx_sdk.AudioRecordModel
 import com.eka.voice2rx_sdk.UploadService
+import com.eka.voice2rx_sdk.audio.processing.AudioProcessor
 import com.eka.voice2rx_sdk.common.AudioQualityMetrics
 import com.eka.voice2rx_sdk.common.ResponseState
 import com.eka.voice2rx_sdk.common.SessionResponse
@@ -53,6 +54,7 @@ import com.konovalov.vad.silero.VadSilero
 import com.konovalov.vad.silero.config.Mode
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -125,7 +127,7 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
         }
     }
 
-    private val coroutineScope = CoroutineScope(Dispatchers.IO)
+    private val coroutineScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var folderName: String = ""
     private lateinit var config: Voice2RxInitConfig
 
@@ -153,6 +155,7 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
 
     private lateinit var fullRecordingFile: File
     private var sessionUploadStatus = true
+    private var audioProcessor: AudioProcessor? = null
 
     private var currentMode = Voice2RxType.DICTATION
 
@@ -328,6 +331,7 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
                         .setSilenceDurationMs(DEFAULT_SILENCE_DURATION_MS)
                         .build()
                     isVadActive = true
+                    audioProcessor = AudioProcessor(context = app.applicationContext)
 
                     recorder = VoiceRecorder(this@V2RxInternal, this@V2RxInternal)
                     audioHelper = AudioHelper(
@@ -344,7 +348,8 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
                         context = app,
                         audioHelper = audioHelper,
                         sessionId = sessionId,
-                        v2RxInternal = this@V2RxInternal
+                        v2RxInternal = this@V2RxInternal,
+                        audioProcessor = audioProcessor
                     )
 
                     isRecording = true
@@ -425,6 +430,29 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
                 )
             }
         )
+    }
+
+    fun releaseResources() {
+        coroutineScope.launch {
+            try {
+                audioProcessor?.release()
+                isRecording = false
+                if (::recorder.isInitialized) {
+                    recorder.stop()
+                }
+                if (::vad.isInitialized && isVadActive) {
+                    try {
+                        vad.close()
+                        isVadActive = false
+                    } catch (e: Exception) {
+                        VoiceLogger.d(TAG, "VAD close exception: ${e.message}")
+                        isVadActive = false
+                    }
+                }
+            } catch (e: Exception) {
+                VoiceLogger.d(TAG, "Error releasing resources: ${e.message}")
+            }
+        }
     }
 
     suspend fun getVoice2RxStatus(sessionId: String): SessionStatus {
@@ -556,29 +584,12 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
         )
         uploadWholeFileData()
         stopVoiceTransaction()
+        releaseResources()
         config.voice2RxLifecycle.onStopSession(sessionId, chunksInfo.size)
     }
 
     fun isRecording(): Boolean {
         return isRecording
-    }
-
-    fun dispose() {
-        coroutineScope.launch {
-            isRecording = false
-            if (::recorder.isInitialized) {
-                recorder.stop()
-            }
-            if (::vad.isInitialized && isVadActive) {
-                try {
-                    vad.close()
-                    isVadActive = false
-                } catch (e: Exception) {
-                    VoiceLogger.d(TAG, "VAD close exception: ${e.message}")
-                    isVadActive = false
-                }
-            }
-        }
     }
 
     fun updateSession(

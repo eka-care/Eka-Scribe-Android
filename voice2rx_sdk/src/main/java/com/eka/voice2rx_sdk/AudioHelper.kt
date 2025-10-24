@@ -21,7 +21,6 @@ internal class AudioHelper(
     private val sampleRate: Int = 16000,
     private val frameSize: Int = 512
 ) {
-
     companion object {
         private const val TAG = "AudioHelper"
     }
@@ -32,6 +31,7 @@ internal class AudioHelper(
 
     private var silenceDuration = 0
     private var lastClipIndex = 0
+    private var lastAudioQualityIndex = 0
     private var currentClipIndex = 0
     private var isClipping = false
 
@@ -76,8 +76,11 @@ internal class AudioHelper(
 
     private fun updateAudioQualityMetrics() {
         val currentIndex = audioRecordData.size - 1
-        val lastIndex =
-            currentIndex - ((sampleRate * 5) / frameSize) + 1 // taking last 5 seconds data
+        val lastIndex = currentIndex - ((sampleRate * 1) / frameSize) + 1
+        if (lastIndex < lastAudioQualityIndex) {
+            return
+        }
+        lastAudioQualityIndex = currentIndex
         v2RxInternal.getUploadService().updateAudioQualityMetrics(
             lastClipIndex1 = lastIndex,
             currentClipIndex = currentIndex

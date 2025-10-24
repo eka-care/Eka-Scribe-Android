@@ -1,6 +1,6 @@
 package com.eka.voice2rx_sdk.common
 
-import androidx.annotation.Keep
+import com.eka.voice2rx_sdk.audio.processing.AudioProcessor
 import kotlin.math.log10
 import kotlin.math.pow
 import kotlin.math.sqrt
@@ -144,47 +144,31 @@ object AudioQualityAnalyzer {
      */
     fun analyzeAudioQuality(
         audioData: ShortArray,
-        frameSize: Int,
+        audioProcessor: AudioProcessor,
     ): AudioQualityMetrics? {
         if (audioData.isEmpty()) return null
 
-        val samples = convertBytesToShortArray(audioData)
-        val rms = calculateRMS(samples)
-        val peak = samples.maxOfOrNull { kotlin.math.abs(it) } ?: 0.0
-        val snr = calculateAudioQuality(
-            audioData = audioData,
-            frameSizeInSamples = frameSize
-        )
-
-        // Calculate dynamic range
-        val dynamicRange = if (rms > 0) 20 * log10(peak / rms) else 0.0
-
-        return AudioQualityMetrics(
-            snr = snr,
-            rmsLevel = rms,
-            peakLevel = peak,
-            dynamicRange = dynamicRange
-        )
+        val quality = audioProcessor.analyzeAudio(audioData)
+        return quality
     }
 }
 
-/**
- * Data class containing audio quality metrics
- */
-@Keep
 data class AudioQualityMetrics(
-    val snr: Double,              // Signal-to-Noise Ratio in dB
-    val rmsLevel: Double,          // Root Mean Square level
-    val peakLevel: Double,         // Peak amplitude
-    val dynamicRange: Double       // Dynamic range in dB
+    val stoi: Float,      // Speech Intelligibility (0.0 - 1.0)
+    val pesq: Float,      // Perceptual Quality (-0.5 - 4.5)
+    val siSDR: Float      // Signal Distortion Ratio (dB)
 ) {
-    fun getQualityRating(): String {
-        return when {
-            snr >= 0.9 -> "Excellent"
-            snr >= 0.8 -> "Good"
-            snr >= 0.6 -> "Fair"
-            snr >= 0.4 -> "Poor"
-            else -> "Very Poor"
-        }
+    fun getQualityScore(): Double {
+        // Simple overall score (0-5 stars)
+        val stoiScore = (stoi * 5).coerceIn(0f, 5f)
+        val pesqScore = ((pesq + 0.5) / 5.0 * 5).coerceIn(0.0, 5.0)
+        return (stoiScore + pesqScore) / 2f
+    }
+
+    fun getQualityLabel(): String = when {
+        getQualityScore() >= 4.0 -> "Excellent"
+        getQualityScore() >= 3.0 -> "Good"
+        getQualityScore() >= 2.0 -> "Fair"
+        else -> "Poor"
     }
 }

@@ -10,9 +10,9 @@ object VoiceLogger {
         }
     }
 
-    fun e(tag: String, msg: String) {
+    fun e(tag: String, msg: String, e: Exception? = null) {
         if (enableDebugLogs) {
-            Log.e(tag, msg)
+            Log.e(tag, msg, e)
         }
     }
 

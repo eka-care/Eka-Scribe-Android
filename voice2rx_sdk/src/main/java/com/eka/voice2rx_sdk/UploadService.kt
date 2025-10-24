@@ -1,6 +1,7 @@
 package com.eka.voice2rx_sdk
 
 import android.content.Context
+import com.eka.voice2rx_sdk.audio.processing.AudioProcessor
 import com.eka.voice2rx_sdk.common.AudioQualityAnalyzer
 import com.eka.voice2rx_sdk.common.Voice2RxUtils
 import com.eka.voice2rx_sdk.common.voicelogger.VoiceLogger
@@ -9,7 +10,6 @@ import com.eka.voice2rx_sdk.data.local.models.FileInfo
 import com.eka.voice2rx_sdk.data.local.models.IncludeStatus
 import com.eka.voice2rx_sdk.sdkinit.V2RxInternal
 import com.eka.voice2rx_sdk.sdkinit.Voice2Rx
-import com.konovalov.vad.silero.config.FrameSize
 import com.konovalov.vad.silero.config.SampleRate
 import java.io.File
 
@@ -18,7 +18,7 @@ internal class UploadService(
     private val audioHelper: AudioHelper,
     private val sessionId: String,
     private val v2RxInternal: V2RxInternal,
-    private val frameSize: Int = FrameSize.FRAME_SIZE_512.value,
+    private val audioProcessor: AudioProcessor? = null,
     private val sampleRate: Int = SampleRate.SAMPLE_RATE_16K.value
 ) {
     companion object {
@@ -82,9 +82,10 @@ internal class UploadService(
             if (calculateDurationByMargin(audioDataSize = totalAudioData.size)) {
                 return
             }
+            if (audioProcessor == null) return
             val audioQualityMetrics = AudioQualityAnalyzer.analyzeAudioQuality(
                 audioData = totalAudioData,
-                frameSize = frameSize
+                audioProcessor = audioProcessor
             )
             v2RxInternal.updateAudioQualityMetrics(audioQualityMetrics)
         } catch (e: Exception) {
@@ -93,7 +94,7 @@ internal class UploadService(
     }
 
     private fun calculateDurationByMargin(audioDataSize: Int): Boolean {
-        return audioDataSize >= (sampleRate * 5)
+        return audioDataSize >= (sampleRate * 3)
     }
 
     fun getCombinedAudio(audioChunks: ArrayList<ShortArray>): ShortArray {
