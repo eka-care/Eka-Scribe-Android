@@ -9,7 +9,7 @@ import retrofit2.http.Streaming
 interface ModelDownloadApi {
 
     @Streaming
-    @GET("squim_objective.ptl") // Your model path on CDN
+    @GET("squim_objective_for_android.onnx") // Your model path on CDN
     suspend fun downloadModel(
         @Header("If-None-Match") etag: String? = null
     ): Response<ResponseBody>

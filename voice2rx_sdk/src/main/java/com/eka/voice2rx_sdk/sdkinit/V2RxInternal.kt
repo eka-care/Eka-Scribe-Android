@@ -54,7 +54,6 @@ import com.konovalov.vad.silero.VadSilero
 import com.konovalov.vad.silero.config.Mode
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -127,7 +126,7 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
         }
     }
 
-    private val coroutineScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val coroutineScope = CoroutineScope(Dispatchers.IO)
     private var folderName: String = ""
     private lateinit var config: Voice2RxInitConfig
 

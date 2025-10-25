@@ -12,6 +12,7 @@ import com.eka.voice2rx_sdk.sdkinit.V2RxInternal
 import com.eka.voice2rx_sdk.sdkinit.Voice2Rx
 import com.konovalov.vad.silero.config.SampleRate
 import java.io.File
+import kotlin.time.measureTime
 
 internal class UploadService(
     private val context: Context,
@@ -83,18 +84,21 @@ internal class UploadService(
                 return
             }
             if (audioProcessor == null) return
-            val audioQualityMetrics = AudioQualityAnalyzer.analyzeAudioQuality(
-                audioData = totalAudioData,
-                audioProcessor = audioProcessor
-            )
-            v2RxInternal.updateAudioQualityMetrics(audioQualityMetrics)
+            val time = measureTime {
+                val audioQualityMetrics = AudioQualityAnalyzer.analyzeAudioQuality(
+                    audioData = totalAudioData,
+                    audioProcessor = audioProcessor
+                )
+                v2RxInternal.updateAudioQualityMetrics(audioQualityMetrics)
+            }
+            VoiceLogger.d(TAG, "Audio quality calculation took ${time.inWholeSeconds} s")
         } catch (e: Exception) {
             VoiceLogger.d(TAG, e.printStackTrace().toString())
         }
     }
 
     private fun calculateDurationByMargin(audioDataSize: Int): Boolean {
-        return audioDataSize >= (sampleRate * 3)
+        return audioDataSize >= (sampleRate * 1)
     }
 
     fun getCombinedAudio(audioChunks: ArrayList<ShortArray>): ShortArray {

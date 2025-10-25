@@ -134,5 +134,5 @@ dependencies {
     implementation(libs.retrofit.gson)
     implementation(libs.haroldadmin.networkresponseadapter)
     implementation(libs.androidx.work.runtime.ktx)
-    implementation("org.pytorch:pytorch_android:2.1.0")
+    implementation(libs.onnxruntime.android)
 }

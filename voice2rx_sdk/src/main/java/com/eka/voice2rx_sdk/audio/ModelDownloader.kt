@@ -15,8 +15,8 @@ class ModelDownloader(private val context: Context) {
     companion object {
         private const val TAG = "ModelDownloader"
         private const val CDN_BASE_URL =
-            "https://github.com/divyesh11/squim-models/releases/download/v1.0.1/"
-        private const val MODEL_NAME = "squim_objective.ptl"
+            "https://github.com/divyesh11/squim-models/releases/download/v1.0.6/"
+        private const val MODEL_NAME = "squim_objective.onnx"
         private const val ETAG_FILE_NAME = "squim_objective.etag"
     }
 
