@@ -187,7 +187,7 @@ class SquimAnalyzer(private val context: Context) {
                 val floatBuffer = it.floatBuffer
                 val floatArray = FloatArray(floatBuffer.remaining())
                 floatBuffer.get(floatArray)
-                results[key] = floatArray.getOrElse(0, { 0f })
+                results[key] = floatArray.getOrElse(0) { 0f }
             }
         }
         VoiceLogger.d(TAG, "Results: $results")
@@ -198,9 +198,10 @@ class SquimAnalyzer(private val context: Context) {
 
 
         // Extract results - handle both Tuple and TensorList
-        val stoi = 0.0f
-        val pesq = 0.0f
-        val siSDR = 0.0f
+//        {stoi=0.45684606, pesq=1.1719481, si_sdr=-12.458948}
+        val stoi = results["stoi"] ?: 0.0f
+        val pesq = results["pesq"] ?: 0.0f
+        val siSDR = results["si_sdr"] ?: 0.0f
 
         return AudioQualityMetrics(stoi, pesq, siSDR)
     }
