@@ -330,7 +330,10 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
                         .setSilenceDurationMs(DEFAULT_SILENCE_DURATION_MS)
                         .build()
                     isVadActive = true
-                    audioProcessor = AudioProcessor(context = app.applicationContext)
+                    audioProcessor = AudioProcessor(
+                        context = app.applicationContext,
+                        isAudioQualityAnalysisEnabled = Voice2Rx.getVoice2RxInitConfiguration().audioQuality == AudioQualityConfig.ENABLED
+                    )
 
                     recorder = VoiceRecorder(this@V2RxInternal, this@V2RxInternal)
                     audioHelper = AudioHelper(
@@ -348,7 +351,9 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
                         audioHelper = audioHelper,
                         sessionId = sessionId,
                         v2RxInternal = this@V2RxInternal,
-                        audioProcessor = audioProcessor
+                        audioProcessor = audioProcessor,
+                        audioQualityConfig = Voice2Rx.getVoice2RxInitConfiguration().audioQuality,
+                        sampleRate = Voice2Rx.getVoice2RxInitConfiguration().sampleRate.value
                     )
 
                     isRecording = true
