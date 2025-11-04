@@ -134,4 +134,5 @@ dependencies {
     implementation(libs.retrofit.gson)
     implementation(libs.haroldadmin.networkresponseadapter)
     implementation(libs.androidx.work.runtime.ktx)
+    implementation(libs.onnxruntime.android)
 }

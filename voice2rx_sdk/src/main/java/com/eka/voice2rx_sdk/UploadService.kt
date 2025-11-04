@@ -1,13 +1,17 @@
 package com.eka.voice2rx_sdk
 
 import android.content.Context
+import com.eka.voice2rx_sdk.audio.processing.AudioProcessor
+import com.eka.voice2rx_sdk.common.AudioQualityAnalyzer
 import com.eka.voice2rx_sdk.common.Voice2RxUtils
 import com.eka.voice2rx_sdk.common.voicelogger.VoiceLogger
 import com.eka.voice2rx_sdk.data.local.db.entities.VoiceFileType
 import com.eka.voice2rx_sdk.data.local.models.FileInfo
 import com.eka.voice2rx_sdk.data.local.models.IncludeStatus
+import com.eka.voice2rx_sdk.sdkinit.AudioQualityConfig
 import com.eka.voice2rx_sdk.sdkinit.V2RxInternal
 import com.eka.voice2rx_sdk.sdkinit.Voice2Rx
+import com.konovalov.vad.silero.config.SampleRate
 import java.io.File
 
 internal class UploadService(
@@ -15,6 +19,9 @@ internal class UploadService(
     private val audioHelper: AudioHelper,
     private val sessionId: String,
     private val v2RxInternal: V2RxInternal,
+    private val audioProcessor: AudioProcessor? = null,
+    private val audioQualityConfig: AudioQualityConfig,
+    private val sampleRate: Int = SampleRate.SAMPLE_RATE_16K.value
 ) {
     companion object {
         const val TAG = "UploadService"
@@ -38,21 +45,59 @@ internal class UploadService(
 
             val clipIndex = currentClipIndex
             val lastClipIndex = lastClipIndex1
-            if (clipIndex != -1) {
-                clippedAudioData.addAll(
-                    audioData.subList(lastClipIndex + 1, clipIndex + 1).map { it.frameData })
-
-                generateAudioFileFromAudioData(
-                    audioData = getCombinedAudio(clippedAudioData),
-                    startIndex = lastClipIndex,
-                    endIndex = clipIndex,
-                    onFileUploaded = onFileUploaded
-                )
-                audioHelper.removeData()
+            if (clipIndex < 0) {
+                return
             }
+            clippedAudioData.addAll(
+                audioData.subList(lastClipIndex + 1, clipIndex + 1).map { it.frameData })
+
+            generateAudioFileFromAudioData(
+                audioData = getCombinedAudio(clippedAudioData),
+                startIndex = lastClipIndex,
+                endIndex = clipIndex,
+                onFileUploaded = onFileUploaded
+            )
+            audioHelper.removeData()
         } catch (e: Exception) {
             VoiceLogger.d(TAG, e.printStackTrace().toString())
         }
+    }
+
+    fun updateAudioQualityMetrics(
+        lastClipIndex1: Int,
+        currentClipIndex: Int,
+    ) {
+        try {
+            val audioData = audioHelper.getAudioRecordData()
+            val clippedAudioData = ArrayList<ShortArray>()
+
+            val clipIndex = currentClipIndex
+            val lastClipIndex = lastClipIndex1
+
+            if (clipIndex < 0 || lastClipIndex < 0) {
+                return
+            }
+            clippedAudioData.addAll(
+                audioData.subList(lastClipIndex + 1, clipIndex + 1).map { it.frameData })
+            val totalAudioData = getCombinedAudio(clippedAudioData)
+            // If data is less than 5 seconds than do not calculate the audio quality as it will have less confidence
+            if (calculateDurationByMargin(audioDataSize = totalAudioData.size)) {
+                return
+            }
+            if (audioProcessor == null) return
+            if (audioQualityConfig == AudioQualityConfig.DISABLED) return
+            val audioQualityMetrics = AudioQualityAnalyzer.analyzeAudioQuality(
+                audioData = totalAudioData,
+                audioProcessor = audioProcessor
+            )
+            v2RxInternal.updateAudioQualityMetrics(audioQualityMetrics)
+        } catch (e: Exception) {
+            VoiceLogger.d(TAG, e.printStackTrace().toString())
+        }
+    }
+
+    private fun calculateDurationByMargin(audioDataSize: Int): Boolean {
+        return audioDataSize >= (sampleRate * 1)
     }
 
     fun getCombinedAudio(audioChunks: ArrayList<ShortArray>): ShortArray {

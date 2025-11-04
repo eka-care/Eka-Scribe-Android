@@ -13,7 +13,7 @@ import java.util.Locale
 
 internal class AudioHelper(
     private val context: Context,
-    private val viewModel: V2RxInternal,
+    private val v2RxInternal: V2RxInternal,
     private val sessionId: String,
     private val prefLength: Int = 10,
     private val despLength: Int = 20,
@@ -21,7 +21,6 @@ internal class AudioHelper(
     private val sampleRate: Int = 16000,
     private val frameSize: Int = 512
 ) {
-
     companion object {
         private const val TAG = "AudioHelper"
     }
@@ -32,6 +31,7 @@ internal class AudioHelper(
 
     private var silenceDuration = 0
     private var lastClipIndex = 0
+    private var lastAudioQualityIndex = 0
     private var currentClipIndex = 0
     private var isClipping = false
 
@@ -65,12 +65,26 @@ internal class AudioHelper(
 
         audioRecordModel.isClipped = isClipPointFrame
         audioRecordData.add(audioRecordModel)
+        updateAudioQualityMetrics()
 
         if (isClipPointFrame) {
             silenceDuration = 0
             clipTimeStamps.add(clipTime)
-            viewModel.getUploadService().processAndUpload(lastClipIndex, currentClipIndex)
+            v2RxInternal.getUploadService().processAndUpload(lastClipIndex, currentClipIndex)
         }
+    }
+
+    private fun updateAudioQualityMetrics() {
+        val currentIndex = audioRecordData.size - 1
+        val lastIndex = currentIndex - ((sampleRate * 1) / frameSize) + 1
+        if (lastIndex < lastAudioQualityIndex) {
+            return
+        }
+        lastAudioQualityIndex = currentIndex
+        v2RxInternal.getUploadService().updateAudioQualityMetrics(
+            lastClipIndex1 = lastIndex,
+            currentClipIndex = currentIndex
+        )
     }
 
     private fun updateSilenceDuration(audioRecordModel: AudioRecordModel) {
@@ -111,7 +125,7 @@ internal class AudioHelper(
         lastClipIndex = currentClipIndex
         currentClipIndex = audioRecordData.size - 1
         isClipping = true
-        viewModel.getUploadService()
+        v2RxInternal.getUploadService()
             .processAndUpload(lastClipIndex, currentClipIndex, onFileUploaded = onFileUploaded)
     }
 
@@ -155,6 +169,6 @@ internal class AudioHelper(
     }
 
     fun onNewFileCreated(fileName: String, endTime: String, startTime: String) {
-        viewModel.addValueToChunksInfo(fileName, FileInfo(st = startTime, et = endTime))
+        v2RxInternal.addValueToChunksInfo(fileName, FileInfo(st = startTime, et = endTime))
     }
 }

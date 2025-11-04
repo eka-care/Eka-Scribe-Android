@@ -5,6 +5,8 @@ import android.content.Context
 import com.eka.voice2rx_sdk.AudioHelper
 import com.eka.voice2rx_sdk.AudioRecordModel
 import com.eka.voice2rx_sdk.UploadService
+import com.eka.voice2rx_sdk.audio.processing.AudioProcessor
+import com.eka.voice2rx_sdk.common.AudioQualityMetrics
 import com.eka.voice2rx_sdk.common.ResponseState
 import com.eka.voice2rx_sdk.common.SessionResponse
 import com.eka.voice2rx_sdk.common.UploadListener
@@ -140,6 +142,9 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
     private val _voiceActivityFlow = MutableStateFlow(VoiceActivityData())
     val voiceActivityFlow = _voiceActivityFlow.asStateFlow()
 
+    private val _audioQualityFlow = MutableStateFlow<AudioQualityMetrics?>(null)
+    val audioQualityFlow = _audioQualityFlow.asStateFlow()
+
     private lateinit var recorder: VoiceRecorder
     private lateinit var audioHelper: AudioHelper
     private lateinit var uploadService: UploadService
@@ -149,6 +154,7 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
 
     private lateinit var fullRecordingFile: File
     private var sessionUploadStatus = true
+    private var audioProcessor: AudioProcessor? = null
 
     private var currentMode = Voice2RxType.DICTATION
 
@@ -202,6 +208,11 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
     fun addValueToChunksInfo(fileName: String, fileInfo: FileInfo) {
         chunksInfo[fileName.split("_").last()] = fileInfo
         recordedFiles.add(fileName)
+    }
+
+    fun updateAudioQualityMetrics(audioQualityMetrics: AudioQualityMetrics?) {
+        if (audioQualityMetrics == null) return
+        _audioQualityFlow.value = audioQualityMetrics
     }
 
     fun onNewFileCreated(
@@ -319,11 +330,15 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
                         .setSilenceDurationMs(DEFAULT_SILENCE_DURATION_MS)
                         .build()
                     isVadActive = true
+                    audioProcessor = AudioProcessor(
+                        context = app.applicationContext,
+                        isAudioQualityAnalysisEnabled = Voice2Rx.getVoice2RxInitConfiguration().audioQuality == AudioQualityConfig.ENABLED
+                    )
 
                     recorder = VoiceRecorder(this@V2RxInternal, this@V2RxInternal)
                     audioHelper = AudioHelper(
                         context = app,
-                        viewModel = this@V2RxInternal,
+                        v2RxInternal = this@V2RxInternal,
                         sessionId = sessionId,
                         sampleRate = Voice2Rx.getVoice2RxInitConfiguration().sampleRate.value,
                         frameSize = Voice2Rx.getVoice2RxInitConfiguration().frameSize.value,
@@ -335,7 +350,10 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
                         context = app,
                         audioHelper = audioHelper,
                         sessionId = sessionId,
-                        v2RxInternal = this@V2RxInternal
+                        v2RxInternal = this@V2RxInternal,
+                        audioProcessor = audioProcessor,
+                        audioQualityConfig = Voice2Rx.getVoice2RxInitConfiguration().audioQuality,
+                        sampleRate = Voice2Rx.getVoice2RxInitConfiguration().sampleRate.value
                     )
 
                     isRecording = true
@@ -345,10 +363,10 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
                     )
                     chunksInfo = mutableMapOf<String, FileInfo>()
                     recorder.start(
-                        app,
-                        fullRecordingFile,
-                        vad.sampleRate.value,
-                        vad.frameSize.value
+                        context = app,
+                        fullRecordingFile = fullRecordingFile,
+                        sampleRate = vad.sampleRate.value,
+                        frameSize = vad.frameSize.value
                     )
                     onStart(sessionId)
                     config.voice2RxLifecycle.onStartSession(sessionId)
@@ -416,6 +434,29 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
                 )
             }
         )
+    }
+
+    fun releaseResources() {
+        coroutineScope.launch {
+            try {
+                audioProcessor?.release()
+                isRecording = false
+                if (::recorder.isInitialized) {
+                    recorder.stop()
+                }
+                if (::vad.isInitialized && isVadActive) {
+                    try {
+                        vad.close()
+                        isVadActive = false
+                    } catch (e: Exception) {
+                        VoiceLogger.d(TAG, "VAD close exception: ${e.message}")
+                        isVadActive = false
+                    }
+                }
+            } catch (e: Exception) {
+                VoiceLogger.d(TAG, "Error releasing resources: ${e.message}")
+            }
+        }
     }
 
     suspend fun getVoice2RxStatus(sessionId: String): SessionStatus {
@@ -547,29 +588,12 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
         )
         uploadWholeFileData()
         stopVoiceTransaction()
+        releaseResources()
         config.voice2RxLifecycle.onStopSession(sessionId, chunksInfo.size)
     }
 
     fun isRecording(): Boolean {
         return isRecording
-    }
-
-    fun dispose() {
-        coroutineScope.launch {
-            isRecording = false
-            if (::recorder.isInitialized) {
-                recorder.stop()
-            }
-            if (::vad.isInitialized && isVadActive) {
-                try {
-                    vad.close()
-                    isVadActive = false
-                } catch (e: Exception) {
-                    VoiceLogger.d(TAG, "VAD close exception: ${e.message}")
-                    isVadActive = false
-                }
-            }
-        }
     }
 
     fun updateSession(
