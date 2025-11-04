@@ -10,6 +10,7 @@ activityCompose = "1.10.0"
 composeBom = "2023.08.00"
 appcompat = "1.7.0"
 material = "1.12.0"
+onnxruntimeAndroid = "1.23.2"
 silero = "2.0.10"
 awsAndroidSdkS3 = "2.22.0"
 ext-junit = "1.2.0"
@@ -41,6 +42,7 @@ androidx-ui-tooling-preview = { group = "androidx.compose.ui", name = "ui-toolin
 androidx-ui-test-manifest = { group = "androidx.compose.ui", name = "ui-test-manifest" }
 androidx-ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-test-junit4" }
 androidx-material3 = { group = "androidx.compose.material3", name = "material3" }
+onnxruntime-android = { module = "com.microsoft.onnxruntime:onnxruntime-android", version.ref = "onnxruntimeAndroid" }
 silero = { module = "com.github.gkonovalov.android-vad:silero", version.ref = "silero" }
 ext-junit = { module = "androidx.test.ext:junit", version.ref = "ext-junit" }
 aws-android-sdk-core = { module = "com.amazonaws:aws-android-sdk-core", version.ref = "awsAndroidSdkS3" }

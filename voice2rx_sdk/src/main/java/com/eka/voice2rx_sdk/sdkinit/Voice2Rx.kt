@@ -3,6 +3,7 @@ package com.eka.voice2rx_sdk.sdkinit
 import android.content.Context
 import android.util.Log
 import androidx.work.WorkManager
+import com.eka.voice2rx_sdk.common.AudioQualityMetrics
 import com.eka.voice2rx_sdk.common.ResponseState
 import com.eka.voice2rx_sdk.common.SessionResponse
 import com.eka.voice2rx_sdk.common.models.EkaScribeError
@@ -264,6 +265,8 @@ object Voice2Rx {
 
     fun getVoiceActivityFlow(): Flow<VoiceActivityData>? = v2RxInternal?.voiceActivityFlow
 
+    fun getAudioQualityFlow(): Flow<AudioQualityMetrics?>? = v2RxInternal?.audioQualityFlow
+
     suspend fun getVoice2RxSessionStatus(sessionId: String): SessionStatus {
         return v2RxInternal?.getVoice2RxStatus(sessionId) ?: SessionStatus(
             sessionId = sessionId,
@@ -280,7 +283,7 @@ object Voice2Rx {
         )
     }
 
-    fun dispose() {
-        v2RxInternal?.dispose()
+    fun releaseResources() {
+        v2RxInternal?.releaseResources()
     }
 }

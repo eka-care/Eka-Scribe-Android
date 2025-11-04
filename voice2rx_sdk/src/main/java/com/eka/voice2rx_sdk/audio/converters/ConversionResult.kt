@@ -1,4 +1,4 @@
-package com.eka.voice2rx_sdk.audio_converters
+package com.eka.voice2rx_sdk.audio.converters
 
 import androidx.annotation.Keep
 

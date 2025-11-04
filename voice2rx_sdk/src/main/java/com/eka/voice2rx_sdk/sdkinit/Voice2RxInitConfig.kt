@@ -14,5 +14,11 @@ data class Voice2RxInitConfig(
     val despCutDuration: Int = 20, // In seconds
     val maxCutDuration: Int = 25,
     val authorizationToken: String,
+    val audioQuality: AudioQualityConfig = AudioQualityConfig.ENABLED,
     val ekaAuthConfig: EkaAuthConfig? = null,
 )
+
+enum class AudioQualityConfig {
+    ENABLED,
+    DISABLED
+}
