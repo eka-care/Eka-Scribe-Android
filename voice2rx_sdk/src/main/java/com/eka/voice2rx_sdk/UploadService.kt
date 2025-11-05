@@ -21,6 +21,7 @@ internal class UploadService(
     private val v2RxInternal: V2RxInternal,
     private val audioProcessor: AudioProcessor? = null,
     private val audioQualityConfig: AudioQualityConfig,
+    private val audioQualityAnalysisDuration: Int,
     private val sampleRate: Int = SampleRate.SAMPLE_RATE_16K.value
 ) {
     companion object {
@@ -97,7 +98,7 @@ internal class UploadService(
     }
 
     private fun calculateDurationByMargin(audioDataSize: Int): Boolean {
-        return audioDataSize >= (sampleRate * 1)
+        return audioDataSize >= (sampleRate * audioQualityAnalysisDuration)
     }
 
     fun getCombinedAudio(audioChunks: ArrayList<ShortArray>): ShortArray {

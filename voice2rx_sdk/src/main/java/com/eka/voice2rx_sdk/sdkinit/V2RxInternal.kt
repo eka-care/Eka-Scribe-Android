@@ -345,6 +345,7 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
                         prefLength = Voice2Rx.getVoice2RxInitConfiguration().prefCutDuration,
                         despLength = Voice2Rx.getVoice2RxInitConfiguration().despCutDuration,
                         maxLength = Voice2Rx.getVoice2RxInitConfiguration().maxCutDuration,
+                        audioQualityAnalysisDuration = Voice2Rx.getVoice2RxInitConfiguration().audioQualityDuration
                     )
                     uploadService = UploadService(
                         context = app,
@@ -353,6 +354,7 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
                         v2RxInternal = this@V2RxInternal,
                         audioProcessor = audioProcessor,
                         audioQualityConfig = Voice2Rx.getVoice2RxInitConfiguration().audioQuality,
+                        audioQualityAnalysisDuration = Voice2Rx.getVoice2RxInitConfiguration().audioQualityDuration,
                         sampleRate = Voice2Rx.getVoice2RxInitConfiguration().sampleRate.value
                     )
 
