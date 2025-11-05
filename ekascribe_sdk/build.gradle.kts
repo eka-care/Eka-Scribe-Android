@@ -98,6 +98,9 @@ android {
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
+    // Voice Activity analysis
+    api(libs.silero)
+
     // Serialization library
     implementation(libs.google.gson)
 
