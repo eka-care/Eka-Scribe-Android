@@ -15,6 +15,7 @@ internal class AudioHelper(
     private val context: Context,
     private val v2RxInternal: V2RxInternal,
     private val sessionId: String,
+    private val audioQualityAnalysisDuration: Int,
     private val prefLength: Int = 10,
     private val despLength: Int = 20,
     private val maxLength: Int = 25,
@@ -76,7 +77,7 @@ internal class AudioHelper(
 
     private fun updateAudioQualityMetrics() {
         val currentIndex = audioRecordData.size - 1
-        val lastIndex = currentIndex - ((sampleRate * 1) / frameSize) + 1
+        val lastIndex = currentIndex - ((sampleRate * audioQualityAnalysisDuration) / frameSize) + 1
         if (lastIndex < lastAudioQualityIndex) {
             return
         }
