@@ -313,6 +313,7 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
             sessionUploadStatus = true
             sessionId = session
             recordedFiles.clear()
+            folderName = Voice2RxUtils.getCurrentDateInYYMMDD()
             initVoice2RxTransaction(
                 mode = mode,
                 patientDetails = patientDetails,
