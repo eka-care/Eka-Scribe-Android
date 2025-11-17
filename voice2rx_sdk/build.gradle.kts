@@ -114,6 +114,8 @@ afterEvaluate {
 
 dependencies {
     testImplementation(libs.junit)
+    testImplementation(libs.mockito.core)
+    testImplementation(libs.mockito.kotlin)
     androidTestImplementation(libs.ext.junit)
     api(libs.silero)
     implementation(libs.aws.android.sdk.s3)
