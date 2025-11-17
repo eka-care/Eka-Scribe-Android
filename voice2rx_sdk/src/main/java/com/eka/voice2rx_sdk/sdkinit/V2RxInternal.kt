@@ -442,7 +442,6 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
     fun releaseResources() {
         coroutineScope.launch {
             try {
-                audioProcessor?.release()
                 isRecording = false
                 if (::recorder.isInitialized) {
                     recorder.stop()
@@ -456,6 +455,7 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
                         isVadActive = false
                     }
                 }
+                audioProcessor?.release()
             } catch (e: Exception) {
                 VoiceLogger.d(TAG, "Error releasing resources: ${e.message}")
             }
