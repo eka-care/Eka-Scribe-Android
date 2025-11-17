@@ -19,6 +19,7 @@ class SquimAnalyzer(private val context: Context) {
     //    private var module: Module? = null
     private var ortEnvironment: OrtEnvironment? = null
     private var ortSession: OrtSession? = null
+    private val sessionLock = Any()
 
     companion object {
         private const val TAG = "SquimAnalyzer"
@@ -34,16 +35,15 @@ class SquimAnalyzer(private val context: Context) {
     private fun loadModel() {
         CoroutineScope(Dispatchers.IO).launch {
             try {
+                ortEnvironment = OrtEnvironment.getEnvironment()
                 val modelDownloader = ModelDownloader(context)
                 VoiceLogger.d(TAG, "Loading SQUIM model...")
                 val startTime = System.currentTimeMillis()
 
                 // Download model if needed (uses ETag for caching)
                 val modelFile = modelDownloader.downloadModelIfNeeded()
-                ortEnvironment = OrtEnvironment.getEnvironment()
                 val sessionOptions = OrtSession.SessionOptions()
                 sessionOptions.addCPU(true)
-                sessionOptions.addNnapi()
                 val modelBytes = modelFile.readBytes()
                 ortSession = ortEnvironment?.createSession(modelBytes, sessionOptions)
 
@@ -170,40 +170,42 @@ class SquimAnalyzer(private val context: Context) {
             "Chunk must be exactly 16000 samples, got ${chunk.size}"
         }
 
-        val inputShape = longArrayOf(1, chunk.size.toLong())
-        val inputTensor = OnnxTensor.createTensor(
-            ortEnvironment,
-            FloatBuffer.wrap(chunk),
-            inputShape
-        )
+        synchronized(sessionLock) {
+            val inputShape = longArrayOf(1, chunk.size.toLong())
+            val inputTensor = OnnxTensor.createTensor(
+                ortEnvironment,
+                FloatBuffer.wrap(chunk),
+                inputShape
+            )
 
-        val inputs = mapOf(session.inputNames.first() to inputTensor)
-        val outputs = session.run(inputs)
+            val inputs = mapOf(session.inputNames.first() to inputTensor)
 
-        val results = mutableMapOf<String, Float>()
-        outputs.forEach { (key, value) ->
-            val tensor = value as? OnnxTensor
-            tensor?.let {
-                val floatBuffer = it.floatBuffer
-                val floatArray = FloatArray(floatBuffer.remaining())
-                floatBuffer.get(floatArray)
-                results[key] = floatArray.getOrElse(0) { 0f }
+            val outputs = session.run(inputs)
+
+            val results = mutableMapOf<String, Float>()
+            outputs.forEach { (key, value) ->
+                val tensor = value as? OnnxTensor
+                tensor?.let {
+                    val floatBuffer = it.floatBuffer
+                    val floatArray = FloatArray(floatBuffer.remaining())
+                    floatBuffer.get(floatArray)
+                    results[key] = floatArray.getOrElse(0) { 0f }
+                }
             }
-        }
-        VoiceLogger.d(TAG, "Results: $results")
+            VoiceLogger.d(TAG, "Results: $results")
 
-        // Clean up
-        inputTensor.close()
-        outputs.close()
+            // Clean up
+            inputTensor.close()
+            outputs.close()
 
-
-        // Extract results - handle both Tuple and TensorList
+            // Extract results - handle both Tuple and TensorList
 //        {stoi=0.45684606, pesq=1.1719481, si_sdr=-12.458948}
-        val stoi = results["stoi"] ?: 0.0f
-        val pesq = results["pesq"] ?: 0.0f
-        val siSDR = results["si_sdr"] ?: 0.0f
+            val stoi = results["stoi"] ?: 0.0f
+            val pesq = results["pesq"] ?: 0.0f
+            val siSDR = results["si_sdr"] ?: 0.0f
 
-        return AudioQualityMetrics(stoi, pesq, siSDR)
+            return AudioQualityMetrics(stoi, pesq, siSDR)
+        }
     }
 
     /**
