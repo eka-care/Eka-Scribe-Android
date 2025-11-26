@@ -135,4 +135,5 @@ dependencies {
     implementation(libs.haroldadmin.networkresponseadapter)
     implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.onnxruntime.android)
+    implementation(libs.eka.network.android)
 }

@@ -1,5 +1,6 @@
 [versions]
 agp = "8.12.3"
+ekaNetworkAndroid = "2.0.2"
 kotlin = "2.1.0"
 coreKtx = "1.15.0"
 junit = "4.13.2"
@@ -29,6 +30,7 @@ brotiliVersion = "0.1.2"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
+eka-network-android = { module = "com.github.eka-care:eka-network-android", version.ref = "ekaNetworkAndroid" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "junitVersion" }
 androidx-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "espressoCore" }

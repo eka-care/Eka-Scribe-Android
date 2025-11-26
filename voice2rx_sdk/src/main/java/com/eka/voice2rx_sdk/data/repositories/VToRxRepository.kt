@@ -2,6 +2,7 @@ package com.eka.voice2rx_sdk.data.repositories
 
 import android.content.Context
 import android.util.Log
+import com.eka.networking.client.EkaNetwork
 import com.eka.voice2rx.data.remote.models.AwsS3ConfigResponse
 import com.eka.voice2rx_sdk.BuildConfig
 import com.eka.voice2rx_sdk.common.ResponseState
@@ -27,8 +28,6 @@ import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxInitTransaction
 import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxStopTransactionResponse
 import com.eka.voice2rx_sdk.data.remote.services.AwsS3UploadService
 import com.eka.voice2rx_sdk.data.remote.services.Voice2RxService
-import com.eka.voice2rx_sdk.networking.ConverterFactoryType
-import com.eka.voice2rx_sdk.networking.Networking
 import com.eka.voice2rx_sdk.sdkinit.Voice2Rx
 import com.google.gson.Gson
 import com.haroldadmin.cnradapter.NetworkResponse
@@ -47,12 +46,13 @@ import java.io.File
 internal class VToRxRepository(
     private val vToRxDatabase: Voice2RxDatabase
 ) {
-
-    private val remoteDataSource: Voice2RxService =
-        Networking.create(
-            clazz = Voice2RxService::class.java,
-            baseUrl = BuildConfig.DEVELOPER_URL,
-            converterFactoryType = ConverterFactoryType.GSON
+    private val remoteDataSource: Voice2RxService = EkaNetwork
+        .creatorFor(
+            appId = Voice2Rx.getVoice2RxInitConfiguration().networkConfig.appId,
+            service = "ekascribe_session_service",
+        ).create(
+            serviceUrl = BuildConfig.DEVELOPER_URL,
+            serviceClass = Voice2RxService::class.java
         )
 
     suspend fun initVoice2RxTransaction(
