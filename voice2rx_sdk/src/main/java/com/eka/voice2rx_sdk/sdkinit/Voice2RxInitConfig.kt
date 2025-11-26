@@ -1,7 +1,8 @@
 package com.eka.voice2rx_sdk.sdkinit
 
 import androidx.annotation.Keep
-import com.eka.voice2rx_sdk.sdkinit.ekaauth.EkaAuthConfig
+import com.eka.networking.client.NetworkConfig
+import com.eka.networking.token.TokenStorage
 import com.konovalov.vad.silero.config.FrameSize
 import com.konovalov.vad.silero.config.SampleRate
 
@@ -13,10 +14,9 @@ data class Voice2RxInitConfig(
     val prefCutDuration: Int = 10, // In seconds
     val despCutDuration: Int = 20, // In seconds
     val maxCutDuration: Int = 25,
-    val authorizationToken: String,
     val audioQuality: AudioQualityConfig = AudioQualityConfig.ENABLED,
     val audioQualityDuration: Int = 3, // In Seconds
-    val ekaAuthConfig: EkaAuthConfig? = null,
+    val networkConfig : NetworkConfig,
 )
 
 enum class AudioQualityConfig {
