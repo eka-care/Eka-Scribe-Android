@@ -3,6 +3,8 @@ package com.eka.voice2rx_sdk.sdkinit
 import android.content.Context
 import android.util.Log
 import androidx.work.WorkManager
+import com.eka.networking.client.EkaNetwork
+import com.eka.networking.client.NetworkConfig
 import com.eka.voice2rx_sdk.common.AudioQualityMetrics
 import com.eka.voice2rx_sdk.common.ResponseState
 import com.eka.voice2rx_sdk.common.SessionResponse
@@ -25,52 +27,29 @@ import com.eka.voice2rx_sdk.data.remote.models.requests.SupportedLanguages
 import com.eka.voice2rx_sdk.data.remote.models.responses.EkaScribeErrorDetails
 import com.eka.voice2rx_sdk.data.remote.models.responses.TemplateId
 import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxHistoryResponse
-import com.eka.voice2rx_sdk.networking.ConverterFactoryType
-import com.eka.voice2rx_sdk.networking.Networking
-import com.eka.voice2rx_sdk.sdkinit.ekaauth.OkHttpImpl
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
 object Voice2Rx {
     private var configuration: Voice2RxInitConfig? = null
-    private var v2RxInternal : V2RxInternal? = null
+    private var v2RxInternal: V2RxInternal? = null
     private var logger: LogInterceptor? = null
 
-    fun init(
-        config: Voice2RxInitConfig,
-        defaultHeaders: Map<String, String> = emptyMap(),
-        context: Context,
-    ) {
+    fun init(config: Voice2RxInitConfig, context: Context) {
         configuration = config
-        if (config.authorizationToken.isEmpty()) {
-            throw IllegalStateException("Voice2Rx SDK not initialized with authorization token")
-        }
-        if (config.ekaAuthConfig == null) {
+        try {
+            EkaNetwork.init(
+                networkConfig = config.networkConfig,
+            )
+        } catch (ex: Exception) {
             logger?.logEvent(
                 EventLog.Warning(
-                    warningCode = EventCode.VOICE2RX_SESSION_WARNING,
-                    message = "EkaAuthConfig is null. Please provide EkaAuthConfig for refreshing authentication!"
+                    warningCode = EventCode.VOICE2RX_SESSION_ERROR,
+                    message = "Error while initializing EkaNetwork: ${ex.localizedMessage}"
                 )
             )
-            Log.w(
-                "Voice2RxSDK",
-                "EkaAuthConfig is null. Please provide EkaAuthConfig for refreshing authentication!"
-            )
         }
-        try {
-            val okHttp = OkHttpImpl(
-                authorizationToken = config.authorizationToken,
-                defaultHeaders = defaultHeaders,
-                ekaAuthConfig = config.ekaAuthConfig
-            )
-            Networking.init(
-                baseUrl = "https://cog.eka.care/",
-                okHttpSetup = okHttp,
-                converterFactoryType = ConverterFactoryType.GSON
-            )
-        } catch (_: Exception) {
-        }
-        if(v2RxInternal == null) {
+        if (v2RxInternal == null) {
             v2RxInternal = V2RxInternal()
         }
         v2RxInternal?.initValues(context)
@@ -88,14 +67,6 @@ object Voice2Rx {
         VoiceLogger.enableDebugLogs = true
     }
 
-    fun updateAuthToken(newAuthToken: String?) {
-        newAuthToken?.let {
-            configuration = configuration?.copy(
-                authorizationToken = newAuthToken
-            )
-        }
-    }
-
     fun setEventLogger(logInterceptor: LogInterceptor) {
         logger = logInterceptor
     }
@@ -110,7 +81,7 @@ object Voice2Rx {
 
     fun getVoice2RxInitConfiguration(): Voice2RxInitConfig {
         if (configuration == null) {
-            throw IllegalStateException("Voice2Rx SDK not initialized with configuration")
+            throw IllegalStateException("Configuration not initialized. Please call Voice2Rx.init() first.")
         }
         return configuration!!
     }
@@ -123,9 +94,9 @@ object Voice2Rx {
     }
 
     fun retrySession(
-        context : Context,
-        sessionId : String,
-        onResponse : (ResponseState) -> Unit,
+        context: Context,
+        sessionId: String,
+        onResponse: (ResponseState) -> Unit,
     ) {
         if (v2RxInternal == null) {
             throw IllegalStateException("Voice2Rx SDK not initialized")
@@ -232,27 +203,31 @@ object Voice2Rx {
         v2RxInternal?.resumeRecording()
     }
 
-    fun updateSessionInfo(oldSessionId : String, updatedSessionId : String, status : Voice2RxSessionStatus) {
+    fun updateSessionInfo(
+        oldSessionId: String,
+        updatedSessionId: String,
+        status: Voice2RxSessionStatus
+    ) {
         v2RxInternal?.updateSession(oldSessionId, updatedSessionId, status)
     }
 
-    suspend fun getSessionsByOwnerId(ownerId : String) : List<VToRxSession>? {
+    suspend fun getSessionsByOwnerId(ownerId: String): List<VToRxSession>? {
         return v2RxInternal?.getSessionsByOwnerId(ownerId)
     }
 
-    suspend fun getHistoryVoice2Rx(count: Int ?= null): Voice2RxHistoryResponse? {
+    suspend fun getHistoryVoice2Rx(count: Int? = null): Voice2RxHistoryResponse? {
         return v2RxInternal?.getHistory(count)
     }
 
-    suspend fun getSessions() : List<VToRxSession>? {
+    suspend fun getSessions(): List<VToRxSession>? {
         return v2RxInternal?.getAllSessions()
     }
 
-    suspend fun getSessionBySessionId(sessionId : String) : VToRxSession? {
+    suspend fun getSessionBySessionId(sessionId: String): VToRxSession? {
         return v2RxInternal?.getSessionBySessionId(sessionId)
     }
 
-    fun isCurrentlyRecording() : Boolean {
+    fun isCurrentlyRecording(): Boolean {
         return v2RxInternal?.isRecording() ?: false
     }
 

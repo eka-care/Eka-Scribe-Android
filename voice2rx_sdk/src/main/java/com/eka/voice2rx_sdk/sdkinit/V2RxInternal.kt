@@ -89,7 +89,9 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
                 sessionId = sessionId,
                 voiceFileType = voiceFileType,
                 onResponse = onResponse,
-                bid = Voice2RxInternalUtils.getUserTokenData(sessionToken = Voice2Rx.getVoice2RxInitConfiguration().authorizationToken)?.businessId.toString(),
+                bid = Voice2RxInternalUtils.getUserTokenData(
+                    sessionToken = Voice2Rx.getVoice2RxInitConfiguration().networkConfig.tokenStorage.getAccessToken()
+                )?.businessId.toString(),
             )
         }
 
@@ -648,7 +650,7 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
         )
     }
 
-    suspend fun getHistory(count : Int ?= null): Voice2RxHistoryResponse {
+    suspend fun getHistory(count: Int? = null): Voice2RxHistoryResponse {
         return repository.getVoice2RxHistory(queries = count)
     }
 
@@ -675,7 +677,9 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
                 updatedAt = Voice2RxUtils.getCurrentUTCEpochMillis(),
                 fullAudioPath = Voice2RxUtils.getFullRecordingFileName(sessionId = sessionId),
                 ownerId = "",
-                bid = Voice2RxInternalUtils.getUserTokenData(Voice2Rx.getVoice2RxInitConfiguration().authorizationToken)?.businessId.toString(),
+                bid = Voice2RxInternalUtils.getUserTokenData(
+                    sessionToken = Voice2Rx.getVoice2RxInitConfiguration().networkConfig.tokenStorage.getAccessToken()
+                )?.businessId.toString(),
                 mode = mode,
                 updatedSessionId = sessionId,
                 status = Voice2RxSessionStatus.DRAFT,
