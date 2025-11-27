@@ -21,6 +21,7 @@ class SquimAnalyzer(private val context: Context) {
     private var ortSession: OrtSession? = null
     private val sessionLock = Any()
 
+
     companion object {
         private const val TAG = "SquimAnalyzer"
     }
@@ -244,12 +245,17 @@ class SquimAnalyzer(private val context: Context) {
      * Release resources
      */
     fun release() {
-        try {
-            ortSession?.close()
-            ortEnvironment?.close()
-            VoiceLogger.d(TAG, "Resources released")
-        } catch (e: Exception) {
-            VoiceLogger.e(TAG, "Error releasing resources", e)
+        synchronized(sessionLock) {
+            try {
+                ortSession?.close()
+                ortEnvironment?.close()
+                VoiceLogger.d(TAG, "Resources released")
+            } catch (e: Exception) {
+                VoiceLogger.e(TAG, "Error releasing resources", e)
+            } finally {
+                ortSession = null
+                ortEnvironment = null
+            }
         }
     }
 }
