@@ -1,7 +1,5 @@
 package com.eka.voice2rx_sdk.common.voicelogger
 
-import org.json.JSONObject
-
 sealed class EventLog {
     data class Error(
         val message: String,
@@ -9,7 +7,7 @@ sealed class EventLog {
     ) : EventLog()
 
     data class Info(
-        val params: JSONObject = JSONObject(),
+        val params: Map<String, Any?> = emptyMap(),
         val code: EventCode? = null
     ) : EventLog()
 

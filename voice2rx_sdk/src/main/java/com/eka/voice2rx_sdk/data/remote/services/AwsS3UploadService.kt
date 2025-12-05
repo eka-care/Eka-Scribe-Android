@@ -27,7 +27,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import org.json.JSONObject
 import java.io.File
 
 object AwsS3UploadService {
@@ -118,13 +117,11 @@ object AwsS3UploadService {
         Voice2Rx.logEvent(
             EventLog.Info(
                 code = EventCode.VOICE2RX_SESSION_UPLOAD_LIFECYCLE,
-                params = JSONObject(
-                    mapOf(
-                        "sessionId" to sessionId,
-                        "fileName" to fileName,
-                        "upload" to "started",
-                        "retryCount" to retryCount,
-                    )
+                params = mapOf(
+                    "sessionId" to sessionId,
+                    "fileName" to fileName,
+                    "upload" to "started",
+                    "retryCount" to retryCount,
                 )
             )
         )
@@ -134,13 +131,11 @@ object AwsS3UploadService {
                 Voice2Rx.logEvent(
                     EventLog.Info(
                         code = EventCode.VOICE2RX_SESSION_UPLOAD_LIFECYCLE,
-                        params = JSONObject(
-                            mapOf(
-                                "sessionId" to sessionId,
-                                "fileName" to fileName,
-                                "upload" to state?.name,
-                                "retryCount" to retryCount,
-                            )
+                        params = mapOf(
+                            "sessionId" to sessionId,
+                            "fileName" to fileName,
+                            "upload" to state?.name,
+                            "retryCount" to retryCount,
                         )
                     )
                 )
