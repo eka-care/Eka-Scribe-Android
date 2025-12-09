@@ -59,7 +59,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import org.json.JSONObject
 import java.io.File
 
 internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener {
@@ -300,12 +299,12 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
             Voice2Rx.logEvent(
                 EventLog.Info(
                     code = EventCode.VOICE2RX_SESSION_LIFECYCLE,
-                    params = JSONObject(
+                    params =
                         mapOf(
                             "sessionId" to session,
                             "lifecycle" to "session started"
                         )
-                    )
+
                 )
             )
             currentlySelectedLanguage = languages
@@ -384,12 +383,11 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
         Voice2Rx.logEvent(
             EventLog.Info(
                 code = EventCode.VOICE2RX_SESSION_LIFECYCLE,
-                params = JSONObject(
-                    mapOf(
+                params = mapOf(
                         "sessionId" to sessionId,
                         "lifecycle" to "session paused"
                     )
-                )
+
             )
         )
         recorder.pauseListening()
@@ -400,12 +398,11 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
         Voice2Rx.logEvent(
             EventLog.Info(
                 code = EventCode.VOICE2RX_SESSION_LIFECYCLE,
-                params = JSONObject(
-                    mapOf(
+                params = mapOf(
                         "sessionId" to sessionId,
                         "lifecycle" to "session resumed"
                     )
-                )
+
             )
         )
         recorder.resumeListening()
@@ -417,12 +414,11 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
         Voice2Rx.logEvent(
             EventLog.Info(
                 code = EventCode.VOICE2RX_SESSION_LIFECYCLE,
-                params = JSONObject(
-                    mapOf(
+                params = mapOf(
                         "sessionId" to sessionId,
                         "lifecycle" to "session stopped"
                     )
-                )
+
             )
         )
         isRecording = false
@@ -470,13 +466,12 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
         Voice2Rx.logEvent(
             EventLog.Info(
                 code = EventCode.VOICE2RX_SESSION_STATUS,
-                params = JSONObject(
-                    mapOf(
+                params = mapOf(
                         "sessionId" to sessionId,
                         "lifecycle_event" to "session_result",
                         "response" to response
                     )
-                )
+
             )
         )
         val successStates = Voice2RxUtils.getOutputSuccessStates()
@@ -488,14 +483,13 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
                     Voice2Rx.logEvent(
                         EventLog.Info(
                             code = EventCode.VOICE2RX_SESSION_STATUS,
-                            params = JSONObject(
-                                mapOf(
+                            params = mapOf(
                                     "sessionId" to sessionId,
                                     "lifecycle_event" to "session_result",
                                     "response_code" to response.code,
                                     "response" to response
                                 )
-                            )
+
                         )
                     )
                     VoiceLogger.d(
@@ -583,12 +577,11 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
         Voice2Rx.logEvent(
             EventLog.Info(
                 code = EventCode.VOICE2RX_SESSION_LIFECYCLE,
-                params = JSONObject(
-                    mapOf(
+                params = mapOf(
                         "sessionId" to sessionId,
                         "lifecycle" to "last file upload completed"
                     )
-                )
+
             )
         )
         uploadWholeFileData()

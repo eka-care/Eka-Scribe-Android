@@ -40,7 +40,6 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import org.json.JSONObject
 import java.io.File
 
 internal class VToRxRepository(
@@ -66,11 +65,9 @@ internal class VToRxRepository(
                 Voice2Rx.logEvent(
                     EventLog.Info(
                         code = EventCode.VOICE2RX_SESSION_LIFECYCLE,
-                        params = JSONObject(
-                            mapOf(
-                                "sessionId" to sessionId,
-                                "lifecycle_event" to "init",
-                            )
+                        params = mapOf(
+                            "sessionId" to sessionId,
+                            "lifecycle_event" to "init",
                         )
                     )
                 )
@@ -93,13 +90,12 @@ internal class VToRxRepository(
                     Voice2Rx.logEvent(
                         EventLog.Info(
                             code = EventCode.VOICE2RX_SESSION_ERROR,
-                            params = JSONObject(
-                                mapOf(
+                            params = mapOf(
                                     "sessionId" to sessionId,
                                     "lifecycle_event" to "init",
                                     "error" to "Error initializing transaction: ${response.body.toString()} :: ${response.error.toString()}"
                                 )
-                            )
+
                         )
                     )
                     onError(response.body)
@@ -109,13 +105,12 @@ internal class VToRxRepository(
                 Voice2Rx.logEvent(
                     EventLog.Info(
                         code = EventCode.VOICE2RX_SESSION_ERROR,
-                        params = JSONObject(
-                            mapOf(
+                        params = mapOf(
                                 "sessionId" to sessionId,
                                 "lifecycle_event" to "init",
                                 "error" to "Error initializing transaction: ${e.message}",
                             )
-                        )
+
                     )
                 )
                 NetworkResponse.UnknownError(error = e, response = null)
@@ -133,12 +128,11 @@ internal class VToRxRepository(
                 Voice2Rx.logEvent(
                     EventLog.Info(
                         code = EventCode.VOICE2RX_SESSION_LIFECYCLE,
-                        params = JSONObject(
-                            mapOf(
+                        params = mapOf(
                                 "sessionId" to sessionId,
                                 "lifecycle_event" to "stop",
                             )
-                        )
+
                     )
                 )
                 val response =
@@ -148,13 +142,12 @@ internal class VToRxRepository(
                         Voice2Rx.logEvent(
                             EventLog.Info(
                                 code = EventCode.VOICE2RX_SESSION_LIFECYCLE,
-                                params = JSONObject(
-                                    mapOf(
+                                params = mapOf(
                                         "sessionId" to sessionId,
                                         "lifecycle_event" to "stop",
                                         "response_status" to "success"
                                     )
-                                )
+
                             )
                         )
                         updateSessionUploadStage(
@@ -168,13 +161,12 @@ internal class VToRxRepository(
                         Voice2Rx.logEvent(
                             EventLog.Info(
                                 code = EventCode.VOICE2RX_SESSION_LIFECYCLE,
-                                params = JSONObject(
-                                    mapOf(
+                                params = mapOf(
                                         "sessionId" to sessionId,
                                         "lifecycle_event" to "stop",
                                         "response_status" to (response.body?.message.toString()),
                                     )
-                                )
+
                             )
                         )
                     }
@@ -188,13 +180,12 @@ internal class VToRxRepository(
                 Voice2Rx.logEvent(
                     EventLog.Info(
                         code = EventCode.VOICE2RX_SESSION_ERROR,
-                        params = JSONObject(
-                            mapOf(
+                        params = mapOf(
                                 "sessionId" to sessionId,
                                 "lifecycle_event" to "commit",
                                 "error" to "Error stopping transaction: ${e.message}",
                             )
-                        )
+
                     )
                 )
                 NetworkResponse.UnknownError(error = e, response = null)
@@ -255,13 +246,12 @@ internal class VToRxRepository(
                 Voice2Rx.logEvent(
                     EventLog.Info(
                         code = EventCode.VOICE2RX_SESSION_ERROR,
-                        params = JSONObject(
-                            mapOf(
+                        params = mapOf(
                                 "sessionId" to sessionId,
                                 "lifecycle_event" to "stop",
                                 "error" to "No audio files found for session: $sessionId",
                             )
-                        )
+
                     )
                 )
                 updateSessionUploadStage(
@@ -295,13 +285,12 @@ internal class VToRxRepository(
                 Voice2Rx.logEvent(
                     EventLog.Info(
                         code = EventCode.VOICE2RX_SESSION_ERROR,
-                        params = JSONObject(
-                            mapOf(
+                        params = mapOf(
                                 "sessionId" to sessionId,
                                 "lifecycle_event" to "commit",
                                 "error" to "No audio files found for session: $sessionId",
                             )
-                        )
+
                     )
                 )
                 return@launch
@@ -323,13 +312,12 @@ internal class VToRxRepository(
                 Voice2Rx.logEvent(
                     EventLog.Info(
                         code = EventCode.VOICE2RX_SESSION_LIFECYCLE,
-                        params = JSONObject(
-                            mapOf(
+                        params = mapOf(
                                 "sessionId" to sessionId,
                                 "lifecycle_event" to "commit",
                                 "error" to "Not all audio files are uploaded"
                             )
-                        )
+
                     )
                 )
                 VoiceLogger.e("Voice2Rx", "Not all audio files are uploaded")
@@ -346,12 +334,11 @@ internal class VToRxRepository(
                 Voice2Rx.logEvent(
                     EventLog.Info(
                         code = EventCode.VOICE2RX_SESSION_LIFECYCLE,
-                        params = JSONObject(
-                            mapOf(
+                        params = mapOf(
                                 "sessionId" to sessionId,
                                 "lifecycle_event" to "commit",
                             )
-                        )
+
                     )
                 )
                 val response =
@@ -361,13 +348,12 @@ internal class VToRxRepository(
                         Voice2Rx.logEvent(
                             EventLog.Info(
                                 code = EventCode.VOICE2RX_SESSION_LIFECYCLE,
-                                params = JSONObject(
-                                    mapOf(
+                                params = mapOf(
                                         "sessionId" to sessionId,
                                         "lifecycle_event" to "commit",
                                         "response_status" to "success"
                                     )
-                                )
+
                             )
                         )
                         updateSessionUploadStage(
@@ -380,13 +366,12 @@ internal class VToRxRepository(
                         Voice2Rx.logEvent(
                             EventLog.Info(
                                 code = EventCode.VOICE2RX_SESSION_LIFECYCLE,
-                                params = JSONObject(
-                                    mapOf(
+                                params = mapOf(
                                         "sessionId" to sessionId,
                                         "lifecycle_event" to "commit",
                                         "response_status" to (response.body?.message.toString()),
                                     )
-                                )
+
                             )
                         )
                     }
@@ -400,13 +385,12 @@ internal class VToRxRepository(
                 Voice2Rx.logEvent(
                     EventLog.Info(
                         code = EventCode.VOICE2RX_SESSION_ERROR,
-                        params = JSONObject(
-                            mapOf(
+                        params = mapOf(
                                 "sessionId" to sessionId,
                                 "lifecycle_event" to "commit",
                                 "error" to "Error committing transaction: ${e.message}",
                             )
-                        )
+
                     )
                 )
                 NetworkResponse.UnknownError(error = e, response = null)
@@ -439,15 +423,14 @@ internal class VToRxRepository(
                         Voice2Rx.logEvent(
                             EventLog.Info(
                                 code = EventCode.VOICE2RX_SESSION_LIFECYCLE,
-                                params = JSONObject(
-                                    mapOf(
+                                params = mapOf(
                                         "sessionId" to sessionId,
                                         "lifecycle_event" to "result_fetch",
                                         "retry_count" to retryCount,
                                         "response_status" to "success",
                                         "status" to responseStatusList,
                                     )
-                                )
+
                             )
                         )
                         if (response.code == 202) {
@@ -479,8 +462,7 @@ internal class VToRxRepository(
                         Voice2Rx.logEvent(
                             EventLog.Info(
                                 code = EventCode.VOICE2RX_SESSION_ERROR,
-                                params = JSONObject(
-                                    mapOf(
+                                params = mapOf(
                                         "sessionId" to sessionId,
                                         "lifecycle_event" to "result_fetch",
                                         "response_status" to "error",
@@ -488,7 +470,7 @@ internal class VToRxRepository(
                                         "error_type" to errorType,
                                         "error" to "Error fetching transaction result: ${response.body.toString()} :: ${response.error.toString()}"
                                     )
-                                )
+
                             )
                         )
                     }
@@ -508,13 +490,12 @@ internal class VToRxRepository(
                     Voice2Rx.logEvent(
                         EventLog.Info(
                             code = EventCode.VOICE2RX_SESSION_STATUS,
-                            params = JSONObject(
-                                mapOf(
+                            params = mapOf(
                                     "sessionId" to sessionId,
                                     "lifecycle_event" to "status_error",
                                     "error" to "Error getting session status: ${response.body.toString()} :: ${response.error.toString()}",
                                 )
-                            )
+
                         )
                     )
                 }
@@ -523,13 +504,12 @@ internal class VToRxRepository(
                 Voice2Rx.logEvent(
                     EventLog.Info(
                         code = EventCode.VOICE2RX_SESSION_ERROR,
-                        params = JSONObject(
-                            mapOf(
+                        params = mapOf(
                                 "sessionId" to sessionId,
                                 "lifecycle_event" to "get_session_status",
                                 "error" to "Error getting session status: ${e.message}",
                             )
-                        )
+
                     )
                 )
                 NetworkResponse.UnknownError(error = e, response = null)
@@ -581,12 +561,12 @@ internal class VToRxRepository(
                 Voice2Rx.logEvent(
                     EventLog.Info(
                         code = EventCode.VOICE2RX_SESSION_LIFECYCLE,
-                        params = JSONObject(
+                        params =
                             mapOf(
                                 "sessionId" to sessionId,
                                 "lifecycle" to "listen_to_all_files",
                             )
-                        )
+
                     )
                 )
                 vToRxDatabase.getVoice2RxDao().getAllFilesFlow(sessionId = sessionId)
@@ -605,12 +585,12 @@ internal class VToRxRepository(
                 Voice2Rx.logEvent(
                     EventLog.Info(
                         code = EventCode.VOICE2RX_SESSION_ERROR,
-                        params = JSONObject(
+                        params =
                             mapOf(
                                 "sessionId" to sessionId,
                                 "error" to "Error listening to all files for session: ${e.message}",
                             )
-                        )
+
                     )
                 )
                 VoiceLogger.e("Voice2Rx", "Error listening to all files for session: ${e.message}")
@@ -626,12 +606,12 @@ internal class VToRxRepository(
                 Voice2Rx.logEvent(
                     EventLog.Info(
                         code = EventCode.VOICE2RX_SESSION_ERROR,
-                        params = JSONObject(
+                        params =
                             mapOf(
                                 "sessionId" to session.sessionId,
                                 "error" to "Error inserting session: ${e.message}",
                             )
-                        )
+
                     )
                 )
             }
@@ -645,12 +625,11 @@ internal class VToRxRepository(
             } catch (e: Exception) {
                 EventLog.Info(
                     code = EventCode.VOICE2RX_SESSION_ERROR,
-                    params = JSONObject(
-                        mapOf(
+                    params = mapOf(
                             "sessionId" to voiceFile.foreignKey,
                             "error" to "Error inserting voice file: ${e.message}",
                         )
-                    )
+
                 )
             }
         }
@@ -664,12 +643,10 @@ internal class VToRxRepository(
             } catch (e: Exception) {
                 EventLog.Info(
                     code = EventCode.VOICE2RX_SESSION_ERROR,
-                    params = JSONObject(
-                        mapOf(
+                    params = mapOf(
                             "fileId" to fileId,
                             "error" to "Error updating voice file: ${e.message}",
                         )
-                    )
                 )
             }
         }
@@ -682,12 +659,11 @@ internal class VToRxRepository(
             } catch (e: Exception) {
                 EventLog.Info(
                     code = EventCode.VOICE2RX_SESSION_ERROR,
-                    params = JSONObject(
-                        mapOf(
+                    params = mapOf(
                             "sessionId" to sessionId,
                             "error" to "Error getting all files: ${e.message}",
                         )
-                    )
+
                 )
                 emptyList<VoiceFile>()
             }
@@ -735,13 +711,12 @@ internal class VToRxRepository(
                 Voice2Rx.logEvent(
                     EventLog.Info(
                         code = EventCode.VOICE2RX_SESSION_ERROR,
-                        params = JSONObject(
-                            mapOf(
+                        params = mapOf(
                                 "sessionId" to sessionId,
                                 "upload_stage" to uploadStage.name,
                                 "error" to "Error updating upload stage: ${e.message}",
                             )
-                        )
+
                     )
                 )
             }
@@ -814,11 +789,11 @@ internal class VToRxRepository(
             } catch (e: Exception) {
                 EventLog.Info(
                     code = EventCode.VOICE2RX_SESSION_ERROR,
-                    params = JSONObject(
+                    params =
                         mapOf(
                             "error" to "Error getting S3 config: ${e.message}",
                         )
-                    )
+
                 )
                 NetworkResponse.UnknownError(error = e, response = null)
             }
@@ -837,13 +812,12 @@ internal class VToRxRepository(
         CoroutineScope(Dispatchers.IO).launch {
             EventLog.Info(
                 code = EventCode.VOICE2RX_SESSION_LIFECYCLE,
-                params = JSONObject(
-                    mapOf(
+                params = mapOf(
                         "sessionId" to sessionId,
                         "lifecycle_event" to "retry_upload",
                         "status" to "started",
                     )
-                )
+
             )
             val session = getSessionBySessionId(sessionId = sessionId)
             if (session?.uploadStage == VoiceTransactionStage.ERROR) {
@@ -877,14 +851,14 @@ internal class VToRxRepository(
             } catch (error: Exception) {
                 EventLog.Info(
                     code = EventCode.VOICE2RX_SESSION_ERROR,
-                    params = JSONObject(
+                    params =
                         mapOf(
                             "sessionId" to sessionId,
                             "lifecycle_event" to "retry_upload",
                             "status" to "error",
                             "error" to "Error uploading files: ${error.message}",
                         )
-                    )
+
                 )
                 onResponse(ResponseState.Error(error?.message ?: "Something went wrong!"))
             }
