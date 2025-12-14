@@ -47,6 +47,7 @@ import com.eka.voice2rx_sdk.data.repositories.VToRxRepository
 import com.eka.voice2rx_sdk.recorder.AudioCallback
 import com.eka.voice2rx_sdk.recorder.AudioFocusListener
 import com.eka.voice2rx_sdk.recorder.VoiceRecorder
+import com.eka.voice2rx_sdk.sdkinit.models.SessionData
 import com.google.gson.Gson
 import com.haroldadmin.cnradapter.NetworkResponse
 import com.konovalov.vad.silero.Vad
@@ -802,6 +803,13 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
 
     suspend fun convertTransactionResult(sessionId: String, templateId: String): Result<Boolean> {
         return repository.convertTransactionResult(sessionId = sessionId, templateId = templateId)
+    }
+
+    suspend fun updateSessionResult(
+        sessionId: String,
+        updatedData: List<SessionData>
+    ): Result<Boolean> {
+        return repository.updateSessionResult(sessionId = sessionId, updatedData = updatedData)
     }
 
     suspend fun getSessionInfoAsFlow(sessionId: String): Flow<VToRxSession> {

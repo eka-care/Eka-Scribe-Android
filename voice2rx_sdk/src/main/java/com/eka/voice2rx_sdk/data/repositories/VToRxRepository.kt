@@ -20,6 +20,7 @@ import com.eka.voice2rx_sdk.data.local.db.entities.VoiceTransactionStage
 import com.eka.voice2rx_sdk.data.local.db.entities.VoiceTransactionState
 import com.eka.voice2rx_sdk.data.local.db.entities.VoiceTranscriptionOutput
 import com.eka.voice2rx_sdk.data.local.models.Voice2RxSessionStatus
+import com.eka.voice2rx_sdk.data.remote.models.requests.UpdateSessionRequest
 import com.eka.voice2rx_sdk.data.remote.models.requests.Voice2RxInitTransactionRequest
 import com.eka.voice2rx_sdk.data.remote.models.requests.Voice2RxStopTransactionRequest
 import com.eka.voice2rx_sdk.data.remote.models.responses.EkaScribeResult
@@ -29,6 +30,7 @@ import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxStopTransaction
 import com.eka.voice2rx_sdk.data.remote.services.AwsS3UploadService
 import com.eka.voice2rx_sdk.data.remote.services.Voice2RxService
 import com.eka.voice2rx_sdk.sdkinit.Voice2Rx
+import com.eka.voice2rx_sdk.sdkinit.models.SessionData
 import com.google.gson.Gson
 import com.haroldadmin.cnradapter.NetworkResponse
 import kotlinx.coroutines.CoroutineScope
@@ -941,5 +943,39 @@ internal class VToRxRepository(
             } catch (e: Exception) {
                 Result.failure(e)
             }
+    }
+
+    suspend fun updateSessionResult(
+        sessionId: String,
+        updatedData: List<SessionData>
+    ): Result<Boolean> = withContext(
+        Dispatchers.IO
+    ) {
+        return@withContext try {
+            val request = UpdateSessionRequest()
+            request.addAll(updatedData.map {
+                UpdateSessionRequest.UpdateSessionRequestItem(
+                    data = it.data,
+                    templateId = it.templateId
+                )
+            })
+            val response =
+                remoteDataSource.updateSessionOutput(sessionId = sessionId, request = request)
+            when (response) {
+                is NetworkResponse.Success -> {
+                    if (response.body.status == "success") {
+                        Result.success(true)
+                    } else {
+                        Result.failure(Exception("Something went wrong!"))
+                    }
+                }
+
+                is NetworkResponse.Error -> {
+                    Result.failure(Exception(response.body?.error?.displayMessage.toString()))
+                }
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
     }
 }

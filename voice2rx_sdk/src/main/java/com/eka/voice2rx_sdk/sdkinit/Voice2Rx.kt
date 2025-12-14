@@ -25,6 +25,7 @@ import com.eka.voice2rx_sdk.data.remote.models.requests.SupportedLanguages
 import com.eka.voice2rx_sdk.data.remote.models.responses.EkaScribeErrorDetails
 import com.eka.voice2rx_sdk.data.remote.models.responses.TemplateId
 import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxHistoryResponse
+import com.eka.voice2rx_sdk.sdkinit.models.SessionData
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -262,6 +263,14 @@ object Voice2Rx {
             templateId = templateId
         )
     }
+
+    suspend fun updateSessionResult(
+        sessionId: String,
+        updatedData: List<SessionData>
+    ): Result<Boolean>? = v2RxInternal?.updateSessionResult(
+        sessionId = sessionId,
+        updatedData = updatedData
+    )
 
     fun releaseResources() {
         v2RxInternal?.releaseResources()

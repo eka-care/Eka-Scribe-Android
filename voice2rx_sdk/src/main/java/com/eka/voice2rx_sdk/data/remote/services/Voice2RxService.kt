@@ -1,10 +1,12 @@
 package com.eka.voice2rx_sdk.data.remote.services
 
 import com.eka.voice2rx.data.remote.models.AwsS3ConfigResponse
+import com.eka.voice2rx_sdk.data.remote.models.requests.UpdateSessionRequest
 import com.eka.voice2rx_sdk.data.remote.models.requests.Voice2RxInitTransactionRequest
 import com.eka.voice2rx_sdk.data.remote.models.requests.Voice2RxStopTransactionRequest
 import com.eka.voice2rx_sdk.data.remote.models.responses.EkaScribeResult
 import com.eka.voice2rx_sdk.data.remote.models.responses.TemplateConversionResponse
+import com.eka.voice2rx_sdk.data.remote.models.responses.UpdateSessionResponse
 import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxHistoryResponse
 import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxInitTransactionResponse
 import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxStopTransactionResponse
@@ -12,6 +14,7 @@ import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxTransactionResu
 import com.haroldadmin.cnradapter.NetworkResponse
 import retrofit2.http.Body
 import retrofit2.http.GET
+import retrofit2.http.PATCH
 import retrofit2.http.POST
 import retrofit2.http.Path
 import retrofit2.http.QueryMap
@@ -56,6 +59,12 @@ interface Voice2RxService {
         @Path("session_id") sessionId: String,
         @Path("template_id") templateId: String,
     ): NetworkResponse<TemplateConversionResponse, TemplateConversionResponse>
+
+    @PATCH("voice/api/v3/status/{session_id}")
+    suspend fun updateSessionOutput(
+        @Path("session_id") sessionId: String,
+        @Body request: UpdateSessionRequest
+    ): NetworkResponse<UpdateSessionResponse, UpdateSessionResponse>
 
     @GET("voice/api/v2/transaction/history")
     suspend fun getHistory(
