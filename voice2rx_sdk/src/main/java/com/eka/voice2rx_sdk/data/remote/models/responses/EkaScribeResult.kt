@@ -26,7 +26,7 @@ data class EkaScribeResult(
             @SerializedName("status")
             var status: Voice2RxStatus? = Voice2RxStatus.IN_PROGRESS,
             @SerializedName("template_id")
-            var templateId: TemplateId?,
+            var templateId: String?,
             @SerializedName("type")
             var type: OutputType?,
             @SerializedName("value")

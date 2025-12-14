@@ -4,6 +4,7 @@ import com.eka.voice2rx.data.remote.models.AwsS3ConfigResponse
 import com.eka.voice2rx_sdk.data.remote.models.requests.Voice2RxInitTransactionRequest
 import com.eka.voice2rx_sdk.data.remote.models.requests.Voice2RxStopTransactionRequest
 import com.eka.voice2rx_sdk.data.remote.models.responses.EkaScribeResult
+import com.eka.voice2rx_sdk.data.remote.models.responses.TemplateConversionResponse
 import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxHistoryResponse
 import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxInitTransactionResponse
 import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxStopTransactionResponse
@@ -49,6 +50,12 @@ interface Voice2RxService {
         @Path("session_id") sessionId: String,
         @Body request: Voice2RxStopTransactionRequest
     ): NetworkResponse<Voice2RxStopTransactionResponse, Voice2RxStopTransactionResponse>
+
+    @POST("voice/api/v1/transaction/{session_id}/convert-to-template/{template_id}")
+    suspend fun convertTransactionResult(
+        @Path("session_id") sessionId: String,
+        @Path("template_id") templateId: String,
+    ): NetworkResponse<TemplateConversionResponse, TemplateConversionResponse>
 
     @GET("voice/api/v2/transaction/history")
     suspend fun getHistory(

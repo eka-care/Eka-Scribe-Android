@@ -1,10 +1,8 @@
 package com.eka.voice2rx_sdk.sdkinit
 
 import android.content.Context
-import android.util.Log
 import androidx.work.WorkManager
 import com.eka.networking.client.EkaNetwork
-import com.eka.networking.client.NetworkConfig
 import com.eka.voice2rx_sdk.common.AudioQualityMetrics
 import com.eka.voice2rx_sdk.common.ResponseState
 import com.eka.voice2rx_sdk.common.SessionResponse
@@ -255,6 +253,13 @@ object Voice2Rx {
         }
         return v2RxInternal?.getVoiceSessionData(sessionId = sessionId) ?: SessionResponse.Error(
             Exception("Voice2Rx SDK not initialized")
+        )
+    }
+
+    suspend fun convertTransactionResult(sessionId: String, templateId: String): Result<Boolean>? {
+        return v2RxInternal?.convertTransactionResult(
+            sessionId = sessionId,
+            templateId = templateId
         )
     }
 

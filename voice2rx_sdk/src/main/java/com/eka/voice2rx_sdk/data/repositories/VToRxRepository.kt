@@ -520,23 +520,24 @@ internal class VToRxRepository(
     fun saveSessionOutput(sessionId: String, result: EkaScribeResult) {
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                result.data?.output?.forEachIndexed { idx, it ->
-                    it?.let { output ->
-                        vToRxDatabase.getVoice2RxDao().insertTranscriptionOutput(
-                            VoiceTranscriptionOutput(
-                                outputId = Voice2RxInternalUtils.getOutputId(
-                                    sessionId = sessionId,
-                                    templateId = output.templateId?.value ?: idx.toString()
-                                ),
-                                foreignKey = sessionId,
-                                name = output.name,
-                                templateId = output.templateId,
-                                type = output.type,
-                                value = output.value
-                            )
-                        )
-                    }
-                }
+                // TODO save result locally dont need i think
+//                result.data?.output?.forEachIndexed { idx, it ->
+//                    it?.let { output ->
+//                        vToRxDatabase.getVoice2RxDao().insertTranscriptionOutput(
+//                            VoiceTranscriptionOutput(
+//                                outputId = Voice2RxInternalUtils.getOutputId(
+//                                    sessionId = sessionId,
+//                                    templateId = output.templateId ?: idx.toString()
+//                                ),
+//                                foreignKey = sessionId,
+//                                name = output.name,
+//                                templateId = output.templateId,
+//                                type = output.type,
+//                                value = output.value
+//                            )
+//                        )
+//                    }
+//                }
             } catch (e: Exception) {
                 Log.e("Voice2Rx", "Error saving session output: ${e.message}")
             }
@@ -915,5 +916,30 @@ internal class VToRxRepository(
         }
 
         awaitClose {}
+    }
+
+    suspend fun convertTransactionResult(sessionId: String, templateId: String): Result<Boolean> =
+        withContext(Dispatchers.IO) {
+            return@withContext try {
+                val response = remoteDataSource.convertTransactionResult(
+                    sessionId = sessionId,
+                    templateId = templateId
+                )
+                when (response) {
+                    is NetworkResponse.Success -> {
+                        if (response.body.status == "success") {
+                            Result.success(true)
+                        } else {
+                            Result.failure(Exception("Something went wrong!"))
+                        }
+                    }
+
+                    is NetworkResponse.Error -> {
+                        Result.failure(Exception(response.body?.error?.displayMessage.toString()))
+                    }
+                }
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
     }
 }

@@ -800,6 +800,10 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
         }
     }
 
+    suspend fun convertTransactionResult(sessionId: String, templateId: String): Result<Boolean> {
+        return repository.convertTransactionResult(sessionId = sessionId, templateId = templateId)
+    }
+
     suspend fun getSessionInfoAsFlow(sessionId: String): Flow<VToRxSession> {
         return repository.getSessionInfoAsFlow(sessionId = sessionId)
     }
