@@ -817,9 +817,8 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
         return repository.getTemplates()
     }
 
-    suspend fun getSessionOutput(): Result<TemplateOutput> {
-        val response = repository.getVoice2RxStatus(sessionId)
-
+    suspend fun getSessionOutput(sessionId: String): Result<List<TemplateOutput>> {
+        return repository.pollEkaScribeResult(sessionId)
     }
 
     suspend fun getSessionInfoAsFlow(sessionId: String): Flow<VToRxSession> {

@@ -24,6 +24,7 @@ import com.eka.voice2rx_sdk.data.remote.models.requests.UpdateSessionRequest
 import com.eka.voice2rx_sdk.data.remote.models.requests.Voice2RxInitTransactionRequest
 import com.eka.voice2rx_sdk.data.remote.models.requests.Voice2RxStopTransactionRequest
 import com.eka.voice2rx_sdk.data.remote.models.responses.EkaScribeResult
+import com.eka.voice2rx_sdk.data.remote.models.responses.EkaScribeResultV3
 import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxHistoryResponse
 import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxInitTransactionResponse
 import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxStopTransactionResponse
@@ -33,11 +34,14 @@ import com.eka.voice2rx_sdk.data.remote.services.Voice2RxService
 import com.eka.voice2rx_sdk.sdkinit.Voice2Rx
 import com.eka.voice2rx_sdk.sdkinit.models.SessionData
 import com.eka.voice2rx_sdk.sdkinit.models.TemplateItem
+import com.eka.voice2rx_sdk.sdkinit.models.TemplateOutput
+import com.eka.voice2rx_sdk.sdkinit.models.toTemplateOutput
 import com.google.gson.Gson
 import com.haroldadmin.cnradapter.NetworkResponse
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.collectLatest
@@ -513,6 +517,84 @@ internal class VToRxRepository(
                                 "lifecycle_event" to "get_session_status",
                                 "error" to "Error getting session status: ${e.message}",
                             )
+
+                    )
+                )
+                NetworkResponse.UnknownError(error = e, response = null)
+            }
+        }
+    }
+
+    suspend fun pollEkaScribeResult(
+        sessionId: String,
+        maxRetries: Int = 3
+    ): Result<List<TemplateOutput>> = withContext(Dispatchers.IO) {
+        return@withContext try {
+            var retryCount = 0
+            while (retryCount < maxRetries) {
+                val response = getEkaScribeResult(sessionId = sessionId)
+                when (response) {
+                    is NetworkResponse.Success -> {
+                        if (response.code != 202) {
+                            val templateOutputs =
+                                response.body.data?.templateResults?.custom?.mapNotNull {
+                                    it?.toTemplateOutput(sessionId = sessionId)
+                                }
+                            val transcriptResults =
+                                response.body.data?.templateResults?.transcript?.mapNotNull {
+                                    it?.toTemplateOutput(sessionId = sessionId)
+                                }
+                            val outputs = mutableListOf<TemplateOutput>()
+                            outputs.addAll(templateOutputs ?: emptyList())
+                            outputs.addAll(transcriptResults ?: emptyList())
+                            return@withContext Result.success(outputs.toList())
+                        }
+                    }
+
+                    is NetworkResponse.Error -> {
+                        VoiceLogger.e(
+                            "Voice2Rx",
+                            "Error getting session status: ${response.body.toString()} :: ${response.error.toString()}"
+                        )
+                    }
+                }
+                retryCount++
+                delay(2000L)
+            }
+            Result.failure(Exception("Max retries reached"))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun getEkaScribeResult(sessionId: String): NetworkResponse<EkaScribeResultV3, EkaScribeResultV3> {
+        return withContext(Dispatchers.IO) {
+            try {
+                val response =
+                    remoteDataSource.getVoice2RxTransactionResult(sessionId = sessionId)
+                if (response is NetworkResponse.Error) {
+                    Voice2Rx.logEvent(
+                        EventLog.Info(
+                            code = EventCode.VOICE2RX_SESSION_STATUS,
+                            params = mapOf(
+                                "sessionId" to sessionId,
+                                "lifecycle_event" to "status_error",
+                                "error" to "Error getting session status: ${response.body.toString()} :: ${response.error.toString()}",
+                            )
+
+                        )
+                    )
+                }
+                response
+            } catch (e: Exception) {
+                Voice2Rx.logEvent(
+                    EventLog.Info(
+                        code = EventCode.VOICE2RX_SESSION_ERROR,
+                        params = mapOf(
+                            "sessionId" to sessionId,
+                            "lifecycle_event" to "get_session_status",
+                            "error" to "Error getting session status: ${e.message}",
+                        )
 
                     )
                 )

@@ -271,8 +271,8 @@ object Voice2Rx {
         updatedData = updatedData
     )
 
-    suspend fun getSessionOutput(): Result<List<TemplateOutput>> {
-        return v2RxInternal?.getSessionOutput()
+    suspend fun getSessionOutput(sessionId: String): Result<List<TemplateOutput>> {
+        return v2RxInternal?.getSessionOutput(sessionId = sessionId)
             ?: Result.failure(Exception("EkaScribe SDK not initialized"))
     }
 

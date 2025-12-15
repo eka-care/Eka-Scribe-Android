@@ -5,13 +5,13 @@ import com.eka.voice2rx_sdk.data.remote.models.requests.UpdateSessionRequest
 import com.eka.voice2rx_sdk.data.remote.models.requests.Voice2RxInitTransactionRequest
 import com.eka.voice2rx_sdk.data.remote.models.requests.Voice2RxStopTransactionRequest
 import com.eka.voice2rx_sdk.data.remote.models.responses.EkaScribeResult
+import com.eka.voice2rx_sdk.data.remote.models.responses.EkaScribeResultV3
 import com.eka.voice2rx_sdk.data.remote.models.responses.TemplateConversionResponse
 import com.eka.voice2rx_sdk.data.remote.models.responses.TemplatesResponse
 import com.eka.voice2rx_sdk.data.remote.models.responses.UpdateSessionResponse
 import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxHistoryResponse
 import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxInitTransactionResponse
 import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxStopTransactionResponse
-import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxTransactionResult
 import com.haroldadmin.cnradapter.NetworkResponse
 import retrofit2.http.Body
 import retrofit2.http.GET
@@ -26,16 +26,15 @@ interface Voice2RxService {
     suspend fun getS3Config(
         @Url url: String,
     ): NetworkResponse<AwsS3ConfigResponse, AwsS3ConfigResponse>
-
-    @GET("voice/api/v2/status/{session_id}")
-    suspend fun getVoice2RxTransactionResult(
-        @Path("session_id") sessionId: String,
-    ): NetworkResponse<Voice2RxTransactionResult, Voice2RxTransactionResult>
-
     @GET("voice/api/v3/status/{session_id}")
     suspend fun getVoice2RxTransactionResultV3(
         @Path("session_id") sessionId: String,
     ): NetworkResponse<EkaScribeResult, EkaScribeResult>
+
+    @GET("voice/api/v3/status/{session_id}")
+    suspend fun getVoice2RxTransactionResult(
+        @Path("session_id") sessionId: String,
+    ): NetworkResponse<EkaScribeResultV3, EkaScribeResultV3>
 
     @POST("voice/api/v2/transaction/init/{session_id}")
     suspend fun initTransaction(
