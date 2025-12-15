@@ -11,4 +11,12 @@ data class Data(
     val output: List<Output?>?,
     @SerializedName("additional_data")
     val additionalData: AdditionalData? = null,
+    @SerializedName("audio_matrix")
+    val audioQualityMetrics: AudioQuality? = null
+)
+
+@Keep
+data class AudioQuality(
+    @SerializedName("quality")
+    val quality: Double? = null
 )

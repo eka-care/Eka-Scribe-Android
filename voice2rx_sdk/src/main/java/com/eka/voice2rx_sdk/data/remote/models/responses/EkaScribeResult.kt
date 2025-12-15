@@ -1,6 +1,5 @@
 package com.eka.voice2rx_sdk.data.remote.models.responses
 
-
 import androidx.annotation.Keep
 import com.eka.voice2rx_sdk.data.remote.models.requests.AdditionalData
 import com.google.gson.annotations.SerializedName
@@ -15,8 +14,16 @@ data class EkaScribeResult(
         @SerializedName("additional_data")
         var additionalData: AdditionalData?,
         @SerializedName("output")
-        var output: List<Output?>?
+        var output: List<Output?>?,
+        @SerializedName("audio_matrix")
+        val audioQualityMetrics: AudioQuality? = null
     ) {
+        @Keep
+        data class AudioQuality(
+            @SerializedName("quality")
+            val quality: Double? = null
+        )
+
         @Keep
         data class Output(
             @SerializedName("errors")

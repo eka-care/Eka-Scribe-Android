@@ -39,7 +39,6 @@ import com.eka.voice2rx_sdk.data.remote.models.requests.SupportedLanguages
 import com.eka.voice2rx_sdk.data.remote.models.requests.Voice2RxInitTransactionRequest
 import com.eka.voice2rx_sdk.data.remote.models.requests.Voice2RxStopTransactionRequest
 import com.eka.voice2rx_sdk.data.remote.models.responses.EkaScribeErrorDetails
-import com.eka.voice2rx_sdk.data.remote.models.responses.TemplateId
 import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxHistoryResponse
 import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxStatus
 import com.eka.voice2rx_sdk.data.remote.services.AwsS3UploadService
@@ -48,6 +47,9 @@ import com.eka.voice2rx_sdk.recorder.AudioCallback
 import com.eka.voice2rx_sdk.recorder.AudioFocusListener
 import com.eka.voice2rx_sdk.recorder.VoiceRecorder
 import com.eka.voice2rx_sdk.sdkinit.models.SessionData
+import com.eka.voice2rx_sdk.sdkinit.models.Template
+import com.eka.voice2rx_sdk.sdkinit.models.TemplateItem
+import com.eka.voice2rx_sdk.sdkinit.models.TemplateOutput
 import com.google.gson.Gson
 import com.haroldadmin.cnradapter.NetworkResponse
 import com.konovalov.vad.silero.Vad
@@ -248,16 +250,13 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
     }
 
     var currentlySelectedLanguage: List<SupportedLanguages> = listOf()
-    var currentlySelectedOutputFormat: List<TemplateId> = listOf()
+    var currentlySelectedOutputFormat: List<Template> = listOf()
 
     fun startRecording(
         mode: Voice2RxType = Voice2RxType.DICTATION,
         session: String = Voice2RxUtils.generateNewSessionId(),
         patientDetails: PatientDetails?,
-        outputFormats: List<TemplateId> = listOf(
-            TemplateId.CLINICAL_NOTE_TEMPLATE,
-            TemplateId.TRANSCRIPT_TEMPLATE
-        ),
+        outputFormats: List<Template>,
         languages: List<SupportedLanguages> = listOf(
             SupportedLanguages.EN_IN,
             SupportedLanguages.HI_IN
@@ -771,7 +770,9 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
             speciality = null,
             outputFormatTemplate = currentlySelectedOutputFormat.map {
                 OutputFormatTemplate(
-                    templateId = it.value
+                    templateId = it.templateId,
+                    name = it.templateName,
+                    type = "custom"
                 )
             },
         )
@@ -810,6 +811,15 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
         updatedData: List<SessionData>
     ): Result<Boolean> {
         return repository.updateSessionResult(sessionId = sessionId, updatedData = updatedData)
+    }
+
+    suspend fun getTemplates(): Result<List<TemplateItem>> {
+        return repository.getTemplates()
+    }
+
+    suspend fun getSessionOutput(): Result<TemplateOutput> {
+        val response = repository.getVoice2RxStatus(sessionId)
+
     }
 
     suspend fun getSessionInfoAsFlow(sessionId: String): Flow<VToRxSession> {

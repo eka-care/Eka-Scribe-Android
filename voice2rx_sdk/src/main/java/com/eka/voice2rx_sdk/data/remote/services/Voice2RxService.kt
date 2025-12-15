@@ -6,6 +6,7 @@ import com.eka.voice2rx_sdk.data.remote.models.requests.Voice2RxInitTransactionR
 import com.eka.voice2rx_sdk.data.remote.models.requests.Voice2RxStopTransactionRequest
 import com.eka.voice2rx_sdk.data.remote.models.responses.EkaScribeResult
 import com.eka.voice2rx_sdk.data.remote.models.responses.TemplateConversionResponse
+import com.eka.voice2rx_sdk.data.remote.models.responses.TemplatesResponse
 import com.eka.voice2rx_sdk.data.remote.models.responses.UpdateSessionResponse
 import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxHistoryResponse
 import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxInitTransactionResponse
@@ -65,6 +66,9 @@ interface Voice2RxService {
         @Path("session_id") sessionId: String,
         @Body request: UpdateSessionRequest
     ): NetworkResponse<UpdateSessionResponse, UpdateSessionResponse>
+
+    @GET("voice/api/v1/template")
+    suspend fun getTemplates(): NetworkResponse<TemplatesResponse, TemplatesResponse>
 
     @GET("voice/api/v2/transaction/history")
     suspend fun getHistory(

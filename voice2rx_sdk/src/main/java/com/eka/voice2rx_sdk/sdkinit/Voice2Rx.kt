@@ -23,9 +23,11 @@ import com.eka.voice2rx_sdk.data.remote.models.requests.ModelType
 import com.eka.voice2rx_sdk.data.remote.models.requests.PatientDetails
 import com.eka.voice2rx_sdk.data.remote.models.requests.SupportedLanguages
 import com.eka.voice2rx_sdk.data.remote.models.responses.EkaScribeErrorDetails
-import com.eka.voice2rx_sdk.data.remote.models.responses.TemplateId
 import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxHistoryResponse
 import com.eka.voice2rx_sdk.sdkinit.models.SessionData
+import com.eka.voice2rx_sdk.sdkinit.models.Template
+import com.eka.voice2rx_sdk.sdkinit.models.TemplateItem
+import com.eka.voice2rx_sdk.sdkinit.models.TemplateOutput
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -110,10 +112,7 @@ object Voice2Rx {
     fun startVoice2Rx(
         mode: Voice2RxType = Voice2RxType.DICTATION,
         patientDetails: PatientDetails? = null,
-        outputFormats: List<TemplateId> = listOf(
-            TemplateId.CLINICAL_NOTE_TEMPLATE,
-            TemplateId.TRANSCRIPT_TEMPLATE
-        ),
+        outputFormats: List<Template>,
         languages: List<SupportedLanguages> = listOf(
             SupportedLanguages.EN_IN,
             SupportedLanguages.HI_IN
@@ -271,6 +270,16 @@ object Voice2Rx {
         sessionId = sessionId,
         updatedData = updatedData
     )
+
+    suspend fun getSessionOutput(): Result<List<TemplateOutput>> {
+        return v2RxInternal?.getSessionOutput()
+            ?: Result.failure(Exception("EkaScribe SDK not initialized"))
+    }
+
+    suspend fun getTemplates(): Result<List<TemplateItem>>? {
+        return v2RxInternal?.getTemplates()
+            ?: Result.failure(Exception("EkaScribe SDK not initialized"))
+    }
 
     fun releaseResources() {
         v2RxInternal?.releaseResources()

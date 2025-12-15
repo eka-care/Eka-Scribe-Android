@@ -27,10 +27,12 @@ import com.eka.voice2rx_sdk.data.remote.models.responses.EkaScribeResult
 import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxHistoryResponse
 import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxInitTransactionResponse
 import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxStopTransactionResponse
+import com.eka.voice2rx_sdk.data.remote.models.responses.toTemplateItem
 import com.eka.voice2rx_sdk.data.remote.services.AwsS3UploadService
 import com.eka.voice2rx_sdk.data.remote.services.Voice2RxService
 import com.eka.voice2rx_sdk.sdkinit.Voice2Rx
 import com.eka.voice2rx_sdk.sdkinit.models.SessionData
+import com.eka.voice2rx_sdk.sdkinit.models.TemplateItem
 import com.google.gson.Gson
 import com.haroldadmin.cnradapter.NetworkResponse
 import kotlinx.coroutines.CoroutineScope
@@ -972,6 +974,24 @@ internal class VToRxRepository(
 
                 is NetworkResponse.Error -> {
                     Result.failure(Exception(response.body?.error?.displayMessage.toString()))
+                }
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun getTemplates(): Result<List<TemplateItem>> = withContext(Dispatchers.IO) {
+        return@withContext try {
+            val response = remoteDataSource.getTemplates()
+            when (response) {
+                is NetworkResponse.Success -> {
+                    Result.success(response.body.items?.mapNotNull { it?.toTemplateItem() }
+                        ?.filterNotNull() ?: emptyList())
+                }
+
+                is NetworkResponse.Error -> {
+                    Result.failure(Exception("Error fetching templates"))
                 }
             }
         } catch (e: Exception) {
