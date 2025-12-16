@@ -33,6 +33,7 @@ import com.eka.voice2rx_sdk.data.remote.services.AwsS3UploadService
 import com.eka.voice2rx_sdk.data.remote.services.Voice2RxService
 import com.eka.voice2rx_sdk.sdkinit.Voice2Rx
 import com.eka.voice2rx_sdk.sdkinit.models.SessionData
+import com.eka.voice2rx_sdk.sdkinit.models.SessionResult
 import com.eka.voice2rx_sdk.sdkinit.models.TemplateItem
 import com.eka.voice2rx_sdk.sdkinit.models.TemplateOutput
 import com.eka.voice2rx_sdk.sdkinit.models.toTemplateOutput
@@ -528,7 +529,7 @@ internal class VToRxRepository(
     suspend fun pollEkaScribeResult(
         sessionId: String,
         maxRetries: Int = 3
-    ): Result<List<TemplateOutput>> = withContext(Dispatchers.IO) {
+    ): Result<SessionResult> = withContext(Dispatchers.IO) {
         return@withContext try {
             var retryCount = 0
             while (retryCount < maxRetries) {
@@ -547,7 +548,13 @@ internal class VToRxRepository(
                             val outputs = mutableListOf<TemplateOutput>()
                             outputs.addAll(templateOutputs ?: emptyList())
                             outputs.addAll(transcriptResults ?: emptyList())
-                            return@withContext Result.success(outputs.toList())
+                            val audioQuality = response.body.data?.audioMatrix?.quality
+                            return@withContext Result.success(
+                                SessionResult(
+                                    audioQuality = audioQuality,
+                                    templates = outputs.toList()
+                                )
+                            )
                         }
                     }
 

@@ -47,9 +47,9 @@ import com.eka.voice2rx_sdk.recorder.AudioCallback
 import com.eka.voice2rx_sdk.recorder.AudioFocusListener
 import com.eka.voice2rx_sdk.recorder.VoiceRecorder
 import com.eka.voice2rx_sdk.sdkinit.models.SessionData
+import com.eka.voice2rx_sdk.sdkinit.models.SessionResult
 import com.eka.voice2rx_sdk.sdkinit.models.Template
 import com.eka.voice2rx_sdk.sdkinit.models.TemplateItem
-import com.eka.voice2rx_sdk.sdkinit.models.TemplateOutput
 import com.google.gson.Gson
 import com.haroldadmin.cnradapter.NetworkResponse
 import com.konovalov.vad.silero.Vad
@@ -817,7 +817,7 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
         return repository.getTemplates()
     }
 
-    suspend fun getSessionOutput(sessionId: String): Result<List<TemplateOutput>> {
+    suspend fun getSessionOutput(sessionId: String): Result<SessionResult> {
         return repository.pollEkaScribeResult(sessionId)
     }
 

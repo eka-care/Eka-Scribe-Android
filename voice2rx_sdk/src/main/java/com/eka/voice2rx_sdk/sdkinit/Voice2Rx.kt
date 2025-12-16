@@ -25,9 +25,9 @@ import com.eka.voice2rx_sdk.data.remote.models.requests.SupportedLanguages
 import com.eka.voice2rx_sdk.data.remote.models.responses.EkaScribeErrorDetails
 import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxHistoryResponse
 import com.eka.voice2rx_sdk.sdkinit.models.SessionData
+import com.eka.voice2rx_sdk.sdkinit.models.SessionResult
 import com.eka.voice2rx_sdk.sdkinit.models.Template
 import com.eka.voice2rx_sdk.sdkinit.models.TemplateItem
-import com.eka.voice2rx_sdk.sdkinit.models.TemplateOutput
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -271,7 +271,7 @@ object Voice2Rx {
         updatedData = updatedData
     )
 
-    suspend fun getSessionOutput(sessionId: String): Result<List<TemplateOutput>> {
+    suspend fun getSessionOutput(sessionId: String): Result<SessionResult> {
         return v2RxInternal?.getSessionOutput(sessionId = sessionId)
             ?: Result.failure(Exception("EkaScribe SDK not initialized"))
     }
