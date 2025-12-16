@@ -533,22 +533,14 @@ internal class VToRxRepository(
         return@withContext try {
             var retryCount = 0
             while (retryCount < maxRetries) {
-                val response = getEkaScribeResult(sessionId = sessionId)
+                val response = fetchEkaScribeResult(sessionId = sessionId)
                 when (response) {
                     is NetworkResponse.Success -> {
                         if (response.code != 202) {
-                            val templateOutputs =
-                                response.body.data?.templateResults?.custom?.mapNotNull {
-                                    it?.toTemplateOutput(sessionId = sessionId)
-                                }
-                            val transcriptResults =
-                                response.body.data?.templateResults?.transcript?.mapNotNull {
-                                    it?.toTemplateOutput(sessionId = sessionId)
-                                }
-                            val outputs = mutableListOf<TemplateOutput>()
-                            outputs.addAll(templateOutputs ?: emptyList())
-                            outputs.addAll(transcriptResults ?: emptyList())
-                            val audioQuality = response.body.data?.audioMatrix?.quality
+                            val (outputs, audioQuality) = constructEkaScribeResult(
+                                response,
+                                sessionId
+                            )
                             return@withContext Result.success(
                                 SessionResult(
                                     audioQuality = audioQuality,
@@ -574,7 +566,57 @@ internal class VToRxRepository(
         }
     }
 
-    suspend fun getEkaScribeResult(sessionId: String): NetworkResponse<EkaScribeResultV3, EkaScribeResultV3> {
+    private fun constructEkaScribeResult(
+        response: NetworkResponse.Success<EkaScribeResultV3, EkaScribeResultV3>,
+        sessionId: String
+    ): Pair<MutableList<TemplateOutput>, Double?> {
+        val templateOutputs =
+            response.body.data?.templateResults?.custom?.mapNotNull {
+                it?.toTemplateOutput(sessionId = sessionId)
+            }
+        val transcriptResults =
+            response.body.data?.templateResults?.transcript?.mapNotNull {
+                it?.toTemplateOutput(sessionId = sessionId)
+            }
+        val outputs = mutableListOf<TemplateOutput>()
+        outputs.addAll(templateOutputs ?: emptyList())
+        outputs.addAll(transcriptResults ?: emptyList())
+        val audioQuality = response.body.data?.audioMatrix?.quality
+        return Pair(outputs, audioQuality)
+    }
+
+    suspend fun getEkaScribeResult(
+        sessionId: String,
+    ): Result<SessionResult> = withContext(Dispatchers.IO) {
+        return@withContext try {
+            val response = fetchEkaScribeResult(sessionId = sessionId)
+            when (response) {
+                is NetworkResponse.Success -> {
+                    if (response.code != 202) {
+                        val (outputs, audioQuality) = constructEkaScribeResult(response, sessionId)
+                        return@withContext Result.success(
+                            SessionResult(
+                                audioQuality = audioQuality,
+                                templates = outputs.toList()
+                            )
+                        )
+                    }
+                }
+
+                is NetworkResponse.Error -> {
+                    VoiceLogger.e(
+                        "Voice2Rx",
+                        "Error getting session status: ${response.body.toString()} :: ${response.error.toString()}"
+                    )
+                }
+            }
+            Result.failure(Exception("Failed to get output!"))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun fetchEkaScribeResult(sessionId: String): NetworkResponse<EkaScribeResultV3, EkaScribeResultV3> {
         return withContext(Dispatchers.IO) {
             try {
                 val response =

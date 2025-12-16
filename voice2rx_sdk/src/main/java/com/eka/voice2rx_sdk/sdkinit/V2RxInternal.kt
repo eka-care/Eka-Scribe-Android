@@ -818,6 +818,10 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
     }
 
     suspend fun getSessionOutput(sessionId: String): Result<SessionResult> {
+        return repository.getEkaScribeResult(sessionId)
+    }
+
+    suspend fun pollEkaScribeResult(sessionId: String): Result<SessionResult> {
         return repository.pollEkaScribeResult(sessionId)
     }
 

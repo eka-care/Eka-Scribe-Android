@@ -271,6 +271,11 @@ object Voice2Rx {
         updatedData = updatedData
     )
 
+    suspend fun pollEkaScribeResult(sessionId: String): Result<SessionResult> {
+        return v2RxInternal?.pollEkaScribeResult(sessionId = sessionId)
+            ?: Result.failure(Exception("EkaScribe SDK not initialized"))
+    }
+
     suspend fun getSessionOutput(sessionId: String): Result<SessionResult> {
         return v2RxInternal?.getSessionOutput(sessionId = sessionId)
             ?: Result.failure(Exception("EkaScribe SDK not initialized"))
