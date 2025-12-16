@@ -454,6 +454,9 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
                     }
                 }
                 audioProcessor?.release()
+                if (::audioHelper.isInitialized) {
+                    audioHelper.release()
+                }
             } catch (e: Exception) {
                 VoiceLogger.d(TAG, "Error releasing resources: ${e.message}")
             }

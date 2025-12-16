@@ -38,6 +38,7 @@ object Voice2Rx {
 
     fun init(config: Voice2RxInitConfig, context: Context) {
         configuration = config
+        VoiceLogger.enableDebugLogs = config.debugMode
         try {
             EkaNetwork.init(
                 networkConfig = config.networkConfig,
