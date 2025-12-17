@@ -21,6 +21,7 @@ import com.eka.voice2rx_sdk.data.local.db.entities.VoiceTransactionState
 import com.eka.voice2rx_sdk.data.local.db.entities.VoiceTranscriptionOutput
 import com.eka.voice2rx_sdk.data.local.models.Voice2RxSessionStatus
 import com.eka.voice2rx_sdk.data.remote.models.requests.UpdateSessionRequest
+import com.eka.voice2rx_sdk.data.remote.models.requests.UpdateTemplatesRequest
 import com.eka.voice2rx_sdk.data.remote.models.requests.Voice2RxInitTransactionRequest
 import com.eka.voice2rx_sdk.data.remote.models.requests.Voice2RxStopTransactionRequest
 import com.eka.voice2rx_sdk.data.remote.models.responses.EkaScribeResult
@@ -1129,4 +1130,29 @@ internal class VToRxRepository(
             Result.failure(e)
         }
     }
+
+    suspend fun updateTemplates(enabledTemplates: List<String>): Result<Unit> =
+        withContext(Dispatchers.IO) {
+            try {
+                val response = remoteDataSource.updateTemplates(
+                    requestBody = UpdateTemplatesRequest(
+                        data = UpdateTemplatesRequest.Data(
+                            myTemplates = enabledTemplates
+                        )
+                    )
+                )
+                when (response) {
+                    is NetworkResponse.Success -> {
+                        Result.success(Unit)
+                    }
+
+                    else -> {
+                        Result.failure(Exception("Error updating templates"))
+                    }
+                }
+                Result.failure(Exception("Error updating templates"))
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+        }
 }

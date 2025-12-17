@@ -287,6 +287,11 @@ object Voice2Rx {
             ?: Result.failure(Exception("EkaScribe SDK not initialized"))
     }
 
+    suspend fun updateTemplates(favouriteTemplates: List<String>): Result<Unit> {
+        return v2RxInternal?.updateTemplates(enabledTemplates = favouriteTemplates)
+            ?: Result.failure(Exception("EkaScribe SDK not initialized"))
+    }
+
     fun releaseResources() {
         v2RxInternal?.releaseResources()
     }
