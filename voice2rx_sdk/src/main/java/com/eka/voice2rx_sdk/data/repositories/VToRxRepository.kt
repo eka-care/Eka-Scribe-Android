@@ -30,6 +30,7 @@ import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxHistoryResponse
 import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxInitTransactionResponse
 import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxStopTransactionResponse
 import com.eka.voice2rx_sdk.data.remote.models.responses.toTemplateItem
+import com.eka.voice2rx_sdk.data.remote.models.responses.toUserConfigs
 import com.eka.voice2rx_sdk.data.remote.services.AwsS3UploadService
 import com.eka.voice2rx_sdk.data.remote.services.Voice2RxService
 import com.eka.voice2rx_sdk.sdkinit.Voice2Rx
@@ -37,6 +38,7 @@ import com.eka.voice2rx_sdk.sdkinit.models.SessionData
 import com.eka.voice2rx_sdk.sdkinit.models.SessionResult
 import com.eka.voice2rx_sdk.sdkinit.models.TemplateItem
 import com.eka.voice2rx_sdk.sdkinit.models.TemplateOutput
+import com.eka.voice2rx_sdk.sdkinit.models.UserConfigs
 import com.eka.voice2rx_sdk.sdkinit.models.toTemplateOutput
 import com.google.gson.Gson
 import com.haroldadmin.cnradapter.NetworkResponse
@@ -131,7 +133,8 @@ internal class VToRxRepository(
     suspend fun stopVoice2RxTransaction(
         sessionId: String,
         request: Voice2RxStopTransactionRequest,
-        isForceCommit: Boolean = false
+        isForceCommit: Boolean = false,
+        onError: () -> Unit = {}
     ): NetworkResponse<Voice2RxStopTransactionResponse, Voice2RxStopTransactionResponse> {
         return withContext(Dispatchers.IO) {
             try {
@@ -168,15 +171,15 @@ internal class VToRxRepository(
                     }
 
                     is NetworkResponse.Error -> {
+                        onError()
                         Voice2Rx.logEvent(
                             EventLog.Info(
                                 code = EventCode.VOICE2RX_SESSION_LIFECYCLE,
                                 params = mapOf(
-                                        "sessionId" to sessionId,
-                                        "lifecycle_event" to "stop",
-                                        "response_status" to (response.body?.message.toString()),
-                                    )
-
+                                    "sessionId" to sessionId,
+                                    "lifecycle_event" to "stop",
+                                    "response_status" to (response.body?.message.toString()),
+                                )
                             )
                         )
                     }
@@ -1155,4 +1158,26 @@ internal class VToRxRepository(
                 Result.failure(e)
             }
         }
+
+    suspend fun getConfig(): Result<UserConfigs> = withContext(Dispatchers.IO) {
+        return@withContext try {
+            val response = remoteDataSource.getUserConfig()
+            return@withContext when (response) {
+                is NetworkResponse.Success -> {
+                    val data = response.body.data?.toUserConfigs()
+                    if (data != null) {
+                        Result.success(data)
+                    } else {
+                        Result.failure(Exception("Error fetching config"))
+                    }
+                }
+
+                else -> {
+                    Result.failure(Exception("Error fetching config"))
+                }
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
 }
