@@ -88,7 +88,7 @@ fun EkaScribeResultV3.Data.TemplateResults.Transcript.toTemplateOutput(sessionId
         title = name,
         sections = templateValue,
         sessionId = sessionId,
-        templateId = null,
+        templateId = "transcript",
         type = templateType
     )
 }
