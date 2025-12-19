@@ -24,7 +24,7 @@ object Base64Utils {
     fun encodeToBase64(data: String?): String {
         try {
             if (data == null) return ""
-            return Base64.encodeToString(data.toByteArray(), Base64.DEFAULT)
+            return Base64.encodeToString(data.toByteArray(), Base64.NO_WRAP)
         } catch (e: Exception) {
             VoiceLogger.e("BaseUtil", "decodeBase64 : $data", e)
             return ""
