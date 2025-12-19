@@ -22,6 +22,7 @@ import com.eka.voice2rx_sdk.data.remote.models.SessionStatus
 import com.eka.voice2rx_sdk.data.remote.models.requests.PatientDetails
 import com.eka.voice2rx_sdk.data.remote.models.responses.EkaScribeErrorDetails
 import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxHistoryResponse
+import com.eka.voice2rx_sdk.sdkinit.models.SelectedUserPreferences
 import com.eka.voice2rx_sdk.sdkinit.models.SessionData
 import com.eka.voice2rx_sdk.sdkinit.models.SessionResult
 import com.eka.voice2rx_sdk.sdkinit.models.Template
@@ -253,11 +254,11 @@ object Voice2Rx {
         )
     }
 
-    suspend fun convertTransactionResult(sessionId: String, templateId: String): Result<Boolean>? {
+    suspend fun convertTransactionResult(sessionId: String, templateId: String): Result<Boolean> {
         return v2RxInternal?.convertTransactionResult(
             sessionId = sessionId,
             templateId = templateId
-        )
+        ) ?: Result.failure(Exception("EkaScribe SDK not initialized"))
     }
 
     suspend fun updateSessionResult(
@@ -290,6 +291,11 @@ object Voice2Rx {
 
     suspend fun getUserConfigs(): Result<UserConfigs> {
         return v2RxInternal?.getUserConfigs()
+            ?: Result.failure(Exception("EkaScribe SDK not initialized"))
+    }
+
+    suspend fun updateUserConfigs(selectedUserPreferences: SelectedUserPreferences): Result<Boolean> {
+        return v2RxInternal?.updateUserConfig(selectedUserPreferences = selectedUserPreferences)
             ?: Result.failure(Exception("EkaScribe SDK not initialized"))
     }
 

@@ -3,6 +3,7 @@ package com.eka.voice2rx_sdk.data.remote.services
 import com.eka.voice2rx.data.remote.models.AwsS3ConfigResponse
 import com.eka.voice2rx_sdk.data.remote.models.requests.UpdateSessionRequest
 import com.eka.voice2rx_sdk.data.remote.models.requests.UpdateTemplatesRequest
+import com.eka.voice2rx_sdk.data.remote.models.requests.UpdateUserConfigRequest
 import com.eka.voice2rx_sdk.data.remote.models.requests.Voice2RxInitTransactionRequest
 import com.eka.voice2rx_sdk.data.remote.models.requests.Voice2RxStopTransactionRequest
 import com.eka.voice2rx_sdk.data.remote.models.responses.EkaScribeResult
@@ -12,6 +13,7 @@ import com.eka.voice2rx_sdk.data.remote.models.responses.TemplateConversionRespo
 import com.eka.voice2rx_sdk.data.remote.models.responses.TemplatesResponse
 import com.eka.voice2rx_sdk.data.remote.models.responses.UpdateSessionResponse
 import com.eka.voice2rx_sdk.data.remote.models.responses.UpdateTemplateResponse
+import com.eka.voice2rx_sdk.data.remote.models.responses.UpdateUserConfigResponse
 import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxHistoryResponse
 import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxInitTransactionResponse
 import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxStopTransactionResponse
@@ -80,6 +82,11 @@ interface Voice2RxService {
 
     @GET("voice/api/v2/config")
     suspend fun getUserConfig(): NetworkResponse<GetConfigResponse, GetConfigResponse>
+
+    @PUT("voice/api/v2/config")
+    suspend fun updateUserConfig(
+        @Body request: UpdateUserConfigRequest
+    ): NetworkResponse<UpdateUserConfigResponse, UpdateUserConfigResponse>
 
     @GET("voice/api/v2/transaction/history")
     suspend fun getHistory(

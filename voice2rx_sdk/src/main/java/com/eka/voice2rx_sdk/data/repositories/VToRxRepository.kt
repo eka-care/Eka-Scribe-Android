@@ -22,6 +22,7 @@ import com.eka.voice2rx_sdk.data.local.db.entities.VoiceTranscriptionOutput
 import com.eka.voice2rx_sdk.data.local.models.Voice2RxSessionStatus
 import com.eka.voice2rx_sdk.data.remote.models.requests.UpdateSessionRequest
 import com.eka.voice2rx_sdk.data.remote.models.requests.UpdateTemplatesRequest
+import com.eka.voice2rx_sdk.data.remote.models.requests.UpdateUserConfigRequest
 import com.eka.voice2rx_sdk.data.remote.models.requests.Voice2RxInitTransactionRequest
 import com.eka.voice2rx_sdk.data.remote.models.requests.Voice2RxStopTransactionRequest
 import com.eka.voice2rx_sdk.data.remote.models.responses.EkaScribeResult
@@ -34,6 +35,7 @@ import com.eka.voice2rx_sdk.data.remote.models.responses.toUserConfigs
 import com.eka.voice2rx_sdk.data.remote.services.AwsS3UploadService
 import com.eka.voice2rx_sdk.data.remote.services.Voice2RxService
 import com.eka.voice2rx_sdk.sdkinit.Voice2Rx
+import com.eka.voice2rx_sdk.sdkinit.models.SelectedUserPreferences
 import com.eka.voice2rx_sdk.sdkinit.models.SessionData
 import com.eka.voice2rx_sdk.sdkinit.models.SessionResult
 import com.eka.voice2rx_sdk.sdkinit.models.TemplateItem
@@ -1174,6 +1176,44 @@ internal class VToRxRepository(
 
                 else -> {
                     Result.failure(Exception("Error fetching config"))
+                }
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun updateUserConfig(
+        selectedUserPreferences: SelectedUserPreferences
+    ): Result<Boolean> = withContext(Dispatchers.IO) {
+        return@withContext try {
+            val request = UpdateUserConfigRequest(
+                data = UpdateUserConfigRequest.Data(
+                    consultationMode = selectedUserPreferences.consultationMode?.id,
+                    inputLanguages = selectedUserPreferences.languages.map {
+                        UpdateUserConfigRequest.Data.InputLanguage(
+                            id = it.id,
+                            name = it.name
+                        )
+                    }.toList(),
+                    modelType = selectedUserPreferences.modelType?.id,
+                    outputFormatTemplate = selectedUserPreferences.outputTemplates.map {
+                        UpdateUserConfigRequest.Data.OutputFormatTemplate(
+                            id = it.id,
+                            name = it.name,
+                            templateType = "custom"
+                        )
+                    }
+                )
+            )
+            val response = remoteDataSource.updateUserConfig(request)
+            return@withContext when (response) {
+                is NetworkResponse.Success -> {
+                    Result.success(true)
+                }
+
+                else -> {
+                    Result.failure(Exception("Error updating config"))
                 }
             }
         } catch (e: Exception) {

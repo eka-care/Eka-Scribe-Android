@@ -45,6 +45,7 @@ import com.eka.voice2rx_sdk.data.repositories.VToRxRepository
 import com.eka.voice2rx_sdk.recorder.AudioCallback
 import com.eka.voice2rx_sdk.recorder.AudioFocusListener
 import com.eka.voice2rx_sdk.recorder.VoiceRecorder
+import com.eka.voice2rx_sdk.sdkinit.models.SelectedUserPreferences
 import com.eka.voice2rx_sdk.sdkinit.models.SessionData
 import com.eka.voice2rx_sdk.sdkinit.models.SessionResult
 import com.eka.voice2rx_sdk.sdkinit.models.Template
@@ -843,6 +844,10 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
 
     suspend fun getUserConfigs(): Result<UserConfigs> {
         return repository.getConfig()
+    }
+
+    suspend fun updateUserConfig(selectedUserPreferences: SelectedUserPreferences): Result<Boolean> {
+        return repository.updateUserConfig(selectedUserPreferences)
     }
 
     suspend fun getSessionInfoAsFlow(sessionId: String): Flow<VToRxSession> {
