@@ -30,6 +30,7 @@ import com.eka.voice2rx_sdk.sdkinit.models.TemplateItem
 import com.eka.voice2rx_sdk.sdkinit.models.UserConfigs
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import java.io.File
 
 object Voice2Rx {
     private var configuration: Voice2RxInitConfig? = null
@@ -254,6 +255,11 @@ object Voice2Rx {
         )
     }
 
+    fun getFullRecordingFile(sessionId: String): Result<File> {
+        return v2RxInternal?.getFullRecordingFile(sessionId = sessionId)
+            ?: Result.failure(Exception("EkaScribe SDK not initialized"))
+    }
+
     suspend fun convertTransactionResult(sessionId: String, templateId: String): Result<Boolean> {
         return v2RxInternal?.convertTransactionResult(
             sessionId = sessionId,
@@ -264,10 +270,10 @@ object Voice2Rx {
     suspend fun updateSessionResult(
         sessionId: String,
         updatedData: List<SessionData>
-    ): Result<Boolean>? = v2RxInternal?.updateSessionResult(
+    ): Result<Boolean> = v2RxInternal?.updateSessionResult(
         sessionId = sessionId,
         updatedData = updatedData
-    )
+    ) ?: Result.failure(Exception("EkaScribe SDK not initialized"))
 
     suspend fun pollEkaScribeResult(sessionId: String): Result<SessionResult> {
         return v2RxInternal?.pollEkaScribeResult(sessionId = sessionId)

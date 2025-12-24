@@ -240,7 +240,8 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
                     ),
                     isUploaded = false,
                     startTime = fileInfo.st.toString(),
-                    endTime = fileInfo.et.toString()
+                    endTime = fileInfo.et.toString(),
+                    createdAt = Voice2RxUtils.getCurrentUTCEpochMillis(),
                 )
             )
         }
@@ -749,7 +750,7 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
     private fun uploadWholeFileData() {
         CoroutineScope(Dispatchers.IO).launch {
             audioHelper.uploadFullRecordingFile(
-                Voice2RxUtils.getFullRecordingFileName(sessionId = sessionId),
+                fileName = Voice2RxUtils.getFullRecordingFileName(sessionId = sessionId),
                 onFileCreated = { file ->
                     uploadFileToS3(
                         app,
@@ -760,8 +761,54 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
                         voiceFileType = VoiceFileType.FULL_AUDIO,
                         fileInfo = FileInfo(st = "0", et = "0")
                     )
+                    // Clean up old full audio files after uploading
+                    cleanupOldFullAudioFiles()
                 }
             )
+        }
+    }
+
+    private fun cleanupOldFullAudioFiles(maxFilesToKeep: Int = 1) {
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val sessions = repository.getAllSessions()
+                sessions.drop(maxFilesToKeep).forEach { session ->
+                    try {
+                        val file = File(
+                            app.filesDir,
+                            Voice2RxUtils.getFullRecordingFileName(sessionId = session.sessionId)
+                        )
+                        VoiceLogger.d(
+                            TAG,
+                            "Deleting old full audio file: ${session.sessionId} ${file.absolutePath}"
+                        )
+                        val deleted = file.delete()
+                        VoiceLogger.d(TAG, "Deleted old full audio file: $deleted")
+                    } catch (e1: Exception) {
+                        VoiceLogger.e(TAG, "Error cleaning up old full audio files: ${e1.message}")
+                    }
+                }
+            } catch (e: Exception) {
+                VoiceLogger.e(TAG, "Error cleaning up old full audio files: ${e.message}")
+            }
+        }
+    }
+
+    fun getFullRecordingFile(sessionId: String): Result<File> {
+        try {
+            val file = File(
+                app.filesDir,
+                Voice2RxUtils.getFullRecordingFileName(sessionId = sessionId)
+            )
+            if (!file.exists()) {
+                return Result.failure(Exception("File not exists"))
+            }
+            if (file.length() <= 0) {
+                return Result.failure(Exception("File not exists"))
+            }
+            return Result.success(file)
+        } catch (e: Exception) {
+            return Result.failure(e)
         }
     }
 
