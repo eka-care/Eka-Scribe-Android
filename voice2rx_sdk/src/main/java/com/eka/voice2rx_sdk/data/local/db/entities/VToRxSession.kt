@@ -6,6 +6,7 @@ import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.PrimaryKey
 import com.eka.voice2rx_sdk.common.DatabaseConstants
+import com.eka.voice2rx_sdk.common.Voice2RxUtils
 import com.eka.voice2rx_sdk.data.local.models.Voice2RxSessionStatus
 import com.eka.voice2rx_sdk.data.local.models.Voice2RxType
 import com.eka.voice2rx_sdk.data.remote.models.responses.OutputType
@@ -53,6 +54,7 @@ data class VoiceFile(
     @ColumnInfo(name = "end_time") val endTime: String,
     @ColumnInfo(name = "file_type") val fileType: VoiceFileType = VoiceFileType.CHUNK_AUDIO,
     @ColumnInfo(name = "is_uploaded") val isUploaded: Boolean = false,
+    @ColumnInfo(name = "created_at") val createdAt: Long = Voice2RxUtils.getCurrentUTCEpochMillis(),
 )
 
 @Keep

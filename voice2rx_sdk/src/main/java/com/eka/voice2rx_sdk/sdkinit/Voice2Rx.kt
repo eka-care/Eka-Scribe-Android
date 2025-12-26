@@ -1,10 +1,8 @@
 package com.eka.voice2rx_sdk.sdkinit
 
 import android.content.Context
-import android.util.Log
 import androidx.work.WorkManager
 import com.eka.networking.client.EkaNetwork
-import com.eka.networking.client.NetworkConfig
 import com.eka.voice2rx_sdk.common.AudioQualityMetrics
 import com.eka.voice2rx_sdk.common.ResponseState
 import com.eka.voice2rx_sdk.common.SessionResponse
@@ -21,14 +19,18 @@ import com.eka.voice2rx_sdk.data.local.models.Voice2RxSessionStatus
 import com.eka.voice2rx_sdk.data.local.models.Voice2RxType
 import com.eka.voice2rx_sdk.data.remote.models.Error
 import com.eka.voice2rx_sdk.data.remote.models.SessionStatus
-import com.eka.voice2rx_sdk.data.remote.models.requests.ModelType
 import com.eka.voice2rx_sdk.data.remote.models.requests.PatientDetails
-import com.eka.voice2rx_sdk.data.remote.models.requests.SupportedLanguages
 import com.eka.voice2rx_sdk.data.remote.models.responses.EkaScribeErrorDetails
-import com.eka.voice2rx_sdk.data.remote.models.responses.TemplateId
 import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxHistoryResponse
+import com.eka.voice2rx_sdk.sdkinit.models.SelectedUserPreferences
+import com.eka.voice2rx_sdk.sdkinit.models.SessionData
+import com.eka.voice2rx_sdk.sdkinit.models.SessionResult
+import com.eka.voice2rx_sdk.sdkinit.models.Template
+import com.eka.voice2rx_sdk.sdkinit.models.TemplateItem
+import com.eka.voice2rx_sdk.sdkinit.models.UserConfigs
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import java.io.File
 
 object Voice2Rx {
     private var configuration: Voice2RxInitConfig? = null
@@ -37,6 +39,7 @@ object Voice2Rx {
 
     fun init(config: Voice2RxInitConfig, context: Context) {
         configuration = config
+        VoiceLogger.enableDebugLogs = config.debugMode
         try {
             EkaNetwork.init(
                 networkConfig = config.networkConfig,
@@ -109,17 +112,11 @@ object Voice2Rx {
     }
 
     fun startVoice2Rx(
-        mode: Voice2RxType = Voice2RxType.DICTATION,
+        mode: String = Voice2RxType.CONSULTATION.value,
         patientDetails: PatientDetails? = null,
-        outputFormats: List<TemplateId> = listOf(
-            TemplateId.CLINICAL_NOTE_TEMPLATE,
-            TemplateId.TRANSCRIPT_TEMPLATE
-        ),
-        languages: List<SupportedLanguages> = listOf(
-            SupportedLanguages.EN_IN,
-            SupportedLanguages.HI_IN
-        ),
-        modelType: ModelType = ModelType.PRO,
+        outputFormats: List<Template>,
+        languages: List<String>,
+        modelType: String,
         onError: (EkaScribeError) -> Unit,
         onStart: (String) -> Unit
     ) {
@@ -256,6 +253,56 @@ object Voice2Rx {
         return v2RxInternal?.getVoiceSessionData(sessionId = sessionId) ?: SessionResponse.Error(
             Exception("Voice2Rx SDK not initialized")
         )
+    }
+
+    fun getFullRecordingFile(sessionId: String): Result<File> {
+        return v2RxInternal?.getFullRecordingFile(sessionId = sessionId)
+            ?: Result.failure(Exception("EkaScribe SDK not initialized"))
+    }
+
+    suspend fun convertTransactionResult(sessionId: String, templateId: String): Result<Boolean> {
+        return v2RxInternal?.convertTransactionResult(
+            sessionId = sessionId,
+            templateId = templateId
+        ) ?: Result.failure(Exception("EkaScribe SDK not initialized"))
+    }
+
+    suspend fun updateSessionResult(
+        sessionId: String,
+        updatedData: List<SessionData>
+    ): Result<Boolean> = v2RxInternal?.updateSessionResult(
+        sessionId = sessionId,
+        updatedData = updatedData
+    ) ?: Result.failure(Exception("EkaScribe SDK not initialized"))
+
+    suspend fun pollEkaScribeResult(sessionId: String): Result<SessionResult> {
+        return v2RxInternal?.pollEkaScribeResult(sessionId = sessionId)
+            ?: Result.failure(Exception("EkaScribe SDK not initialized"))
+    }
+
+    suspend fun getSessionOutput(sessionId: String): Result<SessionResult> {
+        return v2RxInternal?.getSessionOutput(sessionId = sessionId)
+            ?: Result.failure(Exception("EkaScribe SDK not initialized"))
+    }
+
+    suspend fun getTemplates(): Result<List<TemplateItem>>? {
+        return v2RxInternal?.getTemplates()
+            ?: Result.failure(Exception("EkaScribe SDK not initialized"))
+    }
+
+    suspend fun updateTemplates(favouriteTemplates: List<String>): Result<Unit> {
+        return v2RxInternal?.updateTemplates(enabledTemplates = favouriteTemplates)
+            ?: Result.failure(Exception("EkaScribe SDK not initialized"))
+    }
+
+    suspend fun getUserConfigs(): Result<UserConfigs> {
+        return v2RxInternal?.getUserConfigs()
+            ?: Result.failure(Exception("EkaScribe SDK not initialized"))
+    }
+
+    suspend fun updateUserConfigs(selectedUserPreferences: SelectedUserPreferences): Result<Boolean> {
+        return v2RxInternal?.updateUserConfig(selectedUserPreferences = selectedUserPreferences)
+            ?: Result.failure(Exception("EkaScribe SDK not initialized"))
     }
 
     fun releaseResources() {

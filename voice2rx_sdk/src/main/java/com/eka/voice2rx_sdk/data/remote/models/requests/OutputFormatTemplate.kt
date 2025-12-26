@@ -7,5 +7,9 @@ import com.google.gson.annotations.SerializedName
 @Keep
 data class OutputFormatTemplate(
     @SerializedName("template_id")
-    var templateId: String?
+    var templateId: String?,
+    @SerializedName("template_type")
+    var type: String = "custom",
+    @SerializedName("template_name")
+    var name: String?
 )

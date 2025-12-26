@@ -6,6 +6,7 @@ import com.eka.voice2rx_sdk.common.voicelogger.VoiceLogger
 import com.eka.voice2rx_sdk.data.local.db.entities.VToRxSession
 import com.eka.voice2rx_sdk.data.local.db.entities.VoiceFile
 import com.eka.voice2rx_sdk.data.remote.models.requests.ChunkData
+import com.eka.voice2rx_sdk.sdkinit.models.ModelType
 import com.google.gson.Gson
 import com.google.gson.annotations.SerializedName
 import java.nio.charset.StandardCharsets
@@ -60,6 +61,22 @@ internal object Voice2RxInternalUtils {
             VoiceLogger.e("getUserTokenData", e.message.toString())
         }
         return null
+    }
+
+    fun getModelTypes(): List<ModelType> {
+        val modelTypes = listOf(
+            ModelType(
+                id = "lite",
+                name = "Lite",
+                desc = "Lightweight, faster results with balanced accuracy."
+            ),
+            ModelType(
+                id = "pro",
+                name = "Pro",
+                desc = "Our best model built for accuracy, may take a little longer."
+            ),
+        )
+        return modelTypes
     }
 }
 

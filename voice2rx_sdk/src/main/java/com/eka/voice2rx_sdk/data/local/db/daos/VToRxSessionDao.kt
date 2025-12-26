@@ -35,7 +35,7 @@ interface VToRxSessionDao {
     @Query("SELECT * FROM ${DatabaseConstants.V2RX_SESSION_TABLE_NAME} WHERE session_id = :sessionId")
     suspend fun getSessionBySessionId(sessionId : String) : VToRxSession?
 
-    @Query("SELECT * FROM ${DatabaseConstants.V2RX_SESSION_TABLE_NAME}")
+    @Query("SELECT * FROM ${DatabaseConstants.V2RX_SESSION_TABLE_NAME} ORDER BY updated_at DESC")
     suspend fun getAllVoice2RxSessions() : List<VToRxSession>
 
     @Query("SELECT * FROM ${DatabaseConstants.V2RX_SESSION_TABLE_NAME} WHERE owner_id = :ownerId")

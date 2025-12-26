@@ -45,6 +45,8 @@ class SquimAnalyzer(private val context: Context) {
                 val modelFile = modelDownloader.downloadModelIfNeeded()
                 val sessionOptions = OrtSession.SessionOptions()
                 sessionOptions.addCPU(true)
+                sessionOptions.setExecutionMode(OrtSession.SessionOptions.ExecutionMode.PARALLEL)
+
                 val modelBytes = modelFile.readBytes()
                 ortSession = ortEnvironment?.createSession(modelBytes, sessionOptions)
 

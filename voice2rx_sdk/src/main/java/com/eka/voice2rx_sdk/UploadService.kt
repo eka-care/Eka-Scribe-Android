@@ -12,6 +12,8 @@ import com.eka.voice2rx_sdk.sdkinit.AudioQualityConfig
 import com.eka.voice2rx_sdk.sdkinit.V2RxInternal
 import com.eka.voice2rx_sdk.sdkinit.Voice2Rx
 import com.konovalov.vad.silero.config.SampleRate
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
 
 internal class UploadService(
@@ -32,13 +34,13 @@ internal class UploadService(
 
     private var FILE_INDEX = 0
 
-    fun processAndUpload(
+    suspend fun processAndUpload(
         lastClipIndex1: Int,
         currentClipIndex: Int,
         onFileUploaded: (String, FileInfo, IncludeStatus) -> Unit = { _, _, _ -> }
-    ) {
+    ) = withContext(Dispatchers.IO) {
         if (!audioHelper.isClipping()) {
-            return
+            return@withContext
         }
         try {
             val audioData = audioHelper.getAudioRecordData()
@@ -47,7 +49,7 @@ internal class UploadService(
             val clipIndex = currentClipIndex
             val lastClipIndex = lastClipIndex1
             if (clipIndex < 0) {
-                return
+                return@withContext
             }
             clippedAudioData.addAll(
                 audioData.subList(lastClipIndex + 1, clipIndex + 1).map { it.frameData })
