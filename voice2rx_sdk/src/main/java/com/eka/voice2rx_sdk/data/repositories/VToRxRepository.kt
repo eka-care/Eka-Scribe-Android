@@ -1024,7 +1024,7 @@ internal class VToRxRepository(
             return@callbackFlow
         }
 
-        val file = File(context.filesDir, voiceFile.filePath)
+        val file = File(voiceFile.filePath)
         if (!file.exists()) {
             VoiceLogger.e("Retry Session", "File Not Found!")
             trySend(true)
