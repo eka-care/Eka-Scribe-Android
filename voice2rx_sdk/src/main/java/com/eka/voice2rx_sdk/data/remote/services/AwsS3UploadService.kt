@@ -235,7 +235,6 @@ object AwsS3UploadService {
                     fileName = fileName
                 ), isUploaded = isUploaded
             )
-            repository?.checkUploadingStageAndProgress(sessionId = sessionId)
         }
     }
 

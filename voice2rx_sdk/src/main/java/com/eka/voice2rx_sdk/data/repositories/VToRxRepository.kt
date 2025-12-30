@@ -207,19 +207,19 @@ internal class VToRxRepository(
         }
     }
 
-    internal fun checkUploadingStageAndProgress(
+    internal suspend fun checkUploadingStageAndProgress(
         sessionId: String,
         isForceCommit: Boolean = false
     ) {
-        CoroutineScope(Dispatchers.IO).launch {
+        withContext(Dispatchers.IO) {
             val session = getSessionBySessionId(sessionId = sessionId)
             if (session == null) {
                 VoiceLogger.e("Voice2Rx", "Session not found for sessionId: $sessionId")
-                return@launch
+                return@withContext
             }
             if (session.voiceTransactionState != VoiceTransactionState.STOPPED) {
                 VoiceLogger.e("Voice2Rx", "Session is not stopped yet!")
-                return@launch
+                return@withContext
             }
             when (session.uploadStage) {
                 VoiceTransactionStage.INIT -> {
@@ -253,8 +253,8 @@ internal class VToRxRepository(
         }
     }
 
-    private fun goToStopStep(sessionId: String, isForceCommit: Boolean = false) {
-        CoroutineScope(Dispatchers.IO).launch {
+    private suspend fun goToStopStep(sessionId: String, isForceCommit: Boolean = false) {
+        withContext(Dispatchers.IO) {
             val voiceFiles = getAllFiles(sessionId = sessionId)
             if (voiceFiles.isEmpty()) {
                 Voice2Rx.logEvent(
@@ -272,7 +272,7 @@ internal class VToRxRepository(
                     sessionId = sessionId,
                     uploadStage = VoiceTransactionStage.ERROR
                 )
-                return@launch
+                return@withContext
             }
             stopVoice2RxTransaction(
                 sessionId = sessionId,
@@ -287,12 +287,12 @@ internal class VToRxRepository(
         }
     }
 
-    private fun goToCommitStep(sessionId: String, isForceCommit: Boolean = false) {
-        CoroutineScope(Dispatchers.IO).launch {
+    private suspend fun goToCommitStep(sessionId: String, isForceCommit: Boolean = false) {
+        withContext(Dispatchers.IO) {
             val session = getSessionBySessionId(sessionId = sessionId)
             if (session == null) {
                 VoiceLogger.e("Voice2Rx", "Session not found for sessionId: $sessionId")
-                return@launch
+                return@withContext
             }
             val voiceFiles = getAllFiles(sessionId = sessionId)
             if (voiceFiles.isEmpty()) {
@@ -307,7 +307,7 @@ internal class VToRxRepository(
 
                     )
                 )
-                return@launch
+                return@withContext
             }
             val filteredFiles = voiceFiles.filter { it.fileType == VoiceFileType.CHUNK_AUDIO }
             val isAllUploaded = filteredFiles.all { it.isUploaded }
@@ -708,12 +708,10 @@ internal class VToRxRepository(
                             Voice2Rx.logEvent(
                                 EventLog.Info(
                                     code = EventCode.VOICE2RX_SESSION_LIFECYCLE,
-                                    params =
-                                        mapOf(
-                                            "sessionId" to sessionId,
-                                            "lifecycle" to "listen_to_all_files",
-                                        )
-
+                                    params = mapOf(
+                                        "sessionId" to sessionId,
+                                        "lifecycle" to "All files uploaded successfully.",
+                                    )
                                 )
                             )
                         } catch (e: Exception) {
