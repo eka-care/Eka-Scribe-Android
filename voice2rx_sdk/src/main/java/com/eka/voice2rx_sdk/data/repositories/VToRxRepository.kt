@@ -50,7 +50,6 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -244,7 +243,7 @@ internal class VToRxRepository(
                 }
 
                 VoiceTransactionStage.ANALYZING -> {
-                    fetchVoice2RxTransactionResult(
+                    pollEkaScribeResult(
                         sessionId = sessionId
                     )
                 }
@@ -697,46 +696,55 @@ internal class VToRxRepository(
         }
     }
 
-    fun listenToAllFilesForSession(sessionId: String) {
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                Voice2Rx.logEvent(
-                    EventLog.Info(
-                        code = EventCode.VOICE2RX_SESSION_LIFECYCLE,
-                        params =
-                            mapOf(
-                                "sessionId" to sessionId,
-                                "lifecycle" to "listen_to_all_files",
-                            )
+    fun listenToAllFilesForSession(context: Context, sessionId: String) {
+        try {
+            retrySessionUploading(
+                context = context,
+                sessionId = sessionId,
+                forceCommit = true,
+                onResponse = {
+                    if (it is ResponseState.Success) {
+                        try {
+                            Voice2Rx.logEvent(
+                                EventLog.Info(
+                                    code = EventCode.VOICE2RX_SESSION_LIFECYCLE,
+                                    params =
+                                        mapOf(
+                                            "sessionId" to sessionId,
+                                            "lifecycle" to "listen_to_all_files",
+                                        )
 
-                    )
-                )
-                vToRxDatabase.getVoice2RxDao().getAllFilesFlow(sessionId = sessionId)
-                    .collectLatest {
-                        val files = it.filter { file -> file.fileType == VoiceFileType.CHUNK_AUDIO }
-                        if (files.isNotEmpty()) {
-                            val isAllUploaded = files.all { file -> file.isUploaded }
-                            if (isAllUploaded) {
-                                checkUploadingStageAndProgress(sessionId = sessionId)
-                            } else {
-                                VoiceLogger.w("Voice2Rx", "Not all audio files are uploaded")
-                            }
+                                )
+                            )
+                        } catch (e: Exception) {
+                            Voice2Rx.logEvent(
+                                EventLog.Info(
+                                    code = EventCode.VOICE2RX_SESSION_ERROR,
+                                    params =
+                                        mapOf(
+                                            "sessionId" to sessionId,
+                                            "error" to "Error listening to all files for session: ${e.message}",
+                                        )
+
+                                )
+                            )
+                            VoiceLogger.e(
+                                "Voice2Rx",
+                                "Error listening to all files for session: ${e.message}"
+                            )
                         }
                     }
-            } catch (e: Exception) {
-                Voice2Rx.logEvent(
-                    EventLog.Info(
-                        code = EventCode.VOICE2RX_SESSION_ERROR,
-                        params =
-                            mapOf(
-                                "sessionId" to sessionId,
-                                "error" to "Error listening to all files for session: ${e.message}",
-                            )
-
+                })
+        } catch (e: Exception) {
+            Voice2Rx.logEvent(
+                EventLog.Info(
+                    code = EventCode.VOICE2RX_SESSION_ERROR,
+                    params = mapOf(
+                        "sessionId" to sessionId,
+                        "error" to "Error listening to all files for session: ${e.message}",
                     )
                 )
-                VoiceLogger.e("Voice2Rx", "Error listening to all files for session: ${e.message}")
-            }
+            )
         }
     }
 
@@ -945,6 +953,7 @@ internal class VToRxRepository(
     fun retrySessionUploading(
         context: Context,
         sessionId: String,
+        forceCommit: Boolean = true,
         onResponse: (ResponseState) -> Unit,
     ) {
         if (!Voice2RxUtils.isNetworkAvailable(context)) {
@@ -985,7 +994,10 @@ internal class VToRxRepository(
                     }.flatten()
 
                 if (results.all { it }) {
-                    checkUploadingStageAndProgress(sessionId = sessionId, isForceCommit = true)
+                    checkUploadingStageAndProgress(
+                        sessionId = sessionId,
+                        isForceCommit = forceCommit
+                    )
                     onResponse(ResponseState.Success(true))
                 } else {
                     onResponse(ResponseState.Error("Audio file upload failed!"))

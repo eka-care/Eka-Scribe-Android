@@ -692,7 +692,10 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
                 sessionId = sessionId,
                 updatedState = VoiceTransactionState.STOPPED
             )
-//            repository.listenToAllFilesForSession(sessionId = sessionId)
+            repository.listenToAllFilesForSession(
+                context = app.applicationContext,
+                sessionId = sessionId
+            )
             if (chunksInfo.size == voiceFiles.size) {
                 repository.stopVoice2RxTransaction(
                     sessionId = sessionId,
