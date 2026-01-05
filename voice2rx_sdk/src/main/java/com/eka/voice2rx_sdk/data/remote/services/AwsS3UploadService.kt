@@ -18,6 +18,7 @@ import com.eka.voice2rx_sdk.common.Voice2RxUtils
 import com.eka.voice2rx_sdk.common.voicelogger.EventCode
 import com.eka.voice2rx_sdk.common.voicelogger.EventLog
 import com.eka.voice2rx_sdk.common.voicelogger.VoiceLogger
+import com.eka.voice2rx_sdk.common.voicelogger.logNetworkInfo
 import com.eka.voice2rx_sdk.data.local.db.Voice2RxDatabase
 import com.eka.voice2rx_sdk.data.local.db.entities.VoiceFileType
 import com.eka.voice2rx_sdk.data.repositories.VToRxRepository
@@ -74,6 +75,7 @@ object AwsS3UploadService {
 
         if (!Voice2RxUtils.isNetworkAvailable(context)) {
             onResponse(ResponseState.Error("No Internet!"))
+            logNetworkInfo(context = context, sessionId = sessionId)
             uploadListener?.onError(
                 sessionId = sessionId,
                 fileName = fileName,
@@ -199,10 +201,22 @@ object AwsS3UploadService {
                     uploadListener?.onError(
                         sessionId = sessionId,
                         fileName = fileName,
-                        errorMsg = "FAILED"
+                        errorMsg = "FAILED Retry exceeded!"
                     )
                     return
                 }
+                Voice2Rx.logEvent(
+                    EventLog.Info(
+                        code = EventCode.VOICE2RX_SESSION_UPLOAD_LIFECYCLE,
+                        params = mapOf(
+                            "sessionId" to sessionId,
+                            "fileName" to fileName,
+                            "upload" to "FAILED",
+                            "retryCount" to retryCount,
+                            "errorMsg" to "${ex?.message} errortype : $id"
+                        )
+                    )
+                )
                 VoiceLogger.d(TAG, "Upload failed, retrying... Retry count: $retryCount")
                 retryFileUpload(
                     context = context,

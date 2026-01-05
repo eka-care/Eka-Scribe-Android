@@ -12,6 +12,7 @@ import com.eka.voice2rx_sdk.common.Voice2RxUtils
 import com.eka.voice2rx_sdk.common.voicelogger.EventCode
 import com.eka.voice2rx_sdk.common.voicelogger.EventLog
 import com.eka.voice2rx_sdk.common.voicelogger.VoiceLogger
+import com.eka.voice2rx_sdk.common.voicelogger.logNetworkInfo
 import com.eka.voice2rx_sdk.data.local.db.Voice2RxDatabase
 import com.eka.voice2rx_sdk.data.local.db.entities.VToRxSession
 import com.eka.voice2rx_sdk.data.local.db.entities.VoiceFile
@@ -696,15 +697,19 @@ internal class VToRxRepository(
         }
     }
 
-    fun listenToAllFilesForSession(context: Context, sessionId: String) {
+    fun listenToAllFilesForSession(
+        context: Context,
+        sessionId: String,
+        onResponse: (ResponseState) -> Unit
+    ) {
         try {
             retrySessionUploading(
                 context = context,
                 sessionId = sessionId,
                 forceCommit = true,
                 onResponse = {
-                    if (it is ResponseState.Success) {
-                        try {
+                    when (it) {
+                        is ResponseState.Success -> {
                             Voice2Rx.logEvent(
                                 EventLog.Info(
                                     code = EventCode.VOICE2RX_SESSION_LIFECYCLE,
@@ -714,26 +719,28 @@ internal class VToRxRepository(
                                     )
                                 )
                             )
-                        } catch (e: Exception) {
+                        }
+
+                        is ResponseState.Error -> {
                             Voice2Rx.logEvent(
                                 EventLog.Info(
                                     code = EventCode.VOICE2RX_SESSION_ERROR,
                                     params =
                                         mapOf(
                                             "sessionId" to sessionId,
-                                            "error" to "Error listening to all files for session: ${e.message}",
+                                            "error" to "Error listening to all files for session: ${it.error}",
                                         )
 
                                 )
                             )
-                            VoiceLogger.e(
-                                "Voice2Rx",
-                                "Error listening to all files for session: ${e.message}"
-                            )
                         }
+
+                        else -> {}
                     }
+                    onResponse(it)
                 })
         } catch (e: Exception) {
+            onResponse(ResponseState.Error("Error listening to all files for session: ${e.message}"))
             Voice2Rx.logEvent(
                 EventLog.Info(
                     code = EventCode.VOICE2RX_SESSION_ERROR,
@@ -955,6 +962,7 @@ internal class VToRxRepository(
         onResponse: (ResponseState) -> Unit,
     ) {
         if (!Voice2RxUtils.isNetworkAvailable(context)) {
+            logNetworkInfo(context = context, sessionId = sessionId)
             onResponse(ResponseState.Error("Network not available!"))
             return
         }
@@ -962,11 +970,10 @@ internal class VToRxRepository(
             EventLog.Info(
                 code = EventCode.VOICE2RX_SESSION_LIFECYCLE,
                 params = mapOf(
-                        "sessionId" to sessionId,
-                        "lifecycle_event" to "retry_upload",
-                        "status" to "started",
-                    )
-
+                    "sessionId" to sessionId,
+                    "lifecycle_event" to "retry_upload",
+                    "status" to "started",
+                )
             )
             val session = getSessionBySessionId(sessionId = sessionId)
             if (session?.uploadStage == VoiceTransactionStage.ERROR) {
@@ -1029,6 +1036,7 @@ internal class VToRxRepository(
         context: Context
     ) = callbackFlow {
         if (!Voice2RxUtils.isNetworkAvailable(context)) {
+            logNetworkInfo(context = context, sessionId = sessionId)
             trySend(false)
             close()
             return@callbackFlow
