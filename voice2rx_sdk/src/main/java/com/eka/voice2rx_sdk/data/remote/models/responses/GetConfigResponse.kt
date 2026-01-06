@@ -69,7 +69,7 @@ data class GetConfigResponse(
             @SerializedName("auto_download")
             var autoDownload: Boolean?,
             @SerializedName("consultation_mode")
-            var consultationMode: Data.ConsultationMode?,
+            var consultationModeId: String?,
             @SerializedName("languages")
             var languages: List<SupportedLanguage?>?,
             @SerializedName("model_type")
@@ -147,7 +147,7 @@ internal fun GetConfigResponse.Data.toUserConfigs(): UserConfigs {
             maxSelection = this.maxSelection?.supportedOutputFormats ?: 1
         ),
         selectedUserPreferences = SelectedUserPreferences(
-            consultationMode = this.selectedPreferences?.consultationMode?.toConsultationMode(),
+            consultationMode = supportedModes.firstOrNull { it.id == this.selectedPreferences?.consultationModeId },
             languages = this.selectedPreferences?.languages?.mapNotNull { it?.toSupportedLanguage() }
                 ?: emptyList(),
             outputTemplates = this.selectedPreferences?.outputFormats?.mapNotNull { it?.toOutputFormat() }
