@@ -5,7 +5,6 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
-import android.os.Build
 import androidx.core.content.ContextCompat
 import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxStatus
 import java.text.SimpleDateFormat
@@ -72,23 +71,35 @@ object Voice2RxUtils {
 //        return String(decodedBytes, Charsets.UTF_8)
     }
 
+
+    // Source https://developer.android.com/develop/connectivity/network-ops/reading-network-state#restrictions
     fun isNetworkAvailable(context: Context): Boolean {
-        val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val capabilities = connectivityManager.getNetworkCapabilities(connectivityManager.activeNetwork) ?: return false
-            return when {
-                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ->    true
-                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) ->   true
-                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ->   true
-                else ->     false
-            }
-        }
-        else {
-            if (connectivityManager.activeNetworkInfo != null && connectivityManager.activeNetworkInfo!!.isConnectedOrConnecting) {
-                return true
-            }
-        }
-        return false
+        val connectivityManager =
+            context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+
+        val network = connectivityManager.activeNetwork ?: return false
+        val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return false
+
+        return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+    }
+
+    fun getNetworkCapabilities(context: Context): Map<String, Any> {
+        val connectivityManager =
+            context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+
+        val network = connectivityManager.activeNetwork ?: return mapOf("activeNetwork" to false)
+        val capabilities = connectivityManager.getNetworkCapabilities(network)
+            ?: return mapOf("capabilities" to "empty")
+
+        return mapOf(
+            "INTERNET" to capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET),
+            "VALIDATED" to capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED),
+            "WIFI" to capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI),
+            "CELLULAR" to capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR),
+            "VPN" to capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN),
+            "ETHERNET" to capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET),
+        )
     }
 
     fun getOutputSuccessStates(): Set<Voice2RxStatus> {

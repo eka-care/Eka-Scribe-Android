@@ -2,7 +2,6 @@ package com.eka.voice2rx_sdk.data.remote.models.requests
 
 
 import androidx.annotation.Keep
-import com.eka.voice2rx_sdk.data.local.models.Voice2RxType
 import com.google.gson.annotations.SerializedName
 
 @Keep
@@ -10,7 +9,7 @@ data class Voice2RxInitTransactionRequest(
     @SerializedName("input_language")
     var inputLanguage: List<String?>?,
     @SerializedName("mode")
-    var mode: Voice2RxType = Voice2RxType.DICTATION,
+    var mode: String,
     @SerializedName("output_format_template")
     var outputFormatTemplate: List<OutputFormatTemplate?>?,
     @SerializedName("s3_url")
@@ -22,7 +21,7 @@ data class Voice2RxInitTransactionRequest(
     @SerializedName("transfer")
     var transfer: String = "vaded",
     @SerializedName("model_type")
-    var modelType: ModelType = ModelType.PRO,
+    var modelType: String,
     @SerializedName("patient_details")
     var patientDetails: PatientDetails? = null
 )

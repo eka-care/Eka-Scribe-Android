@@ -15,11 +15,11 @@ val sdk = Properties().apply { load(project.rootProject.file("sdk.properties").i
 
 android {
     namespace = "com.eka.voice2rx_sdk"
-    compileSdk = 34
+    compileSdk = 36
 
     defaultConfig {
-        minSdk = 21
-        targetSdk = 34
+        minSdk = 23
+        targetSdk = 35
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         consumerProguardFiles("consumer-rules.pro")

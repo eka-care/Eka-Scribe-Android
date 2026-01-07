@@ -39,7 +39,10 @@ enum class OutputType(val value: String) {
     MARKDOWN("markdown"),
 
     @SerializedName("text")
-    TEXT("text")
+    TEXT("text"),
+
+    @SerializedName("custom")
+    CUSTOM("custom")
 }
 
 //"data": {
