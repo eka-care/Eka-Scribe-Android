@@ -12,6 +12,7 @@ import com.eka.voice2rx_sdk.common.Voice2RxUtils
 import com.eka.voice2rx_sdk.common.voicelogger.EventCode
 import com.eka.voice2rx_sdk.common.voicelogger.EventLog
 import com.eka.voice2rx_sdk.common.voicelogger.VoiceLogger
+import com.eka.voice2rx_sdk.common.voicelogger.logNetworkInfo
 import com.eka.voice2rx_sdk.data.local.db.Voice2RxDatabase
 import com.eka.voice2rx_sdk.data.local.db.entities.VToRxSession
 import com.eka.voice2rx_sdk.data.local.db.entities.VoiceFile
@@ -20,23 +21,36 @@ import com.eka.voice2rx_sdk.data.local.db.entities.VoiceTransactionStage
 import com.eka.voice2rx_sdk.data.local.db.entities.VoiceTransactionState
 import com.eka.voice2rx_sdk.data.local.db.entities.VoiceTranscriptionOutput
 import com.eka.voice2rx_sdk.data.local.models.Voice2RxSessionStatus
+import com.eka.voice2rx_sdk.data.remote.models.requests.UpdateSessionRequest
+import com.eka.voice2rx_sdk.data.remote.models.requests.UpdateTemplatesRequest
+import com.eka.voice2rx_sdk.data.remote.models.requests.UpdateUserConfigRequest
 import com.eka.voice2rx_sdk.data.remote.models.requests.Voice2RxInitTransactionRequest
 import com.eka.voice2rx_sdk.data.remote.models.requests.Voice2RxStopTransactionRequest
 import com.eka.voice2rx_sdk.data.remote.models.responses.EkaScribeResult
+import com.eka.voice2rx_sdk.data.remote.models.responses.EkaScribeResultV3
 import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxHistoryResponse
 import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxInitTransactionResponse
 import com.eka.voice2rx_sdk.data.remote.models.responses.Voice2RxStopTransactionResponse
+import com.eka.voice2rx_sdk.data.remote.models.responses.toTemplateItem
+import com.eka.voice2rx_sdk.data.remote.models.responses.toUserConfigs
 import com.eka.voice2rx_sdk.data.remote.services.AwsS3UploadService
 import com.eka.voice2rx_sdk.data.remote.services.Voice2RxService
 import com.eka.voice2rx_sdk.sdkinit.Voice2Rx
+import com.eka.voice2rx_sdk.sdkinit.models.SelectedUserPreferences
+import com.eka.voice2rx_sdk.sdkinit.models.SessionData
+import com.eka.voice2rx_sdk.sdkinit.models.SessionResult
+import com.eka.voice2rx_sdk.sdkinit.models.TemplateItem
+import com.eka.voice2rx_sdk.sdkinit.models.TemplateOutput
+import com.eka.voice2rx_sdk.sdkinit.models.UserConfigs
+import com.eka.voice2rx_sdk.sdkinit.models.toTemplateOutput
 import com.google.gson.Gson
 import com.haroldadmin.cnradapter.NetworkResponse
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -121,7 +135,8 @@ internal class VToRxRepository(
     suspend fun stopVoice2RxTransaction(
         sessionId: String,
         request: Voice2RxStopTransactionRequest,
-        isForceCommit: Boolean = false
+        isForceCommit: Boolean = false,
+        onError: () -> Unit = {}
     ): NetworkResponse<Voice2RxStopTransactionResponse, Voice2RxStopTransactionResponse> {
         return withContext(Dispatchers.IO) {
             try {
@@ -158,15 +173,15 @@ internal class VToRxRepository(
                     }
 
                     is NetworkResponse.Error -> {
+                        onError()
                         Voice2Rx.logEvent(
                             EventLog.Info(
                                 code = EventCode.VOICE2RX_SESSION_LIFECYCLE,
                                 params = mapOf(
-                                        "sessionId" to sessionId,
-                                        "lifecycle_event" to "stop",
-                                        "response_status" to (response.body?.message.toString()),
-                                    )
-
+                                    "sessionId" to sessionId,
+                                    "lifecycle_event" to "stop",
+                                    "response_status" to (response.body?.message.toString()),
+                                )
                             )
                         )
                     }
@@ -193,19 +208,19 @@ internal class VToRxRepository(
         }
     }
 
-    internal fun checkUploadingStageAndProgress(
+    internal suspend fun checkUploadingStageAndProgress(
         sessionId: String,
         isForceCommit: Boolean = false
     ) {
-        CoroutineScope(Dispatchers.IO).launch {
+        withContext(Dispatchers.IO) {
             val session = getSessionBySessionId(sessionId = sessionId)
             if (session == null) {
                 VoiceLogger.e("Voice2Rx", "Session not found for sessionId: $sessionId")
-                return@launch
+                return@withContext
             }
             if (session.voiceTransactionState != VoiceTransactionState.STOPPED) {
                 VoiceLogger.e("Voice2Rx", "Session is not stopped yet!")
-                return@launch
+                return@withContext
             }
             when (session.uploadStage) {
                 VoiceTransactionStage.INIT -> {
@@ -229,7 +244,7 @@ internal class VToRxRepository(
                 }
 
                 VoiceTransactionStage.ANALYZING -> {
-                    fetchVoice2RxTransactionResult(
+                    pollEkaScribeResult(
                         sessionId = sessionId
                     )
                 }
@@ -239,8 +254,8 @@ internal class VToRxRepository(
         }
     }
 
-    private fun goToStopStep(sessionId: String, isForceCommit: Boolean = false) {
-        CoroutineScope(Dispatchers.IO).launch {
+    private suspend fun goToStopStep(sessionId: String, isForceCommit: Boolean = false) {
+        withContext(Dispatchers.IO) {
             val voiceFiles = getAllFiles(sessionId = sessionId)
             if (voiceFiles.isEmpty()) {
                 Voice2Rx.logEvent(
@@ -258,7 +273,7 @@ internal class VToRxRepository(
                     sessionId = sessionId,
                     uploadStage = VoiceTransactionStage.ERROR
                 )
-                return@launch
+                return@withContext
             }
             stopVoice2RxTransaction(
                 sessionId = sessionId,
@@ -273,12 +288,12 @@ internal class VToRxRepository(
         }
     }
 
-    private fun goToCommitStep(sessionId: String, isForceCommit: Boolean = false) {
-        CoroutineScope(Dispatchers.IO).launch {
+    private suspend fun goToCommitStep(sessionId: String, isForceCommit: Boolean = false) {
+        withContext(Dispatchers.IO) {
             val session = getSessionBySessionId(sessionId = sessionId)
             if (session == null) {
                 VoiceLogger.e("Voice2Rx", "Session not found for sessionId: $sessionId")
-                return@launch
+                return@withContext
             }
             val voiceFiles = getAllFiles(sessionId = sessionId)
             if (voiceFiles.isEmpty()) {
@@ -293,7 +308,7 @@ internal class VToRxRepository(
 
                     )
                 )
-                return@launch
+                return@withContext
             }
             val filteredFiles = voiceFiles.filter { it.fileType == VoiceFileType.CHUNK_AUDIO }
             val isAllUploaded = filteredFiles.all { it.isUploaded }
@@ -517,26 +532,153 @@ internal class VToRxRepository(
         }
     }
 
-    fun saveSessionOutput(sessionId: String, result: EkaScribeResult) {
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                result.data?.output?.forEachIndexed { idx, it ->
-                    it?.let { output ->
-                        vToRxDatabase.getVoice2RxDao().insertTranscriptionOutput(
-                            VoiceTranscriptionOutput(
-                                outputId = Voice2RxInternalUtils.getOutputId(
-                                    sessionId = sessionId,
-                                    templateId = output.templateId?.value ?: idx.toString()
-                                ),
-                                foreignKey = sessionId,
-                                name = output.name,
-                                templateId = output.templateId,
-                                type = output.type,
-                                value = output.value
+    suspend fun pollEkaScribeResult(
+        sessionId: String,
+        maxRetries: Int = 3
+    ): Result<SessionResult> = withContext(Dispatchers.IO) {
+        return@withContext try {
+            var retryCount = 0
+            while (retryCount < maxRetries) {
+                val response = fetchEkaScribeResult(sessionId = sessionId)
+                when (response) {
+                    is NetworkResponse.Success -> {
+                        if (response.code != 202) {
+                            val (outputs, audioQuality) = constructEkaScribeResult(
+                                response,
+                                sessionId
+                            )
+                            return@withContext Result.success(
+                                SessionResult(
+                                    audioQuality = audioQuality,
+                                    templates = outputs.toList()
+                                )
+                            )
+                        }
+                    }
+
+                    is NetworkResponse.Error -> {
+                        VoiceLogger.e(
+                            "Voice2Rx",
+                            "Error getting session status: ${response.body.toString()} :: ${response.error.toString()}"
+                        )
+                    }
+                }
+                retryCount++
+                delay(2000L)
+            }
+            Result.failure(Exception("Max retries reached"))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    private fun constructEkaScribeResult(
+        response: NetworkResponse.Success<EkaScribeResultV3, EkaScribeResultV3>,
+        sessionId: String
+    ): Pair<MutableList<TemplateOutput>, Double?> {
+        val templateOutputs =
+            response.body.data?.templateResults?.custom?.mapNotNull {
+                it?.toTemplateOutput(sessionId = sessionId)
+            }
+        val transcriptResults =
+            response.body.data?.templateResults?.transcript?.mapNotNull {
+                it?.toTemplateOutput(sessionId = sessionId)
+            }
+        val outputs = mutableListOf<TemplateOutput>()
+        outputs.addAll(templateOutputs ?: emptyList())
+        outputs.addAll(transcriptResults ?: emptyList())
+        val audioQuality = response.body.data?.audioMatrix?.quality
+        return Pair(outputs, audioQuality)
+    }
+
+    suspend fun getEkaScribeResult(
+        sessionId: String,
+    ): Result<SessionResult> = withContext(Dispatchers.IO) {
+        return@withContext try {
+            val response = fetchEkaScribeResult(sessionId = sessionId)
+            when (response) {
+                is NetworkResponse.Success -> {
+                    if (response.code != 202) {
+                        val (outputs, audioQuality) = constructEkaScribeResult(response, sessionId)
+                        return@withContext Result.success(
+                            SessionResult(
+                                audioQuality = audioQuality,
+                                templates = outputs.toList()
                             )
                         )
                     }
                 }
+
+                is NetworkResponse.Error -> {
+                    VoiceLogger.e(
+                        "Voice2Rx",
+                        "Error getting session status: ${response.body.toString()} :: ${response.error.toString()}"
+                    )
+                }
+            }
+            Result.failure(Exception("Failed to get output!"))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun fetchEkaScribeResult(sessionId: String): NetworkResponse<EkaScribeResultV3, EkaScribeResultV3> {
+        return withContext(Dispatchers.IO) {
+            try {
+                val response =
+                    remoteDataSource.getVoice2RxTransactionResult(sessionId = sessionId)
+                if (response is NetworkResponse.Error) {
+                    Voice2Rx.logEvent(
+                        EventLog.Info(
+                            code = EventCode.VOICE2RX_SESSION_STATUS,
+                            params = mapOf(
+                                "sessionId" to sessionId,
+                                "lifecycle_event" to "status_error",
+                                "error" to "Error getting session status: ${response.body.toString()} :: ${response.error.toString()}",
+                            )
+
+                        )
+                    )
+                }
+                response
+            } catch (e: Exception) {
+                Voice2Rx.logEvent(
+                    EventLog.Info(
+                        code = EventCode.VOICE2RX_SESSION_ERROR,
+                        params = mapOf(
+                            "sessionId" to sessionId,
+                            "lifecycle_event" to "get_session_status",
+                            "error" to "Error getting session status: ${e.message}",
+                        )
+
+                    )
+                )
+                NetworkResponse.UnknownError(error = e, response = null)
+            }
+        }
+    }
+
+    fun saveSessionOutput(sessionId: String, result: EkaScribeResult) {
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                // TODO save result locally dont need i think
+//                result.data?.output?.forEachIndexed { idx, it ->
+//                    it?.let { output ->
+//                        vToRxDatabase.getVoice2RxDao().insertTranscriptionOutput(
+//                            VoiceTranscriptionOutput(
+//                                outputId = Voice2RxInternalUtils.getOutputId(
+//                                    sessionId = sessionId,
+//                                    templateId = output.templateId ?: idx.toString()
+//                                ),
+//                                foreignKey = sessionId,
+//                                name = output.name,
+//                                templateId = output.templateId,
+//                                type = output.type,
+//                                value = output.value
+//                            )
+//                        )
+//                    }
+//                }
             } catch (e: Exception) {
                 Log.e("Voice2Rx", "Error saving session output: ${e.message}")
             }
@@ -555,46 +697,59 @@ internal class VToRxRepository(
         }
     }
 
-    fun listenToAllFilesForSession(sessionId: String) {
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                Voice2Rx.logEvent(
-                    EventLog.Info(
-                        code = EventCode.VOICE2RX_SESSION_LIFECYCLE,
-                        params =
-                            mapOf(
-                                "sessionId" to sessionId,
-                                "lifecycle" to "listen_to_all_files",
+    fun listenToAllFilesForSession(
+        context: Context,
+        sessionId: String,
+        onResponse: (ResponseState) -> Unit
+    ) {
+        try {
+            retrySessionUploading(
+                context = context,
+                sessionId = sessionId,
+                forceCommit = true,
+                onResponse = {
+                    when (it) {
+                        is ResponseState.Success -> {
+                            Voice2Rx.logEvent(
+                                EventLog.Info(
+                                    code = EventCode.VOICE2RX_SESSION_LIFECYCLE,
+                                    params = mapOf(
+                                        "sessionId" to sessionId,
+                                        "lifecycle" to "All files uploaded successfully.",
+                                    )
+                                )
                             )
-
-                    )
-                )
-                vToRxDatabase.getVoice2RxDao().getAllFilesFlow(sessionId = sessionId)
-                    .collectLatest {
-                        val files = it.filter { file -> file.fileType == VoiceFileType.CHUNK_AUDIO }
-                        if (files.isNotEmpty()) {
-                            val isAllUploaded = files.all { file -> file.isUploaded }
-                            if (isAllUploaded) {
-                                checkUploadingStageAndProgress(sessionId = sessionId)
-                            } else {
-                                VoiceLogger.w("Voice2Rx", "Not all audio files are uploaded")
-                            }
                         }
-                    }
-            } catch (e: Exception) {
-                Voice2Rx.logEvent(
-                    EventLog.Info(
-                        code = EventCode.VOICE2RX_SESSION_ERROR,
-                        params =
-                            mapOf(
-                                "sessionId" to sessionId,
-                                "error" to "Error listening to all files for session: ${e.message}",
-                            )
 
+                        is ResponseState.Error -> {
+                            Voice2Rx.logEvent(
+                                EventLog.Info(
+                                    code = EventCode.VOICE2RX_SESSION_ERROR,
+                                    params =
+                                        mapOf(
+                                            "sessionId" to sessionId,
+                                            "error" to "Error listening to all files for session: ${it.error}",
+                                        )
+
+                                )
+                            )
+                        }
+
+                        else -> {}
+                    }
+                    onResponse(it)
+                })
+        } catch (e: Exception) {
+            onResponse(ResponseState.Error("Error listening to all files for session: ${e.message}"))
+            Voice2Rx.logEvent(
+                EventLog.Info(
+                    code = EventCode.VOICE2RX_SESSION_ERROR,
+                    params = mapOf(
+                        "sessionId" to sessionId,
+                        "error" to "Error listening to all files for session: ${e.message}",
                     )
                 )
-                VoiceLogger.e("Voice2Rx", "Error listening to all files for session: ${e.message}")
-            }
+            )
         }
     }
 
@@ -803,9 +958,11 @@ internal class VToRxRepository(
     fun retrySessionUploading(
         context: Context,
         sessionId: String,
+        forceCommit: Boolean = true,
         onResponse: (ResponseState) -> Unit,
     ) {
         if (!Voice2RxUtils.isNetworkAvailable(context)) {
+            logNetworkInfo(context = context, sessionId = sessionId)
             onResponse(ResponseState.Error("Network not available!"))
             return
         }
@@ -813,11 +970,10 @@ internal class VToRxRepository(
             EventLog.Info(
                 code = EventCode.VOICE2RX_SESSION_LIFECYCLE,
                 params = mapOf(
-                        "sessionId" to sessionId,
-                        "lifecycle_event" to "retry_upload",
-                        "status" to "started",
-                    )
-
+                    "sessionId" to sessionId,
+                    "lifecycle_event" to "retry_upload",
+                    "status" to "started",
+                )
             )
             val session = getSessionBySessionId(sessionId = sessionId)
             if (session?.uploadStage == VoiceTransactionStage.ERROR) {
@@ -843,7 +999,10 @@ internal class VToRxRepository(
                     }.flatten()
 
                 if (results.all { it }) {
-                    checkUploadingStageAndProgress(sessionId = sessionId, isForceCommit = true)
+                    checkUploadingStageAndProgress(
+                        sessionId = sessionId,
+                        isForceCommit = forceCommit
+                    )
                     onResponse(ResponseState.Success(true))
                 } else {
                     onResponse(ResponseState.Error("Audio file upload failed!"))
@@ -877,12 +1036,13 @@ internal class VToRxRepository(
         context: Context
     ) = callbackFlow {
         if (!Voice2RxUtils.isNetworkAvailable(context)) {
+            logNetworkInfo(context = context, sessionId = sessionId)
             trySend(false)
             close()
             return@callbackFlow
         }
 
-        val file = File(context.filesDir, voiceFile.filePath)
+        val file = File(voiceFile.filePath)
         if (!file.exists()) {
             VoiceLogger.e("Retry Session", "File Not Found!")
             trySend(true)
@@ -915,5 +1075,167 @@ internal class VToRxRepository(
         }
 
         awaitClose {}
+    }
+
+    suspend fun convertTransactionResult(sessionId: String, templateId: String): Result<Boolean> =
+        withContext(Dispatchers.IO) {
+            return@withContext try {
+                val response = remoteDataSource.convertTransactionResult(
+                    sessionId = sessionId,
+                    templateId = templateId
+                )
+                when (response) {
+                    is NetworkResponse.Success -> {
+                        if (response.body.status == "success") {
+                            Result.success(true)
+                        } else {
+                            Result.failure(Exception("Something went wrong!"))
+                        }
+                    }
+
+                    is NetworkResponse.Error -> {
+                        Result.failure(Exception(response.body?.error?.displayMessage.toString()))
+                    }
+                }
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+    }
+
+    suspend fun updateSessionResult(
+        sessionId: String,
+        updatedData: List<SessionData>
+    ): Result<Boolean> = withContext(
+        Dispatchers.IO
+    ) {
+        return@withContext try {
+            val request = UpdateSessionRequest()
+            request.addAll(updatedData.map {
+                UpdateSessionRequest.UpdateSessionRequestItem(
+                    data = it.data,
+                    templateId = it.templateId
+                )
+            })
+            val response =
+                remoteDataSource.updateSessionOutput(sessionId = sessionId, request = request)
+            when (response) {
+                is NetworkResponse.Success -> {
+                    if (response.body.status == "success") {
+                        Result.success(true)
+                    } else {
+                        Result.failure(Exception("Something went wrong!"))
+                    }
+                }
+
+                is NetworkResponse.Error -> {
+                    Result.failure(Exception(response.body?.error?.displayMessage.toString()))
+                }
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun getTemplates(): Result<List<TemplateItem>> = withContext(Dispatchers.IO) {
+        return@withContext try {
+            val response = remoteDataSource.getTemplates()
+            when (response) {
+                is NetworkResponse.Success -> {
+                    Result.success(response.body.items?.mapNotNull { it?.toTemplateItem() }
+                        ?.filterNotNull() ?: emptyList())
+                }
+
+                is NetworkResponse.Error -> {
+                    Result.failure(Exception("Error fetching templates"))
+                }
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun updateTemplates(enabledTemplates: List<String>): Result<Unit> =
+        withContext(Dispatchers.IO) {
+            try {
+                val response = remoteDataSource.updateTemplates(
+                    requestBody = UpdateTemplatesRequest(
+                        data = UpdateTemplatesRequest.Data(
+                            myTemplates = enabledTemplates
+                        )
+                    )
+                )
+                when (response) {
+                    is NetworkResponse.Success -> {
+                        Result.success(Unit)
+                    }
+
+                    else -> {
+                        Result.failure(Exception("Error updating templates"))
+                    }
+                }
+                Result.failure(Exception("Error updating templates"))
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+        }
+
+    suspend fun getConfig(): Result<UserConfigs> = withContext(Dispatchers.IO) {
+        return@withContext try {
+            val response = remoteDataSource.getUserConfig()
+            return@withContext when (response) {
+                is NetworkResponse.Success -> {
+                    val data = response.body.data?.toUserConfigs()
+                    if (data != null) {
+                        Result.success(data)
+                    } else {
+                        Result.failure(Exception("Error fetching config"))
+                    }
+                }
+
+                else -> {
+                    Result.failure(Exception("Error fetching config"))
+                }
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun updateUserConfig(
+        selectedUserPreferences: SelectedUserPreferences
+    ): Result<Boolean> = withContext(Dispatchers.IO) {
+        return@withContext try {
+            val request = UpdateUserConfigRequest(
+                data = UpdateUserConfigRequest.Data(
+                    consultationMode = selectedUserPreferences.consultationMode?.id,
+                    inputLanguages = selectedUserPreferences.languages.map {
+                        UpdateUserConfigRequest.Data.InputLanguage(
+                            id = it.id,
+                            name = it.name
+                        )
+                    }.toList(),
+                    modelType = selectedUserPreferences.modelType?.id,
+                    outputFormatTemplate = selectedUserPreferences.outputTemplates.map {
+                        UpdateUserConfigRequest.Data.OutputFormatTemplate(
+                            id = it.id,
+                            name = it.name,
+                            templateType = "custom"
+                        )
+                    }
+                )
+            )
+            val response = remoteDataSource.updateUserConfig(request)
+            return@withContext when (response) {
+                is NetworkResponse.Success -> {
+                    Result.success(true)
+                }
+
+                else -> {
+                    Result.failure(Exception("Error updating config"))
+                }
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
     }
 }

@@ -2,7 +2,6 @@ package com.eka.voice2rx_sdk.sdkinit
 
 import androidx.annotation.Keep
 import com.eka.networking.client.NetworkConfig
-import com.eka.networking.token.TokenStorage
 import com.konovalov.vad.silero.config.FrameSize
 import com.konovalov.vad.silero.config.SampleRate
 
@@ -17,6 +16,7 @@ data class Voice2RxInitConfig(
     val audioQuality: AudioQualityConfig = AudioQualityConfig.ENABLED,
     val audioQualityDuration: Int = 3, // In Seconds
     val networkConfig : NetworkConfig,
+    val debugMode: Boolean = false,
 )
 
 enum class AudioQualityConfig {

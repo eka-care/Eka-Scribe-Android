@@ -44,12 +44,12 @@ class VoiceRecorder(
             AudioManager.AUDIOFOCUS_LOSS,
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT,
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
-                VoiceLogger.d("AudioRecordManager", "Microphone focus gone.")
+                VoiceLogger.d(TAG, "Microphone focus gone.")
                 onMicrophoneFocusGone()
             }
 
             AudioManager.AUDIOFOCUS_GAIN -> {
-                VoiceLogger.d("AudioRecordManager", "Microphone focus gain.")
+                VoiceLogger.d(TAG, "Microphone focus gain.")
                 onMicrophoneFocusGain()
             }
         }
@@ -70,7 +70,7 @@ class VoiceRecorder(
 
             val result = audioManager?.requestAudioFocus(audioFocusRequest!!)
             if (result != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
-                VoiceLogger.d("AudioRecordManager", "Could not get audio focus")
+                VoiceLogger.d(TAG, "Could not get audio focus")
             }
         } else {
             @Suppress("DEPRECATION")
@@ -80,7 +80,7 @@ class VoiceRecorder(
                 AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE
             )
             if (result != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
-                VoiceLogger.d("AudioRecordManager", "Could not get audio focus")
+                VoiceLogger.d(TAG, "Could not get audio focus")
             }
         }
     }
@@ -121,7 +121,7 @@ class VoiceRecorder(
         try {
             requestAudioFocus()
         } catch (e: IOException) {
-            VoiceLogger.d("VoiceRecorder", e.printStackTrace().toString())
+            VoiceLogger.d(TAG, e.printStackTrace().toString())
             e.printStackTrace()
         }
 
@@ -145,10 +145,12 @@ class VoiceRecorder(
 
     fun pauseListening() {
         listeningState = ListeningState.PAUSE
+        VoiceLogger.d(TAG, "Audio paused at: ${System.currentTimeMillis() - startTimestamp}ms")
     }
 
     fun resumeListening() {
         listeningState = ListeningState.LISTENING
+        VoiceLogger.d(TAG, "Audio Resumed at: ${System.currentTimeMillis() - startTimestamp}ms")
     }
 
     fun stop() {
@@ -205,11 +207,13 @@ class VoiceRecorder(
             val buffer = ShortArray(frameSize)
             while (!Thread.interrupted()) {
                 if (listeningState == ListeningState.LISTENING) {
+
                     val read = audioRecord?.read(buffer, 0, buffer.size)
                     if (read != null && read > 0) {
                         val amplitude = getAudioAmplitude(read, buffer)
+                        VoiceLogger.d(TAG, "onAudio")
                         callback.onAudio(
-                            audioData = buffer.copyOfRange(0, read),
+                            audioData = buffer.copyOfRange(0, read).copyOf(),
                             timeStamp = System.currentTimeMillis(),
                             amplitude = amplitude
                         )
@@ -222,7 +226,6 @@ class VoiceRecorder(
     // This code do not take much time it takes 0 seconds
     // I measured it with measureTime function
     private fun getAudioAmplitude(read: Int, buffer: ShortArray): Float {
-        Short
         if (read <= 0 || buffer.isEmpty()) return 0f
 
         val maxAmplitude = 32767f // Max value for 16-bit audio

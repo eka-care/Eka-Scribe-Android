@@ -7,6 +7,11 @@ import com.eka.voice2rx_sdk.data.local.models.FileInfo
 import com.eka.voice2rx_sdk.data.local.models.IncludeStatus
 import com.eka.voice2rx_sdk.sdkinit.V2RxInternal
 import com.eka.voice2rx_sdk.sdkinit.Voice2Rx
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import java.io.File
 import java.util.Collections
 import java.util.Locale
@@ -29,6 +34,9 @@ internal class AudioHelper(
     private val audioRecordData = Collections.synchronizedList(mutableListOf<AudioRecordModel>())
     private val clipPoints = mutableListOf(0)
     private val clipTimeStamps = mutableListOf(0L)
+
+    private val analysisScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val uploadScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     private var silenceDuration = 0
     private var lastClipIndex = 0
@@ -71,7 +79,9 @@ internal class AudioHelper(
         if (isClipPointFrame) {
             silenceDuration = 0
             clipTimeStamps.add(clipTime)
-            v2RxInternal.getUploadService().processAndUpload(lastClipIndex, currentClipIndex)
+            uploadScope.launch {
+                v2RxInternal.getUploadService().processAndUpload(lastClipIndex, currentClipIndex)
+            }
         }
     }
 
@@ -82,10 +92,17 @@ internal class AudioHelper(
             return
         }
         lastAudioQualityIndex = currentIndex
-        v2RxInternal.getUploadService().updateAudioQualityMetrics(
-            lastClipIndex1 = lastIndex,
-            currentClipIndex = currentIndex
-        )
+        analysisScope.launch {
+            try {
+                v2RxInternal.getUploadService().updateAudioQualityMetrics(
+                    lastClipIndex1 = lastIndex,
+                    currentClipIndex = currentIndex
+                )
+            } catch (e: Exception) {
+                e.printStackTrace()
+                VoiceLogger.d(TAG, e.message.toString())
+            }
+        }
     }
 
     private fun updateSilenceDuration(audioRecordModel: AudioRecordModel) {
@@ -123,11 +140,18 @@ internal class AudioHelper(
     }
 
     fun uploadLastData(onFileUploaded: (String, FileInfo, IncludeStatus) -> Unit) {
+        val expectedDuration = audioRecordData.size / sampleRate.toFloat()
+        VoiceLogger.d(
+            TAG,
+            "Expected duration: ${expectedDuration}s, samples: ${audioRecordData.size}"
+        )
         lastClipIndex = currentClipIndex
         currentClipIndex = audioRecordData.size - 1
         isClipping = true
-        v2RxInternal.getUploadService()
-            .processAndUpload(lastClipIndex, currentClipIndex, onFileUploaded = onFileUploaded)
+        uploadScope.launch {
+            v2RxInternal.getUploadService()
+                .processAndUpload(lastClipIndex, currentClipIndex, onFileUploaded = onFileUploaded)
+        }
     }
 
     fun uploadFullRecordingFile(fileName: String, onFileCreated: (File) -> Unit) {
@@ -171,5 +195,9 @@ internal class AudioHelper(
 
     fun onNewFileCreated(fileName: String, endTime: String, startTime: String) {
         v2RxInternal.addValueToChunksInfo(fileName, FileInfo(st = startTime, et = endTime))
+    }
+
+    fun release() {
+        analysisScope.cancel()
     }
 }
