@@ -23,7 +23,7 @@ dependencyResolutionManagement {
         google()
         mavenCentral()
         // Add below line to fetch SDK from Jitpack
-        maven { url = uri("https://jitpack.io") }
+        maven { url = uri("<https://jitpack.io>") }
     }
 }
 
@@ -35,7 +35,7 @@ Add the EkaScribe SDK and required networking dependency to your app's `build.gr
 
 ```kotlin
 dependencies {
-    implementation("com.github.eka-care:Eka-Scribe-Android:3.0.6")
+    implementation("com.github.eka-care:Eka-Scribe-Android:${LATEST_VERSION}")
 }
 
 ```
@@ -48,9 +48,6 @@ Add the following permissions to your `AndroidManifest.xml`:
 <uses-permission android:name="android.permission.RECORD_AUDIO" />
 <uses-permission android:name="android.permission.INTERNET" />
 <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
-    android:maxSdkVersion="28" />
-
 ```
 
 **Note:** You must request `RECORD_AUDIO` permission at runtime for Android 6.0 and above.
@@ -75,7 +72,14 @@ class MyVoice2RxCallbacks : Voice2RxLifecycleCallbacks {
     }
 
     override fun onStopSession(sessionId: String, recordedFiles: Int) {
-        // Recording stopped
+        // Get result when ready after stopping the session
+        CoroutineScope(Dispatchers.IO).launch {
+            Voice2Rx.pollEkaScribeResult(sessionId = sessionId).onSuccess {
+                Log.d(TAG, it.templates.toString())
+            }.onFailure {
+                Log.d(TAG, "error : ${it.message.toString()}")
+            }
+        }
     }
 
     override fun onPauseSession(sessionId: String) {
@@ -102,11 +106,19 @@ import com.eka.networking.token.TokenStorage
 
 class MyTokenStorage : TokenStorage {
     override fun getAccessToken(): String {
-		    // Return EkaAccessToken
-        return "eka-auth-token"
+        return "access_token"
     }
+
+    override fun getRefreshToken(): String {
+        return "refresh_token"
+    }
+
+    override fun saveTokens(accessToken: String, refreshToken: String) {
+        // save tokens
+    }
+
     override fun onSessionExpired() {
-        // Session Expired for the user.
+        // SessionExpired refresh token expired
     }
 }
 ```
@@ -124,7 +136,7 @@ import com.eka.networking.client.AuthConfig
 // 1. Configure Network
 val networkConfig = NetworkConfig(
     appId = "your-app-id",
-    baseUrl = "https://api.eka.care/",
+    baseUrl = "<https://api.eka.care/>",
     appVersionName = BuildConfig.VERSION_NAME,
     appVersionCode = BuildConfig.VERSION_CODE,
     isDebugApp = false // false in production environment,
@@ -137,10 +149,6 @@ val networkConfig = NetworkConfig(
 val config = Voice2RxInitConfig(
     voice2RxLifecycle = MyVoice2RxCallbacks(),
     networkConfig = networkConfig,
-    // Optional configurations:
-    // sampleRate = SampleRate.SAMPLE_RATE_16K,
-    // audioQuality = AudioQualityConfig.ENABLED,
-    // debugMode = true
 )
 
 // 3. Initialize
@@ -218,6 +226,7 @@ Stops the recording and triggers processing.
 
 ```kotlin
 Voice2Rx.stopVoice2Rx()
+
 ```
 
 ### `isCurrentlyRecording`
@@ -226,6 +235,7 @@ Checks if a recording is in progress.
 
 ```kotlin
 val isRecording = Voice2Rx.isCurrentlyRecording()
+
 ```
 
 ### Data & Results
