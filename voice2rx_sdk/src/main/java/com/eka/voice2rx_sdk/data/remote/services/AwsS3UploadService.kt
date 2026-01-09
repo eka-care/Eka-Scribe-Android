@@ -243,12 +243,15 @@ object AwsS3UploadService {
             repository = VToRxRepository(Voice2RxDatabase.getDatabase(context.applicationContext))
         }
         CoroutineScope(Dispatchers.IO).launch {
-            repository?.updateVoiceFile(
-                fileId = Voice2RxInternalUtils.getFileIdForSession(
-                    sessionId = sessionId,
-                    fileName = fileName
-                ), isUploaded = isUploaded
+            val fileId = Voice2RxInternalUtils.getFileIdForSession(
+                sessionId = sessionId,
+                fileName = fileName
             )
+            repository?.updateVoiceFile(
+                fileId = fileId,
+                isUploaded = isUploaded
+            )
+            VoiceLogger.d(TAG, "File status updated $fileId uploadStatus $isUploaded")
         }
     }
 

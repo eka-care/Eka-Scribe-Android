@@ -62,13 +62,13 @@ internal class AudioCombiner {
             fos.write(byteData)
         }
         writeM4aFile(
-            context,
-            inputFile,
-            outputFile,
-            audioData,
-            folderName,
-            sessionId,
-            sampleRate,
+            context = context,
+            inputWavFile = inputFile,
+            outputFile = outputFile,
+            audioData = audioData,
+            folderName = folderName,
+            sessionId = sessionId,
+            sampleRate = sampleRate,
             onFileCreated = onFileCreated,
             shouldUpload = shouldUpload,
             fileInfo = fileInfo
@@ -89,7 +89,7 @@ internal class AudioCombiner {
     ) {
         val wavToM4AConverter = WAVtoM4AConverter(sampleRate, 1, 128000)
 
-        wavToM4AConverter.convert(inputWavFile, outputFile) { result ->
+        wavToM4AConverter.convert(inputWavFile, destinationM4aFile = outputFile) { result ->
             deleteWavFile(inputWavFile)
             if (result.convertCode == ConversionResult.ConversionCode.SUCCESS) {
                 if (outputFile.totalSpace > 0) {
