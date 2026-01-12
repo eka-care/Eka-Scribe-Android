@@ -58,6 +58,7 @@ import com.konovalov.vad.silero.VadSilero
 import com.konovalov.vad.silero.config.Mode
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -424,16 +425,20 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
         if (::recorder.isInitialized) {
             recorder.stop()
         }
-        audioHelper.uploadLastData(
-            onFileUploaded = { fileName, fileInfo, includeStatus ->
-                VoiceLogger.d(TAG, "Last File Success!")
-                onLastFileUploadComplete(
-                    fileName = fileName,
-                    fileInfo = fileInfo,
-                    includeStatus = includeStatus
-                )
-            }
-        )
+        releaseResources()
+        CoroutineScope(Dispatchers.Default).launch {
+            delay(1000L)
+            audioHelper.uploadLastData(
+                onFileUploaded = { fileName, fileInfo, includeStatus ->
+                    VoiceLogger.d(TAG, "Last File Success!")
+                    onLastFileUploadComplete(
+                        fileName = fileName,
+                        fileInfo = fileInfo,
+                        includeStatus = includeStatus
+                    )
+                }
+            )
+        }
     }
 
     fun releaseResources() {
@@ -583,12 +588,10 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
                     "sessionId" to sessionId,
                     "lifecycle" to "last file upload completed"
                 )
-
             )
         )
         uploadWholeFileData()
         stopVoiceTransaction()
-        releaseResources()
         config.voice2RxLifecycle.onStopSession(sessionId, chunksInfo.size)
     }
 
@@ -713,28 +716,6 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
                     }
                 )
             }
-            repository.listenToAllFilesForSession(
-                context = app.applicationContext,
-                sessionId = sessionId,
-                onResponse = {
-                    when (it) {
-                        is ResponseState.Error -> {
-                            config.voice2RxLifecycle.onError(
-                                error = EkaScribeError(
-                                    sessionId = sessionId,
-                                    errorDetails = EkaScribeErrorDetails(
-                                        code = null,
-                                        displayMessage = "Error stopping transaction",
-                                        message = it.error
-                                    )
-                                )
-                            )
-                        }
-
-                        else -> {}
-                    }
-                }
-            )
         }
     }
 
