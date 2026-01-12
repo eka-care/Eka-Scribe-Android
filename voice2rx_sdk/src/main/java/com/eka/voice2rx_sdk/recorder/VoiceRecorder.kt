@@ -207,16 +207,17 @@ class VoiceRecorder(
             val buffer = ShortArray(frameSize)
             while (!Thread.interrupted()) {
                 if (listeningState == ListeningState.LISTENING) {
-
                     val read = audioRecord?.read(buffer, 0, buffer.size)
                     if (read != null && read > 0) {
                         val amplitude = getAudioAmplitude(read, buffer)
                         VoiceLogger.d(TAG, "onAudio")
-                        callback.onAudio(
-                            audioData = buffer.copyOfRange(0, read).copyOf(),
-                            timeStamp = System.currentTimeMillis(),
-                            amplitude = amplitude
-                        )
+                        if (listeningState == ListeningState.LISTENING) {
+                            callback.onAudio(
+                                audioData = buffer.copyOfRange(0, read).copyOf(),
+                                timeStamp = System.currentTimeMillis(),
+                                amplitude = amplitude
+                            )
+                        }
                     }
                 }
             }
