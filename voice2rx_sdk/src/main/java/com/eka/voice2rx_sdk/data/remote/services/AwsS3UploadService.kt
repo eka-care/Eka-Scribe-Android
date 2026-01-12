@@ -251,6 +251,10 @@ object AwsS3UploadService {
                 fileId = fileId,
                 isUploaded = isUploaded
             )
+            repository?.checkUploadingStageAndProgress(
+                sessionId = sessionId,
+                isForceCommit = false
+            )
             VoiceLogger.d(TAG, "File status updated $fileId uploadStatus $isUploaded")
         }
     }

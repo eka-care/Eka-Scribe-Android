@@ -716,28 +716,6 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
                     }
                 )
             }
-            repository.listenToAllFilesForSession(
-                context = app.applicationContext,
-                sessionId = sessionId,
-                onResponse = {
-                    when (it) {
-                        is ResponseState.Error -> {
-                            config.voice2RxLifecycle.onError(
-                                error = EkaScribeError(
-                                    sessionId = sessionId,
-                                    errorDetails = EkaScribeErrorDetails(
-                                        code = null,
-                                        displayMessage = "Error stopping transaction",
-                                        message = it.error
-                                    )
-                                )
-                            )
-                        }
-
-                        else -> {}
-                    }
-                }
-            )
         }
     }
 
