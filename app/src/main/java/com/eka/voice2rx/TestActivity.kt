@@ -53,7 +53,8 @@ import kotlinx.coroutines.launch
 class TestActivity : ComponentActivity() {
     companion object {
         const val TAG = "TestActivity"
-        var TEST_ACCESS_TOKEN = ""
+        var TEST_ACCESS_TOKEN =
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJzY3JpYmUtYW5kcm9pZCIsImItaWQiOiI3MTc1NjIwMjQ1NDgzNzc3IiwiY2MiOnsiZXNjIjoxLCJwZXgiOjE3OTI1NDA4MDAsInBzdCI6InRydWUiLCJzdHkiOiJwIn0sImRvYiI6IjIwMjUtMDgtMjUiLCJleHAiOjE3NjgyOTA3NjYsImZuIjoiSW10aXlheiIsImdlbiI6Ik0iLCJpYXQiOjE3NjgyODg5NjYsImlkcCI6Im1vYiIsImlzcyI6ImVtci5la2EuY2FyZSIsImp0aSI6IjY1YTQ4ZTY1LWNkODUtNDljMi04MDZkLWMyZjAzZmI5M2ZjZCIsImxuIjoibSwiLCJvaWQiOiIxNzU2MjAyNDU1MDI4NDIiLCJwcmkiOnRydWUsInBzIjoiRCIsInIiOiJJTiIsInMiOiJEciIsInV1aWQiOiI2NDIyYmRjMi0yMTgyLTRhMTMtYjYyMC0wNDdmNTBjZDQyZTgiLCJ3LWlkIjoiNzE3NTYyMDI0NTQ4Mzc3NyIsInctbiI6IkltdGl5YXoifQ.3rtMZL7cxsi6dxhH3eArmQWxLovCOsEovVGqZpWuoEI"
         const val TEST_REFRESH_TOKEN = ""
     }
 
