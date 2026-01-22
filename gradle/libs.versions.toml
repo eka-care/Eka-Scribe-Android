@@ -7,6 +7,7 @@ coreKtx = "1.15.0"
 junit = "4.13.2"
 junitVersion = "1.2.1"
 espressoCore = "3.6.1"
+mockito = "5.4.0"
 lifecycleRuntimeKtx = "2.8.7"
 activityCompose = "1.10.0"
 composeBom = "2023.08.00"
@@ -68,6 +69,8 @@ androidx-work-runtime-ktx = { module = "androidx.work:work-runtime-ktx", version
 kotlinx-coroutines = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "kotlinx-coroutines" }
 ok2curl = { module = "com.github.mrmike:ok2curl", version.ref = "ok2curl" }
 brotili = { module = "org.brotli:dec", version.ref = "brotiliVersion" }
+mockito-core = { module = "org.mockito:mockito-core", version.ref = "mockito" }
+mockito-kotlin = { module = "org.mockito.kotlin:mockito-kotlin", version.ref = "mockito" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
