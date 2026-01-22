@@ -35,7 +35,7 @@ data class Voice2RxInitTransactionRequest(
 @Keep
 data class PatientDetails(
     @SerializedName("age")
-    var age: String?,
+    var age: Int?,
     @SerializedName("biologicalSex")
     var biologicalSex: String?,
     @SerializedName("username")
