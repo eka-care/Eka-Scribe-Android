@@ -12,7 +12,7 @@ activityCompose = "1.10.0"
 composeBom = "2023.08.00"
 appcompat = "1.7.0"
 material = "1.12.0"
-onnxruntimeAndroid = "1.23.2"
+onnxruntimeAndroid = "1.19.2"
 silero = "2.0.10"
 awsAndroidSdkS3 = "2.22.0"
 ext-junit = "1.2.0"
@@ -29,6 +29,7 @@ kotlinx-coroutines = "1.10.2"
 ok2curl = "0.8.0"
 brotiliVersion = "0.1.2"
 ekascribe_sdk = "3.0.8"
+sherpaOnnx = "v1.12.23"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -68,6 +69,7 @@ androidx-work-runtime-ktx = { module = "androidx.work:work-runtime-ktx", version
 kotlinx-coroutines = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "kotlinx-coroutines" }
 ok2curl = { module = "com.github.mrmike:ok2curl", version.ref = "ok2curl" }
 brotili = { module = "org.brotli:dec", version.ref = "brotiliVersion" }
+sherpa-onnx-android = { module = "com.github.k2-fsa:sherpa-onnx", version.ref = "sherpaOnnx" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

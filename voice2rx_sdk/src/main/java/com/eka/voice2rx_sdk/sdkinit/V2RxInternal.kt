@@ -5,7 +5,9 @@ import android.content.Context
 import com.eka.voice2rx_sdk.AudioHelper
 import com.eka.voice2rx_sdk.AudioRecordModel
 import com.eka.voice2rx_sdk.UploadService
+import com.eka.voice2rx_sdk.audio.asr.indicconformer.IndicConformerASR
 import com.eka.voice2rx_sdk.audio.processing.AudioProcessor
+import com.eka.voice2rx_sdk.audio.whisper.TranscriptionService
 import com.eka.voice2rx_sdk.common.AudioQualityMetrics
 import com.eka.voice2rx_sdk.common.ResponseState
 import com.eka.voice2rx_sdk.common.SessionResponse
@@ -65,6 +67,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+
+// Using Sherpa for fast transcription
 
 internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener {
 
@@ -151,6 +155,19 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
     private val _audioQualityFlow = MutableStateFlow<AudioQualityMetrics?>(null)
     val audioQualityFlow = _audioQualityFlow.asStateFlow()
 
+    private val _transcriptFlow = MutableStateFlow("")
+    val transcriptFlow = _transcriptFlow.asStateFlow()
+
+    fun appendTranscript(text: String) {
+        if (text.isNotBlank()) {
+            _transcriptFlow.value = (_transcriptFlow.value + " " + text).trim()
+        }
+    }
+
+    fun clearTranscript() {
+        _transcriptFlow.value = ""
+    }
+
     private lateinit var recorder: VoiceRecorder
     private lateinit var audioHelper: AudioHelper
     private lateinit var uploadService: UploadService
@@ -161,6 +178,13 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
     private lateinit var fullRecordingFile: File
     private var sessionUploadStatus = true
     private var audioProcessor: AudioProcessor? = null
+    private var transcriptionService: TranscriptionService? = null
+    private var indicConformerASR: IndicConformerASR? = null
+    private val audioAccumulator =
+        mutableListOf<Short>() // Keep this for full file upload if needed, or remove if unused for logic
+    private val processingAccumulator = mutableListOf<Short>() // For chunk processing
+    private val CHUNK_SIZE_SAMPLES = 16000 * 5 // 5 seconds at 16kHz
+
 
     private var currentMode = Voice2RxType.DICTATION.value
 
@@ -194,6 +218,19 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
                 timeStamp = timeStamp
             )
         )
+
+        // Feed audio to IndicConformer if active for final accumulation (optional, or just rely on UploadService)
+        // We still keep audioAccumulator if we want to do a final full-context checks, but for now user asked to remove "Whisper" 
+        // and using UploadService chunkwise is what matters. 
+        // We'll remove the explicit polling loop we added.
+        if (indicConformerASR != null && indicConformerASR!!.isReady()) {
+            // Just keeping the final accumulator if needed, or we can rely solely on chunks.
+            // Given the requirements, we'll likely rely on chunks in UploadService.
+            // But let's keep audioAccumulator for the 'final flush' in stopRecording if chunks aren't perfectly aligned with end.
+            for (sample in audioData) {
+                processingAccumulator.add(sample)
+            }
+        }
     }
 
     private fun addAudioActivityData(voiceActivityData: VoiceActivityData) {
@@ -313,7 +350,11 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
             getS3Config()
             sessionUploadStatus = true
             sessionId = session
+            sessionId = session
             recordedFiles.clear()
+            audioAccumulator.clear()
+            processingAccumulator.clear()
+            clearTranscript() // Clear transcript for new session
             folderName = Voice2RxUtils.getCurrentDateInYYMMDD()
             initVoice2RxTransaction(
                 mode = mode,
@@ -349,6 +390,58 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
                         maxLength = Voice2Rx.getVoice2RxInitConfiguration().maxCutDuration,
                         audioQualityAnalysisDuration = Voice2Rx.getVoice2RxInitConfiguration().audioQualityDuration
                     )
+
+                    // Initialize Sherpa Transcription Service (fast ASR)
+                    val language = languages.firstOrNull()?.take(2) ?: "en"
+
+//                    if (modelType == ASRBackend.INDIC_CONFORMER.name) {
+                    VoiceLogger.d(TAG, "Initializing IndicConformer ASR...")
+                    indicConformerASR = IndicConformerASR()
+                    coroutineScope.launch {
+                        try {
+                            val modelDir = setupIndicConformerAssets(app)
+                            indicConformerASR?.initialize(
+                                encoderPath = "$modelDir/encoder.onnx",
+                                decoderPath = "$modelDir/decoder_joint.onnx",
+                                tokensPath = "$modelDir/tokens.txt"
+                            )
+                            VoiceLogger.d(
+                                TAG,
+                                "IndicConformer ASR initialized successfully from files"
+                            )
+                        } catch (e: Exception) {
+                            VoiceLogger.e(TAG, "Failed to initialize IndicConformer ASR", e)
+                            onError(
+                                EkaScribeError(
+                                    sessionId = session,
+                                    errorDetails = EkaScribeErrorDetails(
+                                        code = VoiceError.EKA_SCRIBE_SESSION_INITIALIZATION_FAILED.name,
+                                        displayMessage = "Failed to initialize IndicConformer model",
+                                        message = e.message ?: "Unknown error"
+                                    ),
+                                    voiceError = VoiceError.EKA_SCRIBE_SESSION_INITIALIZATION_FAILED
+                                )
+                            )
+                        }
+                    }
+//                    } else {
+//                        transcriptionService = TranscriptionService(
+//                            context = app,
+//                            sessionId = sessionId,
+//                        )
+//                    }
+
+//                    // Start initialization (model download if needed)
+//                    coroutineScope.launch {
+//                        try {
+//                            transcriptionService?.initialize { progress ->
+//                                VoiceLogger.d(TAG, "Whisper model download progress: $progress%")
+//                            }
+//                        } catch (e: Exception) {
+//                            VoiceLogger.e(TAG, "Failed to initialize Sherpa service", e)
+//                        }
+//                    }
+
                     uploadService = UploadService(
                         context = app,
                         audioHelper = audioHelper,
@@ -357,7 +450,9 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
                         audioProcessor = audioProcessor,
                         audioQualityConfig = Voice2Rx.getVoice2RxInitConfiguration().audioQuality,
                         audioQualityAnalysisDuration = Voice2Rx.getVoice2RxInitConfiguration().audioQualityDuration,
-                        sampleRate = Voice2Rx.getVoice2RxInitConfiguration().sampleRate.value
+                        sampleRate = Voice2Rx.getVoice2RxInitConfiguration().sampleRate.value,
+                        transcriptionService = transcriptionService,
+                        indicConformerASR = indicConformerASR
                     )
 
                     isRecording = true
@@ -425,6 +520,27 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
         if (::recorder.isInitialized) {
             recorder.stop()
         }
+        // Transcribe remaining accumulated audio if IndicConformer is active
+        indicConformerASR?.let { asr ->
+            if (processingAccumulator.isNotEmpty()) {
+                VoiceLogger.d(
+                    TAG,
+                    "Starting IndicConformer final flush on ${processingAccumulator.size} samples..."
+                )
+                val samples = processingAccumulator.toShortArray()
+                coroutineScope.launch {
+                    try {
+                        val transcript = asr.transcribe(samples)
+                        VoiceLogger.d(TAG, "IndicConformer Final Flush: $transcript")
+                    } catch (e: Exception) {
+                        VoiceLogger.e(TAG, "IndicConformer final flush failed", e)
+                    } finally {
+                        processingAccumulator.clear()
+                    }
+                }
+            }
+        }
+        
         releaseResources()
         CoroutineScope(Dispatchers.Default).launch {
             delay(1000L)
@@ -461,6 +577,11 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
                 if (::audioHelper.isInitialized) {
                     audioHelper.release()
                 }
+                transcriptionService?.release()
+                transcriptionService = null
+
+                indicConformerASR?.release()
+                indicConformerASR = null
             } catch (e: Exception) {
                 VoiceLogger.d(TAG, "Error releasing resources: ${e.message}")
             }
@@ -696,6 +817,7 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
                 updatedState = VoiceTransactionState.STOPPED
             )
             if (chunksInfo.size == voiceFiles.size) {
+                // All chunks uploaded
                 repository.stopVoice2RxTransaction(
                     sessionId = sessionId,
                     request = Voice2RxStopTransactionRequest(
@@ -718,6 +840,53 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
             }
         }
     }
+
+    private suspend fun setupIndicConformerAssets(context: Context): String =
+        withContext(Dispatchers.IO) {
+            val targetDir = File(context.filesDir, "indicconformer")
+            if (!targetDir.exists()) {
+                targetDir.mkdirs()
+            }
+
+            // Version-based caching: only re-extract if version changes
+            val currentVersion = "1.0.0" // Increment when models change
+            val versionFile = File(targetDir, "version.txt")
+            val existingVersion = if (versionFile.exists()) versionFile.readText().trim() else ""
+
+            if (existingVersion == currentVersion) {
+                VoiceLogger.d(
+                    TAG,
+                    "IndicConformer models already extracted (version $currentVersion)"
+                )
+                return@withContext targetDir.absolutePath
+            }
+
+            VoiceLogger.d(TAG, "Extracting IndicConformer models (version $currentVersion)...")
+            val startTime = System.currentTimeMillis()
+
+            val assets = context.assets
+            val assetPath = "indicconformer"
+            val files = assets.list(assetPath) ?: emptyArray()
+
+            for (fileName in files) {
+                val file = File(targetDir, fileName)
+                VoiceLogger.d(TAG, "Copying asset $fileName to ${file.absolutePath}")
+                assets.open("$assetPath/$fileName").use { inputStream ->
+                    file.outputStream().use { outputStream ->
+                        inputStream.copyTo(outputStream)
+                    }
+                }
+            }
+
+            // Save version marker
+            versionFile.writeText(currentVersion)
+
+            VoiceLogger.d(
+                TAG,
+                "Model extraction complete in ${System.currentTimeMillis() - startTime}ms"
+            )
+            targetDir.absolutePath
+        }
 
     suspend fun getVoiceSessionData(sessionId: String): SessionResponse {
         return withContext(Dispatchers.IO) {
@@ -769,6 +938,7 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
             )
         }
     }
+
 
     private fun cleanupOldFullAudioFiles(maxFilesToKeep: Int = 1) {
         CoroutineScope(Dispatchers.IO).launch {

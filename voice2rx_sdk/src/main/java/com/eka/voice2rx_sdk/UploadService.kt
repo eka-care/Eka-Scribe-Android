@@ -1,7 +1,9 @@
 package com.eka.voice2rx_sdk
 
 import android.content.Context
+import com.eka.voice2rx_sdk.audio.asr.indicconformer.IndicConformerASR
 import com.eka.voice2rx_sdk.audio.processing.AudioProcessor
+import com.eka.voice2rx_sdk.audio.whisper.TranscriptionService
 import com.eka.voice2rx_sdk.common.AudioQualityAnalyzer
 import com.eka.voice2rx_sdk.common.Voice2RxUtils
 import com.eka.voice2rx_sdk.common.voicelogger.VoiceLogger
@@ -24,7 +26,9 @@ internal class UploadService(
     private val audioProcessor: AudioProcessor? = null,
     private val audioQualityConfig: AudioQualityConfig,
     private val audioQualityAnalysisDuration: Int,
-    private val sampleRate: Int = SampleRate.SAMPLE_RATE_16K.value
+    private val sampleRate: Int = SampleRate.SAMPLE_RATE_16K.value,
+    private val transcriptionService: TranscriptionService? = null,
+    private val indicConformerASR: IndicConformerASR? = null
 ) {
     companion object {
         const val TAG = "UploadService"
@@ -54,8 +58,21 @@ internal class UploadService(
             clippedAudioData.addAll(
                 audioData.subList(lastClipIndex + 1, clipIndex + 1).map { it.frameData })
 
+            val combinedAudioData = getCombinedAudio(clippedAudioData)
+
+            // Trigger transcription if service is available
+            if (indicConformerASR != null && indicConformerASR.isReady()) {
+                VoiceLogger.d(TAG, "Triggering IndicConformer transcription for chunk.")
+                val transcript = indicConformerASR.transcribe(combinedAudioData)
+                VoiceLogger.d(TAG, "IndicConformer Chunk Transcript: $transcript")
+                // Append to real-time transcript flow
+                v2RxInternal.appendTranscript(transcript)
+            } else {
+                VoiceLogger.d(TAG, "No ASR service ready, skipping transcription")
+            }
+
             generateAudioFileFromAudioData(
-                audioData = getCombinedAudio(clippedAudioData),
+                audioData = combinedAudioData,
                 startIndex = lastClipIndex,
                 endIndex = clipIndex,
                 onFileUploaded = onFileUploaded

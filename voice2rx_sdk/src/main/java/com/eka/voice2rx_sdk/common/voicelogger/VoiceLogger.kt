@@ -3,7 +3,7 @@ package com.eka.voice2rx_sdk.common.voicelogger
 import android.util.Log
 
 object VoiceLogger {
-    var enableDebugLogs = false
+    var enableDebugLogs = true
     fun d(tag: String, msg: String) {
         if (enableDebugLogs) {
             Log.d(tag, msg)

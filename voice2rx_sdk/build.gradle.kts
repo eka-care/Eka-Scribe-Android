@@ -54,6 +54,7 @@ android {
             )
         }
         debug {
+            isJniDebuggable = true
             buildConfigField(
                 "String",
                 "SDK_VERSION_NAME",
@@ -91,6 +92,18 @@ android {
         singleVariant("release") {
             withSourcesJar()
             withJavadocJar()
+        }
+    }
+
+    packaging {
+        jniLibs {
+            // Use sherpa-onnx's bundled libonnxruntime.so (compatible with sherpa-onnx-jni)
+            pickFirsts += listOf(
+                "lib/arm64-v8a/libonnxruntime.so",
+                "lib/armeabi-v7a/libonnxruntime.so",
+                "lib/x86/libonnxruntime.so",
+                "lib/x86_64/libonnxruntime.so"
+            )
         }
     }
 }
@@ -136,4 +149,8 @@ dependencies {
     implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.onnxruntime.android)
     api(libs.eka.network.android)
+    // TensorFlow Lite for Whisper ASR
+    implementation("org.tensorflow:tensorflow-lite:2.14.0")
+    implementation("org.tensorflow:tensorflow-lite-support:0.4.4")
+    implementation("org.tensorflow:tensorflow-lite-gpu:2.14.0")
 }

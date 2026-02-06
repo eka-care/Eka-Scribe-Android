@@ -7,6 +7,7 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Update
 import com.eka.voice2rx_sdk.common.DatabaseConstants
+import com.eka.voice2rx_sdk.data.local.db.entities.ChunkTranscription
 import com.eka.voice2rx_sdk.data.local.db.entities.VToRxSession
 import com.eka.voice2rx_sdk.data.local.db.entities.VoiceFile
 import com.eka.voice2rx_sdk.data.local.db.entities.VoiceTransactionStage
@@ -64,4 +65,17 @@ interface VToRxSessionDao {
 
     @Query("SELECT * FROM ${DatabaseConstants.V2RX_SESSION_TABLE_NAME} WHERE session_id = :sessionId")
     fun getSessionAsFlow(sessionId: String): Flow<VToRxSession>
+
+    // Chunk Transcription methods
+    @Insert(entity = ChunkTranscription::class, onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertChunkTranscription(transcription: ChunkTranscription)
+
+    @Query("SELECT * FROM ${DatabaseConstants.V2RX_CHUNK_TRANSCRIPTION_TABLE} WHERE foreign_key = :sessionId ORDER BY chunk_index ASC")
+    suspend fun getChunkTranscriptionsBySessionId(sessionId: String): List<ChunkTranscription>
+
+    @Query("SELECT * FROM ${DatabaseConstants.V2RX_CHUNK_TRANSCRIPTION_TABLE} WHERE file_id = :fileId")
+    suspend fun getTranscriptionByFileId(fileId: String): ChunkTranscription?
+
+    @Query("SELECT * FROM ${DatabaseConstants.V2RX_CHUNK_TRANSCRIPTION_TABLE} WHERE foreign_key = :sessionId ORDER BY chunk_index ASC")
+    fun getChunkTranscriptionsFlow(sessionId: String): Flow<List<ChunkTranscription>>
 }
