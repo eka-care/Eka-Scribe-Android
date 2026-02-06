@@ -239,6 +239,8 @@ object Voice2Rx {
 
     fun getAudioQualityFlow(): Flow<AudioQualityMetrics?>? = v2RxInternal?.audioQualityFlow
 
+    fun getTranscriptFlow(): Flow<String>? = v2RxInternal?.transcriptFlow
+
     suspend fun getVoice2RxSessionStatus(sessionId: String): SessionStatus {
         return v2RxInternal?.getVoice2RxStatus(sessionId) ?: SessionStatus(
             sessionId = sessionId,

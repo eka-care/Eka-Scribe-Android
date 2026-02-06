@@ -2,6 +2,7 @@ package com.eka.voice2rx
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.widget.Toast
@@ -42,6 +43,7 @@ import com.eka.networking.token.TokenStorage
 import com.eka.voice2rx.TestActivity.Companion.TAG
 import com.eka.voice2rx_sdk.common.models.EkaScribeError
 import com.eka.voice2rx_sdk.data.local.models.Voice2RxType
+import com.eka.voice2rx_sdk.sdkinit.AudioQualityConfig
 import com.eka.voice2rx_sdk.sdkinit.Voice2Rx
 import com.eka.voice2rx_sdk.sdkinit.Voice2RxInitConfig
 import com.eka.voice2rx_sdk.sdkinit.Voice2RxLifecycleCallbacks
@@ -53,8 +55,9 @@ import kotlinx.coroutines.launch
 class TestActivity : ComponentActivity() {
     companion object {
         const val TAG = "TestActivity"
-        var TEST_ACCESS_TOKEN = ""
-        const val TEST_REFRESH_TOKEN = ""
+        var TEST_ACCESS_TOKEN =
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJkb2Mtd2ViIiwiYi1pZCI6IjcxNzU2MjAyNDU0ODM3NzciLCJjYyI6eyJlc2MiOjEsInBleCI6MTgwMTUyNjQwMCwicHNuIjoiRCIsInBzdCI6InRydWUiLCJzdHkiOiJwIn0sImRvYiI6IjIwMjUtMDgtMjUiLCJleHAiOjE3NzAzODA1MDUsImZuIjoiSW10aXlheiIsImdlbiI6Ik0iLCJpYXQiOjE3NzAzNzg3MDUsImlkcCI6Im1vYiIsImlzcyI6ImVtci5la2EuY2FyZSIsImp0aSI6ImM3ZDczYWJiLTM0N2UtNGU4Ny05OWJjLWViZDkzNGVhMjJiNSIsImxuIjoibSwiLCJvaWQiOiIxNzU2MjAyNDU1MDI4NDIiLCJwcmkiOnRydWUsInBzIjoiRCIsInIiOiJJTiIsInMiOiJEciIsInV1aWQiOiI2NDIyYmRjMi0yMTgyLTRhMTMtYjYyMC0wNDdmNTBjZDQyZTgiLCJ3LWlkIjoiNzE3NTYyMDI0NTQ4Mzc3NyIsInctbiI6IkltdGl5YXoifQ.HYuhhwxrJ0SoINr4p3BSM2O3dekh95teR22gOyiaxDg"
+        const val TEST_REFRESH_TOKEN = "c2b0c66ad1b645a28de76548bd88ba01"
     }
 
     private val requestPermissionLauncher = registerForActivityResult(
@@ -67,6 +70,13 @@ class TestActivity : ComponentActivity() {
         }
     }
 
+    fun getBasicHeaders(): HashMap<String, String> {
+        val headers = HashMap<String, String>()
+        headers["client-id"] = "doc-web"
+        headers["os-version"] = Build.VERSION.SDK_INT.toString()
+        return headers
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -75,6 +85,7 @@ class TestActivity : ComponentActivity() {
         Voice2Rx.init(
             config = Voice2RxInitConfig(
                 voice2RxLifecycle = MyLifecycleCallbacks(),
+                audioQuality = AudioQualityConfig.DISABLED,
                 networkConfig = NetworkConfig(
                     tokenStorage = MyTokenStorage(),
                     appId = "scribe-android",
@@ -83,7 +94,7 @@ class TestActivity : ComponentActivity() {
                     apiCallTimeOutInSec = 30,
                     isDebugApp = true,
                     baseUrl = "https://api.eka.care/",
-                    headers = mapOf()
+                    headers = getBasicHeaders()
                 ),
                 debugMode = true
             ),
@@ -201,6 +212,7 @@ fun TestScreen(
     var recordedFiles by remember { mutableStateOf(0) }
     var isRecording by remember { mutableStateOf(false) }
     var voiceActivity by remember { mutableStateOf("No activity") }
+    var transcript by remember { mutableStateOf("") }
 
     // Monitor recording state
     LaunchedEffect(Unit) {
@@ -218,6 +230,13 @@ fun TestScreen(
             } else {
                 "Silent (${String.format("%.2f", activity.amplitude)})"
             }
+        }
+    }
+
+    // Monitor real-time transcript
+    LaunchedEffect(Unit) {
+        Voice2Rx.getTranscriptFlow()?.collect { text ->
+            transcript = text
         }
     }
 
@@ -274,6 +293,29 @@ fun TestScreen(
                             style = MaterialTheme.typography.bodySmall
                         )
                     }
+                }
+            }
+
+            // Real-time Transcript Card
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = Color(0xFFFFF8E1)
+                )
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "Real-time Transcript:",
+                        style = MaterialTheme.typography.titleSmall
+                    )
+                    Text(
+                        text = if (transcript.isNotEmpty()) transcript else "(No transcript yet)",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (transcript.isNotEmpty()) Color.Black else Color.Gray
+                    )
                 }
             }
 
