@@ -8,6 +8,7 @@ import androidx.room.TypeConverters
 import com.eka.voice2rx_sdk.data.local.convertors.Convertor
 import com.eka.voice2rx_sdk.data.local.db.daos.VToRxSessionDao
 import com.eka.voice2rx_sdk.data.local.db.entities.ChunkTranscription
+import com.eka.voice2rx_sdk.data.local.db.entities.ClinicalNotesOutput
 import com.eka.voice2rx_sdk.data.local.db.entities.VToRxSession
 import com.eka.voice2rx_sdk.data.local.db.entities.VoiceFile
 import com.eka.voice2rx_sdk.data.local.db.entities.VoiceTranscriptionOutput
@@ -17,9 +18,10 @@ import com.eka.voice2rx_sdk.data.local.db.entities.VoiceTranscriptionOutput
         VToRxSession::class,
         VoiceFile::class,
         VoiceTranscriptionOutput::class,
-        ChunkTranscription::class
+        ChunkTranscription::class,
+        ClinicalNotesOutput::class
     ],
-    version = 9,
+    version = 10,
     exportSchema = false
 )
 @TypeConverters(Convertor::class)

@@ -48,6 +48,7 @@ import com.eka.voice2rx_sdk.sdkinit.Voice2Rx
 import com.eka.voice2rx_sdk.sdkinit.Voice2RxInitConfig
 import com.eka.voice2rx_sdk.sdkinit.Voice2RxLifecycleCallbacks
 import com.eka.voice2rx_sdk.sdkinit.models.Template
+import dev.jeziellago.compose.markdowntext.MarkdownText
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -213,6 +214,8 @@ fun TestScreen(
     var isRecording by remember { mutableStateOf(false) }
     var voiceActivity by remember { mutableStateOf("No activity") }
     var transcript by remember { mutableStateOf("") }
+    var clinicalNotes by remember { mutableStateOf("") }
+    var clinicalNotesStatus by remember { mutableStateOf("") }
 
     // Monitor recording state
     LaunchedEffect(Unit) {
@@ -237,6 +240,16 @@ fun TestScreen(
     LaunchedEffect(Unit) {
         Voice2Rx.getTranscriptFlow()?.collect { text ->
             transcript = text
+        }
+    }
+
+    // Monitor clinical notes updates
+    LaunchedEffect(Unit) {
+        Voice2Rx.getClinicalNotesUpdateFlow()?.collect { notes ->
+            if (notes != null) {
+                clinicalNotes = notes
+                clinicalNotesStatus = "Generated"
+            }
         }
     }
 
@@ -316,6 +329,32 @@ fun TestScreen(
                         style = MaterialTheme.typography.bodyMedium,
                         color = if (transcript.isNotEmpty()) Color.Black else Color.Gray
                     )
+                }
+            }
+
+            // Clinical Notes Card (shown after session ends)
+            if (clinicalNotes.isNotEmpty()) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = Color(0xFFE8F5E9)
+                    )
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "Clinical Notes ($clinicalNotesStatus):",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = Color(0xFF2E7D32)
+                        )
+                        MarkdownText(
+                            markdown = clinicalNotes,
+                            modifier = Modifier.fillMaxWidth(),
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
                 }
             }
 

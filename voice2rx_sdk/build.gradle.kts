@@ -153,4 +153,7 @@ dependencies {
     implementation("org.tensorflow:tensorflow-lite:2.14.0")
     implementation("org.tensorflow:tensorflow-lite-support:0.4.4")
     implementation("org.tensorflow:tensorflow-lite-gpu:2.14.0")
+
+    // MediaPipe LLM Inference for Gemma clinical notes generation
+    implementation("com.google.mediapipe:tasks-genai:0.10.27")
 }
