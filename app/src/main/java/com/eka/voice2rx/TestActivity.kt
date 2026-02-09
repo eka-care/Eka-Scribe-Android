@@ -382,6 +382,9 @@ fun TestScreen(
                 onClick = {
                     if (checkPermission()) {
                         onStartClick()
+                        clinicalNotes = ""
+                        clinicalNotesStatus = ""
+                        transcript = ""
                     }
                 },
                 modifier = Modifier
