@@ -16,33 +16,7 @@ class GemmaInferenceService(private val context: Context) {
         private const val TAG = "GemmaInferenceService"
 
         private const val CLINICAL_NOTES_PROMPT =
-            """You are a medical scribe assistant. Extract clinical information from the following doctor-patient conversation and format it as markdown clinical notes.
-
-**Transcription:**
-%s
-
-**Output Format:**
-# Clinical Notes
-
-## Chief Complaint
-[Extract main reason for visit]
-
-## History of Present Illness
-[Relevant history discussed]
-
-## Assessment
-[Diagnosis or impressions if mentioned]
-
-## Plan
-[Treatment recommendations if mentioned]
-
-## Medications
-[Any medications discussed, or "None mentioned" if not discussed]
-
-## Follow-up
-[Next steps if mentioned, or "Not discussed" if not mentioned]
-
-Generate the clinical notes now:"""
+            """<clinical_note>\nTranscription: %s"""
     }
 
     private var llmInference: LlmInference? = null
@@ -136,6 +110,10 @@ Generate the clinical notes now:"""
 
                 // Format the prompt with the transcript
                 val prompt = CLINICAL_NOTES_PROMPT.format(transcript)
+                VoiceLogger.d(
+                    TAG,
+                    "prompt : $prompt"
+                )
 
                 // Generate response synchronously
                 val result = llmInference?.generateResponse(prompt)
