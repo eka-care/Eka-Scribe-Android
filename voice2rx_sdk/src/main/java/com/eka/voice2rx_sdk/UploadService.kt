@@ -61,12 +61,20 @@ internal class UploadService(
             val combinedAudioData = getCombinedAudio(clippedAudioData)
 
             // Trigger transcription if service is available
+            val startTime = audioHelper.getClipTimeFromClipIndex(lastClipIndex)
+            val endTime = audioHelper.getClipTimeFromClipIndex(clipIndex)
             if (indicConformerASR != null && indicConformerASR.isReady()) {
                 VoiceLogger.d(TAG, "Triggering IndicConformer transcription for chunk.")
                 val transcript = indicConformerASR.transcribe(combinedAudioData)
                 VoiceLogger.d(TAG, "IndicConformer Chunk Transcript: $transcript")
                 // Append to real-time transcript flow
                 v2RxInternal.appendTranscript(transcript)
+                // Save chunk transcription to database
+                v2RxInternal.saveChunkTranscription(
+                    text = transcript,
+                    startTime = startTime,
+                    endTime = endTime
+                )
             } else {
                 VoiceLogger.d(TAG, "No ASR service ready, skipping transcription")
             }

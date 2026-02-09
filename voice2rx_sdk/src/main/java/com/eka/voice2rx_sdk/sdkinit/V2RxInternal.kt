@@ -6,6 +6,7 @@ import com.eka.voice2rx_sdk.AudioHelper
 import com.eka.voice2rx_sdk.AudioRecordModel
 import com.eka.voice2rx_sdk.UploadService
 import com.eka.voice2rx_sdk.audio.asr.indicconformer.IndicConformerASR
+import com.eka.voice2rx_sdk.audio.llm.GemmaInferenceService
 import com.eka.voice2rx_sdk.audio.processing.AudioProcessor
 import com.eka.voice2rx_sdk.audio.whisper.TranscriptionService
 import com.eka.voice2rx_sdk.common.AudioQualityMetrics
@@ -21,6 +22,9 @@ import com.eka.voice2rx_sdk.common.voicelogger.EventCode
 import com.eka.voice2rx_sdk.common.voicelogger.EventLog
 import com.eka.voice2rx_sdk.common.voicelogger.VoiceLogger
 import com.eka.voice2rx_sdk.data.local.db.Voice2RxDatabase
+import com.eka.voice2rx_sdk.data.local.db.entities.ChunkTranscription
+import com.eka.voice2rx_sdk.data.local.db.entities.ClinicalNotesOutput
+import com.eka.voice2rx_sdk.data.local.db.entities.ClinicalNotesStatus
 import com.eka.voice2rx_sdk.data.local.db.entities.VToRxSession
 import com.eka.voice2rx_sdk.data.local.db.entities.VoiceFile
 import com.eka.voice2rx_sdk.data.local.db.entities.VoiceFileType
@@ -158,6 +162,8 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
     private val _transcriptFlow = MutableStateFlow("")
     val transcriptFlow = _transcriptFlow.asStateFlow()
 
+    private var chunkIndex = 0
+
     fun appendTranscript(text: String) {
         if (text.isNotBlank()) {
             _transcriptFlow.value = (_transcriptFlow.value + " " + text).trim()
@@ -166,6 +172,38 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
 
     fun clearTranscript() {
         _transcriptFlow.value = ""
+        chunkIndex = 0
+    }
+
+    fun saveChunkTranscription(
+        text: String,
+        startTime: String,
+        endTime: String,
+        fileId: String? = null,
+        language: String = "hi"
+    ) {
+        if (text.isBlank()) return
+        val currentChunkIndex = chunkIndex++
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                database.getVoice2RxDao().insertChunkTranscription(
+                    ChunkTranscription(
+                        transcriptionId = Voice2RxUtils.generateNewSessionId(),
+                        sessionId = sessionId,
+                        fileId = fileId,
+                        text = text,
+                        startTime = startTime,
+                        endTime = endTime,
+                        language = language,
+                        chunkIndex = currentChunkIndex,
+                        createdAt = Voice2RxUtils.getCurrentUTCEpochMillis()
+                    )
+                )
+                VoiceLogger.d(TAG, "Saved chunk transcription #$currentChunkIndex to database")
+            } catch (e: Exception) {
+                VoiceLogger.e(TAG, "Error saving chunk transcription: ${e.message}")
+            }
+        }
     }
 
     private lateinit var recorder: VoiceRecorder
@@ -184,6 +222,10 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
         mutableListOf<Short>() // Keep this for full file upload if needed, or remove if unused for logic
     private val processingAccumulator = mutableListOf<Short>() // For chunk processing
     private val CHUNK_SIZE_SAMPLES = 16000 * 5 // 5 seconds at 16kHz
+    private var gemmaInferenceService: GemmaInferenceService? = null
+
+    private val _clinicalNotesFlow = MutableStateFlow<String?>(null)
+    val clinicalNotesFlow = _clinicalNotesFlow.asStateFlow()
 
 
     private var currentMode = Voice2RxType.DICTATION.value
@@ -431,16 +473,19 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
 //                        )
 //                    }
 
-//                    // Start initialization (model download if needed)
-//                    coroutineScope.launch {
-//                        try {
-//                            transcriptionService?.initialize { progress ->
-//                                VoiceLogger.d(TAG, "Whisper model download progress: $progress%")
-//                            }
-//                        } catch (e: Exception) {
-//                            VoiceLogger.e(TAG, "Failed to initialize Sherpa service", e)
-//                        }
-//                    }
+                    // Pre-load Gemma LLM for clinical notes generation
+                    coroutineScope.launch {
+                        try {
+                            VoiceLogger.d(TAG, "Pre-loading Gemma LLM...")
+                            if (gemmaInferenceService == null) {
+                                gemmaInferenceService = GemmaInferenceService(app)
+                            }
+                            val success = gemmaInferenceService?.initialize()
+                            VoiceLogger.d(TAG, "Gemma LLM pre-load result: $success")
+                        } catch (e: Exception) {
+                            VoiceLogger.e(TAG, "Failed to pre-load Gemma LLM", e)
+                        }
+                    }
 
                     uploadService = UploadService(
                         context = app,
@@ -532,6 +577,12 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
                     try {
                         val transcript = asr.transcribe(samples)
                         VoiceLogger.d(TAG, "IndicConformer Final Flush: $transcript")
+                        appendTranscript(transcript)
+                        saveChunkTranscription(
+                            text = transcript,
+                            startTime = "0",
+                            endTime = "0"
+                        )
                     } catch (e: Exception) {
                         VoiceLogger.e(TAG, "IndicConformer final flush failed", e)
                     } finally {
@@ -713,7 +764,118 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
         )
         uploadWholeFileData()
         stopVoiceTransaction()
+
+        // Generate clinical notes from combined transcription
+        coroutineScope.launch {
+            generateClinicalNotesFromTranscriptions(sessionId)
+        }
+        
         config.voice2RxLifecycle.onStopSession(sessionId, chunksInfo.size)
+    }
+
+    /**
+     * Generate clinical notes from all chunk transcriptions for a session.
+     * This combines all transcription chunks and runs them through Gemma LLM.
+     */
+    private suspend fun generateClinicalNotesFromTranscriptions(sessionId: String) {
+        try {
+            VoiceLogger.d(TAG, "Starting clinical notes generation for session: $sessionId")
+
+            // Get all chunk transcriptions for this session
+            val transcriptions =
+                database.getVoice2RxDao().getChunkTranscriptionsBySessionId(sessionId)
+
+            // Combine all transcription texts in order, fallback to in-memory transcript
+            val combinedTranscript = if (transcriptions.isNotEmpty()) {
+                transcriptions
+                    .sortedBy { it.chunkIndex }
+                    .joinToString(" ") { it.text }
+                    .trim()
+            } else {
+                VoiceLogger.w(TAG, "No DB transcriptions found, using in-memory transcript")
+                _transcriptFlow.value
+            }
+
+            VoiceLogger.d(TAG, "Combined transcript length: ${combinedTranscript.length}")
+
+            if (combinedTranscript.isBlank()) {
+                VoiceLogger.w(TAG, "Combined transcript is empty")
+                return
+            }
+
+            // Create pending clinical notes entry
+            val noteId = Voice2RxUtils.generateNewSessionId()
+            val pendingNote = ClinicalNotesOutput(
+                noteId = noteId,
+                sessionId = sessionId,
+                markdownContent = "",
+                inputTranscript = combinedTranscript,
+                generationStatus = ClinicalNotesStatus.GENERATING.name
+            )
+            database.getVoice2RxDao().insertClinicalNotes(pendingNote)
+
+            // Initialize Gemma if not already done
+            if (gemmaInferenceService == null) {
+                gemmaInferenceService = GemmaInferenceService(app)
+            }
+
+            // Generate clinical notes synchronously
+            val result = gemmaInferenceService?.generateClinicalNotes(combinedTranscript)
+
+            result?.fold(
+                onSuccess = { clinicalNotes ->
+                    VoiceLogger.d(TAG, "Clinical notes generated successfully")
+
+                    // Update with generated content
+                    database.getVoice2RxDao().updateClinicalNotesContent(
+                        sessionId = sessionId,
+                        content = clinicalNotes,
+                        status = ClinicalNotesStatus.COMPLETED.name
+                    )
+
+                    // Emit to flow for UI updates
+                    _clinicalNotesFlow.value = clinicalNotes
+                },
+                onFailure = { error ->
+                    VoiceLogger.e(TAG, "Failed to generate clinical notes", error as? Exception)
+
+                    // Mark as failed
+                    database.getVoice2RxDao().updateClinicalNotesContent(
+                        sessionId = sessionId,
+                        content = "Error: ${error.message}",
+                        status = ClinicalNotesStatus.FAILED.name
+                    )
+                }
+            )
+
+        } catch (e: Exception) {
+            VoiceLogger.e(TAG, "Error generating clinical notes", e)
+        }
+    }
+
+    /**
+     * Initialize Gemma model on first session start (lazy loading).
+     * @param onProgress Progress callback (0.0 to 1.0)
+     */
+    suspend fun initGemmaModel(onProgress: ((Float) -> Unit)? = null): Boolean {
+        if (gemmaInferenceService == null) {
+            gemmaInferenceService = GemmaInferenceService(app)
+        }
+        return gemmaInferenceService?.initialize(onProgress) ?: false
+    }
+
+    /**
+     * Get clinical notes for a session
+     */
+    suspend fun getClinicalNotes(sessionId: String): ClinicalNotesOutput? {
+        return database.getVoice2RxDao().getClinicalNotesBySessionId(sessionId)
+    }
+
+    /**
+     * Get clinical notes as Flow for a session
+     */
+    fun getClinicalNotesFlow(sessionId: String): Flow<ClinicalNotesOutput?> {
+        return database.getVoice2RxDao().getClinicalNotesFlow(sessionId)
     }
 
     fun isRecording(): Boolean {

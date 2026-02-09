@@ -13,6 +13,7 @@ import com.eka.voice2rx_sdk.common.voicelogger.EventCode
 import com.eka.voice2rx_sdk.common.voicelogger.EventLog
 import com.eka.voice2rx_sdk.common.voicelogger.LogInterceptor
 import com.eka.voice2rx_sdk.common.voicelogger.VoiceLogger
+import com.eka.voice2rx_sdk.data.local.db.entities.ClinicalNotesOutput
 import com.eka.voice2rx_sdk.data.local.db.entities.VToRxSession
 import com.eka.voice2rx_sdk.data.local.db.entities.VoiceTransactionStage
 import com.eka.voice2rx_sdk.data.local.models.Voice2RxSessionStatus
@@ -310,4 +311,51 @@ object Voice2Rx {
     fun releaseResources() {
         v2RxInternal?.releaseResources()
     }
+
+    // --- Clinical Notes API ---
+
+    /**
+     * Initialize the Gemma LLM model for clinical notes generation.
+     * This downloads the model if not already present (~700MB).
+     * Call this on first session start for best UX.
+     * @param onProgress Progress callback (0.0 to 1.0) for model download
+     * @return true if initialization successful
+     */
+    suspend fun initClinicalNotesModel(onProgress: ((Float) -> Unit)? = null): Boolean {
+        if (v2RxInternal == null) {
+            throw IllegalStateException("Voice2Rx SDK not initialized")
+        }
+        return v2RxInternal?.initGemmaModel(onProgress) ?: false
+    }
+
+    /**
+     * Get clinical notes for a session.
+     * @param sessionId The session ID
+     * @return ClinicalNotesOutput containing markdown content, or null if not generated yet
+     */
+    suspend fun getClinicalNotes(sessionId: String): ClinicalNotesOutput? {
+        if (v2RxInternal == null) {
+            throw IllegalStateException("Voice2Rx SDK not initialized")
+        }
+        return v2RxInternal?.getClinicalNotes(sessionId)
+    }
+
+    /**
+     * Get clinical notes as a Flow for reactive UI updates.
+     * Listen to this Flow to get updates when clinical notes are generated.
+     * @param sessionId The session ID
+     * @return Flow emitting ClinicalNotesOutput updates
+     */
+    fun getClinicalNotesFlow(sessionId: String): Flow<ClinicalNotesOutput?>? {
+        if (v2RxInternal == null) {
+            throw IllegalStateException("Voice2Rx SDK not initialized")
+        }
+        return v2RxInternal?.getClinicalNotesFlow(sessionId)
+    }
+
+    /**
+     * Get the current clinical notes generation status as a Flow.
+     * Emits the latest clinical notes markdown content.
+     */
+    fun getClinicalNotesUpdateFlow(): Flow<String?>? = v2RxInternal?.clinicalNotesFlow
 }
