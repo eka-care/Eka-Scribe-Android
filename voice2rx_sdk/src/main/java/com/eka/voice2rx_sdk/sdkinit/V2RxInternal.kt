@@ -173,6 +173,7 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
     fun clearTranscript() {
         _transcriptFlow.value = ""
         chunkIndex = 0
+        _clinicalNotesFlow.value = null
     }
 
     fun saveChunkTranscription(
@@ -786,15 +787,7 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
                 database.getVoice2RxDao().getChunkTranscriptionsBySessionId(sessionId)
 
             // Combine all transcription texts in order, fallback to in-memory transcript
-            val combinedTranscript = if (transcriptions.isNotEmpty()) {
-                transcriptions
-                    .sortedBy { it.chunkIndex }
-                    .joinToString(" ") { it.text }
-                    .trim()
-            } else {
-                VoiceLogger.w(TAG, "No DB transcriptions found, using in-memory transcript")
-                _transcriptFlow.value
-            }
+            val combinedTranscript = _transcriptFlow.value
 
             VoiceLogger.d(TAG, "Combined transcript length: ${combinedTranscript.length}")
 
