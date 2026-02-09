@@ -150,7 +150,12 @@ internal class AudioHelper(
         isClipping = true
         uploadScope.launch {
             v2RxInternal.getUploadService()
-                .processAndUpload(lastClipIndex, currentClipIndex, onFileUploaded = onFileUploaded)
+                .processAndUpload(
+                    lastClipIndex,
+                    currentClipIndex,
+                    onFileUploaded = onFileUploaded,
+                    isLastUpload = true
+                )
         }
     }
 

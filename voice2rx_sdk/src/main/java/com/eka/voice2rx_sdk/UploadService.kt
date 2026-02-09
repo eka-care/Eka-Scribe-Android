@@ -41,6 +41,7 @@ internal class UploadService(
     suspend fun processAndUpload(
         lastClipIndex1: Int,
         currentClipIndex: Int,
+        isLastUpload: Boolean = false,
         onFileUploaded: (String, FileInfo, IncludeStatus) -> Unit = { _, _, _ -> }
     ) = withContext(Dispatchers.IO) {
         if (!audioHelper.isClipping()) {
@@ -73,7 +74,8 @@ internal class UploadService(
                 v2RxInternal.saveChunkTranscription(
                     text = transcript,
                     startTime = startTime,
-                    endTime = endTime
+                    endTime = endTime,
+                    isLastUpload = isLastUpload
                 )
             } else {
                 VoiceLogger.d(TAG, "No ASR service ready, skipping transcription")

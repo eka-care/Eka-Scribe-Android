@@ -164,6 +164,10 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
 
     private var chunkIndex = 0
 
+    init {
+        loadIndicConformer()
+    }
+
     fun appendTranscript(text: String) {
         if (text.isNotBlank()) {
             _transcriptFlow.value = (_transcriptFlow.value + " " + text).trim()
@@ -181,7 +185,8 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
         startTime: String,
         endTime: String,
         fileId: String? = null,
-        language: String = "hi"
+        language: String = "hi",
+        isLastUpload: Boolean = false,
     ) {
         if (text.isBlank()) return
         val currentChunkIndex = chunkIndex++
@@ -200,6 +205,9 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
                         createdAt = Voice2RxUtils.getCurrentUTCEpochMillis()
                     )
                 )
+                if (isLastUpload) {
+                    generateClinicalNotesFromTranscriptions(sessionId = sessionId)
+                }
                 VoiceLogger.d(TAG, "Saved chunk transcription #$currentChunkIndex to database")
             } catch (e: Exception) {
                 VoiceLogger.e(TAG, "Error saving chunk transcription: ${e.message}")
@@ -439,34 +447,7 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
 
 //                    if (modelType == ASRBackend.INDIC_CONFORMER.name) {
                     VoiceLogger.d(TAG, "Initializing IndicConformer ASR...")
-                    indicConformerASR = IndicConformerASR()
-                    coroutineScope.launch {
-                        try {
-                            val modelDir = setupIndicConformerAssets(app)
-                            indicConformerASR?.initialize(
-                                encoderPath = "$modelDir/encoder.onnx",
-                                decoderPath = "$modelDir/decoder_joint.onnx",
-                                tokensPath = "$modelDir/tokens.txt"
-                            )
-                            VoiceLogger.d(
-                                TAG,
-                                "IndicConformer ASR initialized successfully from files"
-                            )
-                        } catch (e: Exception) {
-                            VoiceLogger.e(TAG, "Failed to initialize IndicConformer ASR", e)
-                            onError(
-                                EkaScribeError(
-                                    sessionId = session,
-                                    errorDetails = EkaScribeErrorDetails(
-                                        code = VoiceError.EKA_SCRIBE_SESSION_INITIALIZATION_FAILED.name,
-                                        displayMessage = "Failed to initialize IndicConformer model",
-                                        message = e.message ?: "Unknown error"
-                                    ),
-                                    voiceError = VoiceError.EKA_SCRIBE_SESSION_INITIALIZATION_FAILED
-                                )
-                            )
-                        }
-                    }
+                    loadIndicConformer(sessionId = sessionId, onError = onError)
 //                    } else {
 //                        transcriptionService = TranscriptionService(
 //                            context = app,
@@ -520,6 +501,40 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
         }
     }
 
+    fun loadIndicConformer(
+        sessionId: String = "",
+        onError: (EkaScribeError) -> Unit = {},
+    ) {
+        indicConformerASR = IndicConformerASR()
+        coroutineScope.launch {
+            try {
+                val modelDir = setupIndicConformerAssets(app)
+                indicConformerASR?.initialize(
+                    encoderPath = "$modelDir/encoder.onnx",
+                    decoderPath = "$modelDir/decoder_joint.onnx",
+                    tokensPath = "$modelDir/tokens.txt"
+                )
+                VoiceLogger.d(
+                    TAG,
+                    "IndicConformer ASR initialized successfully from files"
+                )
+            } catch (e: Exception) {
+                VoiceLogger.e(TAG, "Failed to initialize IndicConformer ASR", e)
+                onError(
+                    EkaScribeError(
+                        sessionId = sessionId,
+                        errorDetails = EkaScribeErrorDetails(
+                            code = VoiceError.EKA_SCRIBE_SESSION_INITIALIZATION_FAILED.name,
+                            displayMessage = "Failed to initialize IndicConformer model",
+                            message = e.message ?: "Unknown error"
+                        ),
+                        voiceError = VoiceError.EKA_SCRIBE_SESSION_INITIALIZATION_FAILED
+                    )
+                )
+            }
+        }
+    }
+
     fun pauseRecording() {
         Voice2Rx.logEvent(
             EventLog.Info(
@@ -559,7 +574,6 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
                     "sessionId" to sessionId,
                     "lifecycle" to "session stopped"
                 )
-
             )
         )
         isRecording = false
@@ -593,7 +607,6 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
             }
         }
         
-        releaseResources()
         CoroutineScope(Dispatchers.Default).launch {
             delay(1000L)
             audioHelper.uploadLastData(
@@ -766,11 +779,12 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
         uploadWholeFileData()
         stopVoiceTransaction()
 
-        // Generate clinical notes from combined transcription
-        coroutineScope.launch {
-            generateClinicalNotesFromTranscriptions(sessionId)
-        }
-        
+//        // Generate clinical notes from combined transcription
+//        coroutineScope.launch {
+//            generateClinicalNotesFromTranscriptions(sessionId)
+//        }
+
+        releaseResources()
         config.voice2RxLifecycle.onStopSession(sessionId, chunksInfo.size)
     }
 
