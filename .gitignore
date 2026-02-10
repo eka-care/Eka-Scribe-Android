@@ -14,3 +14,5 @@
 .cxx
 local.properties
 /.idea/*
+/voice2rx_sdk/src/main/assets/indicconformer/
+/voice2rx_sdk/src/main/assets/filters_vocab_multilingual.bin
