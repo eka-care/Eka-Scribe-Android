@@ -43,7 +43,7 @@ data class ClinicalNotesOutput(
     val generatedAt: Long = Voice2RxUtils.getCurrentUTCEpochMillis(),
 
     @ColumnInfo(name = "model_version")
-    val modelVersion: String = "gemma3-1b-it",
+    val modelVersion: String = "medgemma-4b-it-Q6_K",
 
     @ColumnInfo(name = "input_transcript")
     val inputTranscript: String = "",

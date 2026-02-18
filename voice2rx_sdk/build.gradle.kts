@@ -17,12 +17,39 @@ android {
     namespace = "com.eka.voice2rx_sdk"
     compileSdk = 36
 
+    ndkVersion = "27.0.12077973"
+
     defaultConfig {
         minSdk = 23
         targetSdk = 35
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         consumerProguardFiles("consumer-rules.pro")
+
+        ndk {
+            abiFilters += listOf("arm64-v8a")
+        }
+
+        externalNativeBuild {
+            cmake {
+                arguments += "-DCMAKE_BUILD_TYPE=Release"
+                arguments += "-DBUILD_SHARED_LIBS=OFF"
+                arguments += "-DLLAMA_BUILD_COMMON=ON"
+                arguments += "-DLLAMA_BUILD_TESTS=OFF"
+                arguments += "-DLLAMA_BUILD_EXAMPLES=OFF"
+                arguments += "-DLLAMA_BUILD_SERVER=OFF"
+                arguments += "-DLLAMA_OPENSSL=OFF"
+                arguments += "-DGGML_NATIVE=OFF"
+                arguments += "-DGGML_LLAMAFILE=OFF"
+            }
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path("src/main/cpp/CMakeLists.txt")
+            version = "3.30.5"
+        }
     }
 
     buildTypes {
@@ -156,4 +183,6 @@ dependencies {
 
     // MediaPipe LLM Inference for Gemma clinical notes generation
     implementation("com.google.mediapipe:tasks-genai:0.10.27")
+
+    // llama.cpp is built from source via CMake (see externalNativeBuild above)
 }

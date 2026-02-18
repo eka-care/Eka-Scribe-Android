@@ -6,7 +6,7 @@ import com.eka.voice2rx_sdk.AudioHelper
 import com.eka.voice2rx_sdk.AudioRecordModel
 import com.eka.voice2rx_sdk.UploadService
 import com.eka.voice2rx_sdk.audio.asr.indicconformer.IndicConformerASR
-import com.eka.voice2rx_sdk.audio.llm.GemmaInferenceService
+import com.eka.voice2rx_sdk.audio.llm.MedGemmaInferenceService
 import com.eka.voice2rx_sdk.audio.processing.AudioProcessor
 import com.eka.voice2rx_sdk.audio.whisper.TranscriptionService
 import com.eka.voice2rx_sdk.common.AudioQualityMetrics
@@ -166,6 +166,11 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
 
     init {
         loadIndicConformer()
+        coroutineScope.launch {
+            initGemmaModel(onProgress = {
+                VoiceLogger.d(TAG, "MedGemma model progress: $it")
+            })
+        }
     }
 
     fun appendTranscript(text: String) {
@@ -231,7 +236,7 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
         mutableListOf<Short>() // Keep this for full file upload if needed, or remove if unused for logic
     private val processingAccumulator = mutableListOf<Short>() // For chunk processing
     private val CHUNK_SIZE_SAMPLES = 16000 * 5 // 5 seconds at 16kHz
-    private var gemmaInferenceService: GemmaInferenceService? = null
+    private var medGemmaInferenceService: MedGemmaInferenceService? = null
 
     private val _clinicalNotesFlow = MutableStateFlow<String?>(null)
     val clinicalNotesFlow = _clinicalNotesFlow.asStateFlow()
@@ -455,17 +460,17 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
 //                        )
 //                    }
 
-                    // Pre-load Gemma LLM for clinical notes generation
+                    // Pre-load MedGemma LLM for clinical notes generation
                     coroutineScope.launch {
                         try {
-                            VoiceLogger.d(TAG, "Pre-loading Gemma LLM...")
-                            if (gemmaInferenceService == null) {
-                                gemmaInferenceService = GemmaInferenceService(app)
+                            VoiceLogger.d(TAG, "Pre-loading MedGemma LLM...")
+                            if (medGemmaInferenceService == null) {
+                                medGemmaInferenceService = MedGemmaInferenceService(app)
                             }
-                            val success = gemmaInferenceService?.initialize()
-                            VoiceLogger.d(TAG, "Gemma LLM pre-load result: $success")
+                            val success = medGemmaInferenceService?.initialize()
+                            VoiceLogger.d(TAG, "MedGemma LLM pre-load result: $success")
                         } catch (e: Exception) {
-                            VoiceLogger.e(TAG, "Failed to pre-load Gemma LLM", e)
+                            VoiceLogger.e(TAG, "Failed to pre-load MedGemma LLM", e)
                         }
                     }
 
@@ -779,10 +784,10 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
         uploadWholeFileData()
         stopVoiceTransaction()
 
-//        // Generate clinical notes from combined transcription
-//        coroutineScope.launch {
-//            generateClinicalNotesFromTranscriptions(sessionId)
-//        }
+        // Generate clinical notes from combined transcription
+        coroutineScope.launch {
+            generateClinicalNotesFromTranscriptions(sessionId)
+        }
 
         releaseResources()
         config.voice2RxLifecycle.onStopSession(sessionId, chunksInfo.size)
@@ -821,13 +826,13 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
             )
             database.getVoice2RxDao().insertClinicalNotes(pendingNote)
 
-            // Initialize Gemma if not already done
-            if (gemmaInferenceService == null) {
-                gemmaInferenceService = GemmaInferenceService(app)
+            // Initialize MedGemma if not already done
+            if (medGemmaInferenceService == null) {
+                medGemmaInferenceService = MedGemmaInferenceService(app)
             }
 
-            // Generate clinical notes synchronously
-            val result = gemmaInferenceService?.generateClinicalNotes(combinedTranscript)
+            // Generate clinical notes using MedGemma
+            val result = medGemmaInferenceService?.generateClinicalNotes(combinedTranscript)
 
             result?.fold(
                 onSuccess = { clinicalNotes ->
@@ -861,14 +866,14 @@ internal class V2RxInternal : AudioCallback, UploadListener, AudioFocusListener 
     }
 
     /**
-     * Initialize Gemma model on first session start (lazy loading).
+     * Initialize MedGemma model on first session start (lazy loading).
      * @param onProgress Progress callback (0.0 to 1.0)
      */
     suspend fun initGemmaModel(onProgress: ((Float) -> Unit)? = null): Boolean {
-        if (gemmaInferenceService == null) {
-            gemmaInferenceService = GemmaInferenceService(app)
+        if (medGemmaInferenceService == null) {
+            medGemmaInferenceService = MedGemmaInferenceService(app)
         }
-        return gemmaInferenceService?.initialize(onProgress) ?: false
+        return medGemmaInferenceService?.initialize(onProgress) ?: false
     }
 
     /**
