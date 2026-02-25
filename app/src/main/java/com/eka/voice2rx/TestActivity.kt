@@ -27,11 +27,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -39,13 +36,13 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.eka.networking.client.NetworkConfig
 import com.eka.networking.token.TokenStorage
-import com.eka.voice2rx.TestActivity.Companion.TAG
-import com.eka.voice2rx_sdk.common.models.EkaScribeError
-import com.eka.voice2rx_sdk.data.local.models.Voice2RxType
-import com.eka.voice2rx_sdk.sdkinit.Voice2Rx
-import com.eka.voice2rx_sdk.sdkinit.Voice2RxInitConfig
-import com.eka.voice2rx_sdk.sdkinit.Voice2RxLifecycleCallbacks
-import com.eka.voice2rx_sdk.sdkinit.models.Template
+import com.eka.scribesdk.api.EkaScribe
+import com.eka.scribesdk.api.EkaScribeCallback
+import com.eka.scribesdk.api.EkaScribeConfig
+import com.eka.scribesdk.api.models.ScribeError
+import com.eka.scribesdk.api.models.SessionConfig
+import com.eka.scribesdk.api.models.SessionState
+import com.eka.scribesdk.data.remote.models.responses.ScribeResultResponse
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -53,9 +50,17 @@ import kotlinx.coroutines.launch
 class TestActivity : ComponentActivity() {
     companion object {
         const val TAG = "TestActivity"
-        var TEST_ACCESS_TOKEN = ""
-        const val TEST_REFRESH_TOKEN = ""
+        var TEST_ACCESS_TOKEN =
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJkb2Mtd2ViIiwiYi1pZCI6IjcxNzU2MjAyNDU0ODM3NzciLCJjYyI6eyJlc2MiOjAsInBleCI6MTgwMTUyNjQwMCwicHNuIjoiRCIsInBzdCI6InRydWUiLCJzdHkiOiJwIn0sImRvYiI6IjIwMjUtMDgtMjUiLCJleHAiOjE3NzIwMjc2NTksImZuIjoiSW10aXlheiIsImdlbiI6Ik0iLCJpYXQiOjE3NzIwMjU4NTksImlkcCI6Im1vYiIsImlzcyI6ImVtci5la2EuY2FyZSIsImp0aSI6IjMyN2M2M2U5LWY0OTAtNGJkZi04N2RjLWVjNzMzM2U0MTNkMCIsImxuIjoibSwiLCJvaWQiOiIxNzU2MjAyNDU1MDI4NDIiLCJwcmkiOnRydWUsInBzIjoiRCIsInIiOiJJTiIsInMiOiJEciIsInV1aWQiOiI2NDIyYmRjMi0yMTgyLTRhMTMtYjYyMC0wNDdmNTBjZDQyZTgiLCJ3LWlkIjoiNzE3NTYyMDI0NTQ4Mzc3NyIsInctbiI6IkltdGl5YXoifQ.3gfUSGsXmgGJRn4lJYKxgqIQ0x3bhH-rj8PqjQMRRV8"
+        const val TEST_REFRESH_TOKEN = "3a8f6151f2f54981b2418a8445208335"
     }
+
+    private val currentSessionId = mutableStateOf("")
+    private val currentState = mutableStateOf(SessionState.IDLE)
+    private val errorMessage = mutableStateOf("")
+    private val chunkCount = mutableIntStateOf(0)
+    private val voiceActivity = mutableStateOf("No activity")
+    private val resultInfo = mutableStateOf("")
 
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -71,10 +76,9 @@ class TestActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        // Initialize SDK
-        Voice2Rx.init(
-            config = Voice2RxInitConfig(
-                voice2RxLifecycle = MyLifecycleCallbacks(),
+        // Initialize the new EkaScribe SDK
+        EkaScribe.init(
+            config = EkaScribeConfig(
                 networkConfig = NetworkConfig(
                     tokenStorage = MyTokenStorage(),
                     appId = "scribe-android",
@@ -87,12 +91,19 @@ class TestActivity : ComponentActivity() {
                 ),
                 debugMode = true
             ),
-            context = this
+            context = this,
+            callback = MyScribeCallback()
         )
 
         setContent {
             MaterialTheme {
                 TestScreen(
+                    sessionId = currentSessionId.value,
+                    sessionState = currentState.value,
+                    errorMsg = errorMessage.value,
+                    chunks = chunkCount.intValue,
+                    voiceActivity = voiceActivity.value,
+                    resultInfo = resultInfo.value,
                     onStartClick = { startRecording() },
                     onPauseClick = { pauseRecording() },
                     onResumeClick = { resumeRecording() },
@@ -122,31 +133,68 @@ class TestActivity : ComponentActivity() {
             return
         }
 
-        val outputFormats = listOf(
-            Template(
-                templateId = "19288d2f-81a9-46a6-b804-9651242a9b3e",
-                templateName = "SOAP Note"
+        try {
+            errorMessage.value = ""
+            resultInfo.value = ""
+            val sessionConfig = SessionConfig(
+                languages = listOf("en-IN"),
+                mode = "dictation",
+                modelType = "pro"
             )
-        )
+            val sessionInfo = EkaScribe.startSession(sessionConfig)
+            currentSessionId.value = sessionInfo.sessionId
+            currentState.value = sessionInfo.state
+            Log.d(TAG, "Session starting: ${sessionInfo.sessionId}")
+            showToast("Session starting")
 
-        val languages = listOf("en-IN")
-
-        Voice2Rx.startVoice2Rx(
-            mode = Voice2RxType.DICTATION.value,
-            outputFormats = outputFormats,
-            languages = languages,
-            modelType = "pro",
-            onError = { error ->
-                val message = error.errorDetails?.message ?: "Unknown error"
-                val displayMessage = error.errorDetails?.displayMessage ?: "An error occurred"
-                Log.e("TestActivity", "Error: $message")
-                showToast("Error: $displayMessage")
-            },
-            onStart = { sessionId ->
-                Log.d("TestActivity", "Recording started: $sessionId")
-                showToast("Recording started: $sessionId")
+            // Collect voice activity updates
+            CoroutineScope(Dispatchers.Main).launch {
+                EkaScribe.getVoiceActivity().collect { data ->
+                    voiceActivity.value = if (data.isSpeech) {
+                        "Speaking (${String.format("%.2f", data.amplitude)})"
+                    } else {
+                        "Silent (${String.format("%.2f", data.amplitude)})"
+                    }
+                }
             }
-        )
+
+            // Collect session state updates
+            CoroutineScope(Dispatchers.Main).launch {
+                EkaScribe.getSessionState().collect { state ->
+                    currentState.value = state
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start session", e)
+            showToast("Error: ${e.message}")
+        }
+    }
+
+    private fun pauseRecording() {
+        try {
+            EkaScribe.pauseSession()
+            showToast("Session paused")
+        } catch (e: Exception) {
+            showToast("Error: ${e.message}")
+        }
+    }
+
+    private fun resumeRecording() {
+        try {
+            EkaScribe.resumeSession()
+            showToast("Session resumed")
+        } catch (e: Exception) {
+            showToast("Error: ${e.message}")
+        }
+    }
+
+    private fun stopRecording() {
+        try {
+            EkaScribe.stopSession()
+            showToast("Session stopping")
+        } catch (e: Exception) {
+            showToast("Error: ${e.message}")
+        }
     }
 
     private fun showToast(msg: String) {
@@ -155,71 +203,74 @@ class TestActivity : ComponentActivity() {
         }
     }
 
-    private fun pauseRecording() {
-        try {
-            Voice2Rx.pauseVoice2Rx()
-            showToast("Recording paused")
-        } catch (e: Exception) {
-            showToast("Error: ${e.message}")
-        }
-    }
-
-    private fun resumeRecording() {
-        try {
-            Voice2Rx.resumeVoice2Rx()
-            showToast("Recording resumed")
-        } catch (e: Exception) {
-            showToast("Error: ${e.message}")
-        }
-    }
-
-    private fun stopRecording() {
-        try {
-            Voice2Rx.stopVoice2Rx()
-            showToast("Recording stopped")
-        } catch (e: Exception) {
-            showToast("Error: ${e.message}")
-        }
-    }
-
     override fun onDestroy() {
         super.onDestroy()
-        Voice2Rx.releaseResources()
+        EkaScribe.destroy()
+    }
+
+    // --- EkaScribe callback ---
+
+    private inner class MyScribeCallback : EkaScribeCallback {
+        override fun onSessionStarted(sessionId: String) {
+            Log.d(TAG, "Session started: $sessionId")
+            showToast("Recording started")
+        }
+
+        override fun onSessionPaused(sessionId: String) {
+            Log.d(TAG, "Session paused: $sessionId")
+        }
+
+        override fun onSessionResumed(sessionId: String) {
+            Log.d(TAG, "Session resumed: $sessionId")
+        }
+
+        override fun onSessionStopped(sessionId: String, chunkCount: Int) {
+            Log.d(TAG, "Session stopped: $sessionId, chunks=$chunkCount")
+            this@TestActivity.chunkCount.intValue = chunkCount
+            showToast("Stopped. Chunks: $chunkCount")
+        }
+
+        override fun onError(error: ScribeError) {
+            Log.e(TAG, "Error: ${error.code} - ${error.message}")
+            errorMessage.value = error.message
+            showToast("Error: ${error.message}")
+        }
+
+        override fun onSessionCompleted(sessionId: String, result: ScribeResultResponse) {
+            Log.d(TAG, "Session completed: $sessionId")
+            val outputCount = result.data?.output?.size ?: 0
+            resultInfo.value = "Completed! Outputs: $outputCount"
+            showToast("Session completed with $outputCount outputs")
+        }
+
+        override fun onSessionFailed(sessionId: String, error: ScribeError) {
+            Log.e(TAG, "Session failed: $sessionId - ${error.code}: ${error.message}")
+            errorMessage.value = "Failed: ${error.message}"
+            showToast("Session failed: ${error.message}")
+        }
     }
 }
 
+// --- Composable UI ---
+
 @Composable
 fun TestScreen(
+    sessionId: String,
+    sessionState: SessionState,
+    errorMsg: String,
+    chunks: Int,
+    voiceActivity: String,
+    resultInfo: String,
     onStartClick: () -> Unit,
     onPauseClick: () -> Unit,
     onResumeClick: () -> Unit,
     onStopClick: () -> Unit,
     checkPermission: () -> Boolean
 ) {
-    var sessionId by remember { mutableStateOf("") }
-    var errorMessage by remember { mutableStateOf("") }
-    var recordedFiles by remember { mutableStateOf(0) }
-    var isRecording by remember { mutableStateOf(false) }
-    var voiceActivity by remember { mutableStateOf("No activity") }
-
-    // Monitor recording state
-    LaunchedEffect(Unit) {
-        while (true) {
-            isRecording = Voice2Rx.isCurrentlyRecording()
-            kotlinx.coroutines.delay(500)
-        }
-    }
-
-    // Monitor voice activity
-    LaunchedEffect(Unit) {
-        Voice2Rx.getVoiceActivityFlow()?.collect { activity ->
-            voiceActivity = if (activity.isSpeech) {
-                "Speaking (${String.format("%.2f", activity.amplitude)})"
-            } else {
-                "Silent (${String.format("%.2f", activity.amplitude)})"
-            }
-        }
-    }
+    val isRecording = sessionState == SessionState.RECORDING
+    val canStop = sessionState == SessionState.RECORDING || sessionState == SessionState.PAUSED
+    val canStart =
+        sessionState == SessionState.IDLE || sessionState == SessionState.COMPLETED || sessionState == SessionState.ERROR
 
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -244,7 +295,14 @@ fun TestScreen(
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
-                    containerColor = if (isRecording) Color(0xFFE8F5E9) else Color(0xFFF5F5F5)
+                    containerColor = when (sessionState) {
+                        SessionState.RECORDING -> Color(0xFFE8F5E9)
+                        SessionState.PAUSED -> Color(0xFFFFF3E0)
+                        SessionState.PROCESSING -> Color(0xFFE1F5FE)
+                        SessionState.ERROR -> Color(0xFFFFEBEE)
+                        SessionState.COMPLETED -> Color(0xFFE8F5E9)
+                        else -> Color(0xFFF5F5F5)
+                    }
                 )
             ) {
                 Column(
@@ -252,33 +310,41 @@ fun TestScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text(
-                        text = "Status: ${if (isRecording) "Recording" else "Not Recording"}",
+                        text = "State: $sessionState",
                         style = MaterialTheme.typography.titleMedium
                     )
 
                     if (sessionId.isNotEmpty()) {
                         Text(
-                            text = "Session ID: $sessionId",
+                            text = "Session: $sessionId",
                             style = MaterialTheme.typography.bodySmall
                         )
                     }
 
                     Text(
-                        text = "Voice Activity: $voiceActivity",
+                        text = "Voice: $voiceActivity",
                         style = MaterialTheme.typography.bodySmall
                     )
 
-                    if (recordedFiles > 0) {
+                    if (chunks > 0) {
                         Text(
-                            text = "Recorded Files: $recordedFiles",
+                            text = "Chunks uploaded: $chunks",
                             style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+
+                    if (resultInfo.isNotEmpty()) {
+                        Text(
+                            text = resultInfo,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFF2E7D32)
                         )
                     }
                 }
             }
 
-            // Error Card (only shown when there's an error)
-            if (errorMessage.isNotEmpty()) {
+            // Error Card
+            if (errorMsg.isNotEmpty()) {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(
@@ -286,7 +352,7 @@ fun TestScreen(
                     )
                 ) {
                     Text(
-                        text = "Error: $errorMessage",
+                        text = "Error: $errorMsg",
                         style = MaterialTheme.typography.bodyMedium,
                         color = Color.Red,
                         modifier = Modifier.padding(16.dp)
@@ -296,7 +362,7 @@ fun TestScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Control Buttons
+            // START
             Button(
                 onClick = {
                     if (checkPermission()) {
@@ -309,11 +375,12 @@ fun TestScreen(
                 colors = ButtonDefaults.buttonColors(
                     containerColor = Color(0xFF4CAF50)
                 ),
-                enabled = !isRecording
+                enabled = canStart
             ) {
                 Text("START RECORDING", style = MaterialTheme.typography.titleMedium)
             }
 
+            // PAUSE / RESUME
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -339,12 +406,13 @@ fun TestScreen(
                     colors = ButtonDefaults.buttonColors(
                         containerColor = Color(0xFF2196F3)
                     ),
-                    enabled = isRecording
+                    enabled = sessionState == SessionState.PAUSED
                 ) {
                     Text("RESUME")
                 }
             }
 
+            // STOP
             Button(
                 onClick = onStopClick,
                 modifier = Modifier
@@ -353,7 +421,7 @@ fun TestScreen(
                 colors = ButtonDefaults.buttonColors(
                     containerColor = Color(0xFFF44336)
                 ),
-                enabled = isRecording
+                enabled = canStop
             ) {
                 Text("STOP RECORDING", style = MaterialTheme.typography.titleMedium)
             }
@@ -372,32 +440,30 @@ fun TestScreen(
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     Text(
-                        text = "Test Configuration:",
+                        text = "SDK Configuration:",
                         style = MaterialTheme.typography.titleSmall
                     )
                     Text(
-                        text = "• Mode: Consultation",
+                        text = "- Sample Rate: 16000 Hz",
                         style = MaterialTheme.typography.bodySmall
                     )
                     Text(
-                        text = "• Language: en-IN",
+                        text = "- Chunk Duration: 10-25s (VAD)",
                         style = MaterialTheme.typography.bodySmall
                     )
                     Text(
-                        text = "• Model: Pro",
+                        text = "- Audio Analyser: Enabled",
                         style = MaterialTheme.typography.bodySmall
                     )
                     Text(
-                        text = "• Output: Transcript",
+                        text = "- Upload: Direct (coroutine + TransferUtility)",
                         style = MaterialTheme.typography.bodySmall
                     )
                 }
             }
         }
     }
-
 }
-
 
 class MyTokenStorage : TokenStorage {
     override fun getAccessToken(): String {
@@ -413,36 +479,6 @@ class MyTokenStorage : TokenStorage {
     }
 
     override fun onSessionExpired() {
-        // SessionExpired refresh token expired
-    }
-}
-
-class MyLifecycleCallbacks : Voice2RxLifecycleCallbacks {
-    override fun onStartSession(sessionId: String) {
-        Log.d("MyLifecycleCallbacks", "Session started: $sessionId")
-    }
-
-    override fun onStopSession(sessionId: String, recordedFiles: Int) {
-        Log.d("MyLifecycleCallbacks", "Session stopped: $sessionId, Files: $recordedFiles")
-
-        CoroutineScope(Dispatchers.IO).launch {
-            Voice2Rx.pollEkaScribeResult(sessionId = sessionId).onSuccess {
-                Log.d(TAG, it.templates.toString())
-            }.onFailure {
-                Log.d(TAG, "error : ${it.message.toString()}")
-            }
-        }
-    }
-
-    override fun onPauseSession(sessionId: String) {
-        Log.d("MyLifecycleCallbacks", "Session paused: $sessionId")
-    }
-
-    override fun onResumeSession(sessionId: String) {
-        Log.d("MyLifecycleCallbacks", "Session resumed: $sessionId")
-    }
-
-    override fun onError(error: EkaScribeError) {
-        Log.e("MyLifecycleCallbacks", "Error: ${error.errorDetails?.message ?: "Unknown error"}")
+        // Handle session expiry
     }
 }
