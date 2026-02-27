@@ -67,7 +67,19 @@ internal class SessionManager(
     }
 
     fun start(sessionConfig: SessionConfig = SessionConfig()): String {
-        assertState(SessionState.IDLE)
+        val currentState = _stateFlow.value
+        if (currentState != SessionState.IDLE) {
+            if (currentState == SessionState.COMPLETED || currentState == SessionState.ERROR) {
+                // Previous session ended — clean up and reset
+                cleanup()
+                _stateFlow.value = SessionState.IDLE
+            } else {
+                throw ScribeException(
+                    ErrorCode.INVALID_STATE_TRANSITION,
+                    "Cannot start new session from state: $currentState. Stop the current session first."
+                )
+            }
+        }
 
         transition(SessionState.STARTING)
 
@@ -114,6 +126,14 @@ internal class SessionManager(
                 }
                 newPipeline.audioQualityFlow?.let { flow ->
                     scope.launch { flow.collect { _audioQualityFlow.emit(it) } }
+                }
+                scope.launch {
+                    newPipeline.audioFocusFlow.collect { hasFocus ->
+                        if (!hasFocus) {
+                            pause()
+                        }
+                        callback?.onAudioFocusChanged(hasFocus)
+                    }
                 }
 
                 newPipeline.start()

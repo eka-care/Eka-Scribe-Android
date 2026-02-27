@@ -34,6 +34,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import java.io.File
@@ -74,6 +76,9 @@ internal class Pipeline(
     private var persistenceJob: Job? = null
     private var qualityForwardJob: Job? = null
 
+    private val _audioFocusFlow = MutableSharedFlow<Boolean>(replay = 1, extraBufferCapacity = 4)
+    val audioFocusFlow: Flow<Boolean> = _audioFocusFlow.asSharedFlow()
+
     val audioQualityFlow: Flow<AudioQualityMetrics>?
         get() = analyser.qualityFlow.map { it.toMetrics() }
 
@@ -85,6 +90,10 @@ internal class Pipeline(
             if (!preBuffer.write(frame)) {
                 logger.warn(TAG, "PreBuffer full, frame dropped: ${frame.frameIndex}")
             }
+        }
+
+        recorder.setAudioFocusCallback { hasFocus ->
+            _audioFocusFlow.tryEmit(hasFocus)
         }
 
         recorder.start()
@@ -288,7 +297,7 @@ internal class Pipeline(
                 frameSize = config.frameSize
             )
 
-            val recorder: AudioRecorder = AndroidAudioRecorder(recorderConfig, logger)
+            val recorder: AudioRecorder = AndroidAudioRecorder(context, recorderConfig, logger)
             val preBuffer = PreBuffer(pipelineConfig.preBufferCapacity)
             val frameChannel = Channel<AudioFrame>(pipelineConfig.frameChannelCapacity)
             val chunkChannel = Channel<AudioChunk>(pipelineConfig.chunkChannelCapacity)
@@ -313,15 +322,16 @@ internal class Pipeline(
             vadProvider.load()
 
             val chunkConfig = ChunkConfig(
-                preferredDurationMs = config.preferredChunkDurationSec * 1000L,
-                desperationDurationMs = config.desperationChunkDurationSec * 1000L,
-                maxDurationMs = config.maxChunkDurationSec * 1000L
+                preferredDurationSec = config.preferredChunkDurationSec,
+                desperationDurationSec = config.desperationChunkDurationSec,
+                maxDurationSec = config.maxChunkDurationSec
             )
 
             val chunker: AudioChunker = VadAudioChunker(
                 vadProvider = vadProvider,
                 config = chunkConfig,
                 sessionId = sessionId,
+                sampleRate = config.sampleRate,
                 logger = logger
             )
 

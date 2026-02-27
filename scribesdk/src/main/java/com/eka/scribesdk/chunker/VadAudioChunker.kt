@@ -14,6 +14,7 @@ class VadAudioChunker(
     private val vadProvider: VadProvider,
     private val config: ChunkConfig,
     private val sessionId: String,
+    private val sampleRate: Int,
     private val logger: Logger
 ) : AudioChunker {
 
@@ -24,11 +25,18 @@ class VadAudioChunker(
     private val _activityFlow = MutableStateFlow<VoiceActivityData?>(null)
     override val activityFlow: Flow<VoiceActivityData> = _activityFlow.asStateFlow().filterNotNull()
 
+    // Pre-compute sample thresholds — no ms division at runtime
+    private val prefLengthSamples = config.preferredDurationSec * sampleRate
+    private val despLengthSamples = config.desperationDurationSec * sampleRate
+    private val maxLengthSamples = config.maxDurationSec * sampleRate
+    private val longSilenceThreshold = (config.longSilenceSec * sampleRate).toInt()
+    private val shortSilenceThreshold = (config.shortSilenceSec * sampleRate).toInt()
+
     private val frameAccumulator = mutableListOf<AudioFrame>()
     private var chunkIndex = 0
     private var chunkStartTimeMs = 0L
-    private var silenceDurationMs = 0L
-    private var speechDurationMs = 0L
+    private var accumulatedSamples = 0L
+    private var silenceSamples = 0L
 
     @Volatile
     private var latestQuality: AudioQuality? = null
@@ -47,14 +55,12 @@ class VadAudioChunker(
         }
 
         frameAccumulator.add(frame)
-
-        val frameDurationMs = (frame.pcm.size * 1000L) / frame.sampleRate
+        accumulatedSamples += frame.pcm.size
 
         if (vadResult.isSpeech) {
-            speechDurationMs += frameDurationMs
-            silenceDurationMs = 0
+            silenceSamples = 0
         } else {
-            silenceDurationMs += frameDurationMs
+            silenceSamples += frame.pcm.size
         }
 
         return if (shouldChunk()) {
@@ -66,6 +72,13 @@ class VadAudioChunker(
 
     override fun flush(): AudioChunk? {
         if (frameAccumulator.isEmpty()) return null
+        if (accumulatedSamples < sampleRate) {
+            logger.debug(TAG, "Flush skipped: remaining ${accumulatedSamples} samples < 1s")
+            frameAccumulator.clear()
+            accumulatedSamples = 0
+            silenceSamples = 0
+            return null
+        }
         val now = frameAccumulator.last().timestampMs
         return createChunk(now)
     }
@@ -82,19 +95,19 @@ class VadAudioChunker(
     }
 
     /**
-     * Chunking decision logic:
-     * - speechDuration > preferred AND silence > minSilence -> natural break
-     * - speechDuration > desperation AND silence > despSilence -> desperation cut
-     * - speechDuration >= max -> force cut
+     * Chunking decision logic (sample-based, matching Voice2Rx AudioHelper):
+     * - accumulated > preferred AND silence > longThreshold -> natural break
+     * - accumulated > desperation AND silence > shortThreshold -> desperation cut
+     * - accumulated >= max -> force cut
      */
     private fun shouldChunk(): Boolean {
-        if (speechDurationMs > config.preferredDurationMs && silenceDurationMs > config.minSilenceToChunkMs) {
+        if (accumulatedSamples > prefLengthSamples && silenceSamples > longSilenceThreshold) {
             return true
         }
-        if (speechDurationMs > config.desperationDurationMs && silenceDurationMs > config.despSilenceToChunkMs) {
+        if (accumulatedSamples > despLengthSamples && silenceSamples > shortSilenceThreshold) {
             return true
         }
-        if (speechDurationMs >= config.maxDurationMs) {
+        if (accumulatedSamples >= maxLengthSamples) {
             return true
         }
         return false
@@ -118,8 +131,8 @@ class VadAudioChunker(
 
         chunkIndex++
         frameAccumulator.clear()
-        speechDurationMs = 0
-        silenceDurationMs = 0
+        accumulatedSamples = 0
+        silenceSamples = 0
 
         return chunk
     }

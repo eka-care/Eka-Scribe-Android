@@ -299,7 +299,7 @@ internal class TransactionManager(
                 is UploadResult.Success -> {
                     dataManager.markUploaded(chunk.chunkId)
                     file.delete()
-                    logger.info(TAG, "Retry upload success: ${chunk.chunkId}")
+                    logger.info(TAG, "Retry upload success & cleaned: ${chunk.chunkId}")
                 }
 
                 is UploadResult.Failure -> {

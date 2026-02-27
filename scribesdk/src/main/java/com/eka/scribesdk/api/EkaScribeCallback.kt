@@ -11,4 +11,5 @@ interface EkaScribeCallback {
     fun onError(error: ScribeError)
     fun onSessionCompleted(sessionId: String, result: SessionResult) {}
     fun onSessionFailed(sessionId: String, error: ScribeError) {}
+    fun onAudioFocusChanged(hasFocus: Boolean) {}
 }

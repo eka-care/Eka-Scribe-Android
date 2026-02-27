@@ -6,4 +6,5 @@ interface AudioRecorder {
     fun pause()
     fun resume()
     fun setFrameCallback(callback: FrameCallback)
+    fun setAudioFocusCallback(callback: AudioFocusCallback)
 }

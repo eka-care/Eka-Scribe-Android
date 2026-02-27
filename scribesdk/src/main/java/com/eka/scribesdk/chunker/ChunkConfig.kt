@@ -1,9 +1,9 @@
 package com.eka.scribesdk.chunker
 
 data class ChunkConfig(
-    val preferredDurationMs: Long = 10_000L,
-    val desperationDurationMs: Long = 20_000L,
-    val maxDurationMs: Long = 25_000L,
-    val minSilenceToChunkMs: Long = 500L,
-    val despSilenceToChunkMs: Long = 100L
+    val preferredDurationSec: Int = 10,
+    val desperationDurationSec: Int = 20,
+    val maxDurationSec: Int = 25,
+    val longSilenceSec: Double = 0.5,
+    val shortSilenceSec: Double = 0.1
 )

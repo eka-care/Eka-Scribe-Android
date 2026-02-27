@@ -149,7 +149,7 @@ internal class S3ChunkUploader(
                         TransferState.CANCELED -> {
                             logger.warn(TAG, "Upload canceled: ${metadata.chunkId}")
                             if (cont.isActive) cont.resume(
-                                UploadResult.Failure("Transfer canceled", isRetryable = false)
+                                UploadResult.Failure("Transfer canceled", isRetryable = true)
                             )
                         }
 
