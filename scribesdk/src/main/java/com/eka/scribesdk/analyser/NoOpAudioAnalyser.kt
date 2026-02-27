@@ -5,13 +5,12 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 
 /**
- * Pass-through analyser used when analysis is disabled or
- * during degraded mode. Wraps the frame without running any model.
+ * Pass-through analyser used when analysis is disabled.
+ * Accepts frames but performs no processing.
  */
 class NoOpAudioAnalyser : AudioAnalyser {
 
-    override suspend fun analyse(frame: AudioFrame): AnalysedFrame {
-        return AnalysedFrame(frame = frame, quality = null)
+    override fun submitFrame(frame: AudioFrame) { /* no-op */
     }
 
     override val qualityFlow: Flow<AudioQuality> = emptyFlow()

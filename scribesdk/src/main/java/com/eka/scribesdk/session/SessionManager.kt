@@ -15,6 +15,7 @@ import com.eka.scribesdk.common.util.TimeProvider
 import com.eka.scribesdk.data.DataManager
 import com.eka.scribesdk.data.local.db.entity.SessionEntity
 import com.eka.scribesdk.data.local.db.entity.TransactionStage
+import com.eka.scribesdk.data.remote.models.responses.toSessionResult
 import com.eka.scribesdk.pipeline.Pipeline
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -26,6 +27,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 
 internal class SessionManager(
     private val config: EkaScribeConfig,
@@ -44,18 +47,18 @@ internal class SessionManager(
 
     // Stable shared flows that survive pipeline lifecycle
     private val _voiceActivityFlow =
-        MutableSharedFlow<VoiceActivityData>(replay = 1, extraBufferCapacity = 64)
+        MutableSharedFlow<VoiceActivityData>(replay = 1, extraBufferCapacity = 640)
     val voiceActivityFlow: Flow<VoiceActivityData> = _voiceActivityFlow.asSharedFlow()
 
     private val _audioQualityFlow =
-        MutableSharedFlow<AudioQualityMetrics>(replay = 1, extraBufferCapacity = 16)
+        MutableSharedFlow<AudioQualityMetrics>(replay = 1, extraBufferCapacity = 160)
     val audioQualityFlow: Flow<AudioQualityMetrics> = _audioQualityFlow.asSharedFlow()
 
     private var activeSessionId: String? = null
     private var activeSessionConfig: SessionConfig? = null
     private var pipeline: Pipeline? = null
     private var callback: EkaScribeCallback? = null
-    private var sessionScope: CoroutineScope? = null
+    private var sessionScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     val currentState: SessionState get() = _stateFlow.value
 
@@ -73,7 +76,7 @@ internal class SessionManager(
         activeSessionConfig = sessionConfig
         sessionScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
-        val scope = sessionScope!!
+        val scope = sessionScope
 
         scope.launch(Dispatchers.IO) {
             try {
@@ -170,8 +173,8 @@ internal class SessionManager(
                 // 2. Transition to PROCESSING for API calls
                 transition(SessionState.PROCESSING)
 
-                // 3. Retry any failed uploads
-                transactionManager.retryFailedUploads(sessionId)
+                // 3. Retry any failed uploads — block if not all uploaded
+                val allUploaded = transactionManager.retryFailedUploads(sessionId)
 
                 // 4. Stop transaction API
                 val stopResult = transactionManager.stopTransaction(sessionId)
@@ -181,6 +184,19 @@ internal class SessionManager(
                         sessionId,
                         ErrorCode.STOP_TRANSACTION_FAILED,
                         stopResult.message
+                    )
+                    return@launch
+                }
+
+                if (!allUploaded) {
+                    logger.error(
+                        TAG,
+                        "Not all chunks uploaded for session: $sessionId"
+                    )
+                    handleTransactionError(
+                        sessionId,
+                        ErrorCode.RETRY_EXHAUSTED,
+                        "Not all audio chunks were uploaded. Use retrySession() to retry or forceCommit to proceed."
                     )
                     return@launch
                 }
@@ -203,7 +219,8 @@ internal class SessionManager(
                     is TransactionPollResult.Success -> {
                         dataManager.updateSessionState(sessionId, SessionState.COMPLETED.name)
                         transition(SessionState.COMPLETED)
-                        callback?.onSessionCompleted(sessionId, pollResult.result)
+                        val sessionResult = pollResult.result.toSessionResult(sessionId)
+                        callback?.onSessionCompleted(sessionId, sessionResult)
                         logger.info(TAG, "Session completed: $sessionId")
                     }
 
@@ -235,7 +252,11 @@ internal class SessionManager(
     }
 
     fun destroy() {
-        pipeline?.stop()
+        runBlocking(Dispatchers.IO) {
+            withTimeoutOrNull(10_000L) {
+                pipeline?.stop()
+            }
+        }
         cleanup()
         transition(SessionState.IDLE)
         logger.info(TAG, "SessionManager destroyed")
@@ -276,7 +297,6 @@ internal class SessionManager(
         pipeline = null
         activeSessionId = null
         activeSessionConfig = null
-        sessionScope?.cancel()
-        sessionScope = null
+        sessionScope.cancel()
     }
 }

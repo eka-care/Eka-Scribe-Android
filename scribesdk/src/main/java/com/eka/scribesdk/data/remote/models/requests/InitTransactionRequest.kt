@@ -4,7 +4,7 @@ import androidx.annotation.Keep
 import com.google.gson.annotations.SerializedName
 
 @Keep
-data class InitTransactionRequest(
+internal data class InitTransactionRequest(
     @SerializedName("input_language")
     val inputLanguage: List<String>?,
     @SerializedName("mode")
@@ -26,7 +26,7 @@ data class InitTransactionRequest(
 )
 
 @Keep
-data class PatientDetails(
+internal data class PatientDetails(
     @SerializedName("age")
     val age: Int?,
     @SerializedName("biologicalSex")
@@ -40,7 +40,7 @@ data class PatientDetails(
 )
 
 @Keep
-data class OutputFormatTemplate(
+internal data class OutputFormatTemplate(
     @SerializedName("template_id")
     val templateId: String?,
     @SerializedName("template_type")

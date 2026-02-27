@@ -8,7 +8,7 @@ import com.eka.scribesdk.data.local.db.entity.SessionEntity
 import kotlinx.coroutines.flow.Flow
 
 @Dao
-interface SessionDao {
+internal interface SessionDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(session: SessionEntity)

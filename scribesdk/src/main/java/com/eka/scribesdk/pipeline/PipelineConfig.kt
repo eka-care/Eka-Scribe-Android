@@ -1,8 +1,8 @@
 package com.eka.scribesdk.pipeline
 
 data class PipelineConfig(
-    val frameChannelCapacity: Int = 64,
-    val chunkChannelCapacity: Int = 8,
+    val frameChannelCapacity: Int = 640,
+    val chunkChannelCapacity: Int = 80,
     val enableAnalyser: Boolean = true,
-    val preBufferCapacity: Int = 200
+    val preBufferCapacity: Int = 2000
 )

@@ -4,11 +4,7 @@ import androidx.annotation.Keep
 import com.google.gson.annotations.SerializedName
 
 @Keep
-internal data class StopTransactionResponse(
+internal data class UpdateTemplateResponse(
     @SerializedName("message")
-    val message: String?,
-    @SerializedName("status")
-    val status: String?,
-    @SerializedName("error")
-    val error: String?
+    var message: String?
 )

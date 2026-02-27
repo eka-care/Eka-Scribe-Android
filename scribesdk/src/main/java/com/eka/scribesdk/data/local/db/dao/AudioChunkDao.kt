@@ -7,7 +7,7 @@ import androidx.room.Query
 import com.eka.scribesdk.data.local.db.entity.AudioChunkEntity
 
 @Dao
-interface AudioChunkDao {
+internal interface AudioChunkDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(chunk: AudioChunkEntity)

@@ -14,7 +14,7 @@ import com.eka.scribesdk.data.local.db.entity.SessionEntity
     version = 3,
     exportSchema = false
 )
-abstract class ScribeDatabase : RoomDatabase() {
+internal abstract class ScribeDatabase : RoomDatabase() {
 
     abstract fun sessionDao(): SessionDao
     abstract fun audioChunkDao(): AudioChunkDao

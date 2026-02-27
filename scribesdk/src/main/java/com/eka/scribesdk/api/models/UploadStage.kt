@@ -1,6 +1,6 @@
-package com.eka.scribesdk.data.local.db.entity
+package com.eka.scribesdk.api.models
 
-internal enum class TransactionStage {
+enum class UploadStage {
     INIT,
     STOP,
     COMMIT,

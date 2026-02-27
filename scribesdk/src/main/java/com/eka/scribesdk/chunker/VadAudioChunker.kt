@@ -1,6 +1,5 @@
 package com.eka.scribesdk.chunker
 
-import com.eka.scribesdk.analyser.AnalysedFrame
 import com.eka.scribesdk.analyser.AudioQuality
 import com.eka.scribesdk.api.models.VoiceActivityData
 import com.eka.scribesdk.common.logging.Logger
@@ -26,29 +25,30 @@ class VadAudioChunker(
     override val activityFlow: Flow<VoiceActivityData> = _activityFlow.asStateFlow().filterNotNull()
 
     private val frameAccumulator = mutableListOf<AudioFrame>()
-    private val qualityAccumulator = mutableListOf<AudioQuality>()
     private var chunkIndex = 0
     private var chunkStartTimeMs = 0L
     private var silenceDurationMs = 0L
     private var speechDurationMs = 0L
 
-    override fun feed(frame: AnalysedFrame): AudioChunk? {
-        val vadResult = vadProvider.detect(frame.frame.pcm)
+    @Volatile
+    private var latestQuality: AudioQuality? = null
+
+    override fun feed(frame: AudioFrame): AudioChunk? {
+        val vadResult = vadProvider.detect(frame.pcm)
 
         _activityFlow.value = VoiceActivityData(
             isSpeech = vadResult.isSpeech,
-            amplitude = calculateAmplitude(frame.frame.pcm),
-            timestampMs = frame.frame.timestampMs
+            amplitude = calculateAmplitude(frame.pcm),
+            timestampMs = frame.timestampMs
         )
 
         if (frameAccumulator.isEmpty()) {
-            chunkStartTimeMs = frame.frame.timestampMs
+            chunkStartTimeMs = frame.timestampMs
         }
 
-        frameAccumulator.add(frame.frame)
-        frame.quality?.let { qualityAccumulator.add(it) }
+        frameAccumulator.add(frame)
 
-        val frameDurationMs = (frame.frame.pcm.size * 1000L) / frame.frame.sampleRate
+        val frameDurationMs = (frame.pcm.size * 1000L) / frame.sampleRate
 
         if (vadResult.isSpeech) {
             speechDurationMs += frameDurationMs
@@ -58,7 +58,7 @@ class VadAudioChunker(
         }
 
         return if (shouldChunk()) {
-            createChunk(frame.frame.timestampMs)
+            createChunk(frame.timestampMs)
         } else {
             null
         }
@@ -70,18 +70,22 @@ class VadAudioChunker(
         return createChunk(now)
     }
 
+    override fun setLatestQuality(quality: AudioQuality?) {
+        latestQuality = quality
+    }
+
     override fun release() {
         frameAccumulator.clear()
-        qualityAccumulator.clear()
+        latestQuality = null
         vadProvider.unload()
         logger.info(TAG, "VadAudioChunker released")
     }
 
     /**
-     * Chunking decision logic from LLD:
-     * - speechDuration > preferred AND silence > minSilence → natural break
-     * - speechDuration > desperation AND silence > despSilence → desperation cut
-     * - speechDuration >= max → force cut
+     * Chunking decision logic:
+     * - speechDuration > preferred AND silence > minSilence -> natural break
+     * - speechDuration > desperation AND silence > despSilence -> desperation cut
+     * - speechDuration >= max -> force cut
      */
     private fun shouldChunk(): Boolean {
         if (speechDurationMs > config.preferredDurationMs && silenceDurationMs > config.minSilenceToChunkMs) {
@@ -104,7 +108,7 @@ class VadAudioChunker(
             frames = frameAccumulator.toList(),
             startTimeMs = chunkStartTimeMs,
             endTimeMs = endTimeMs,
-            quality = averageQuality()
+            quality = latestQuality
         )
 
         logger.debug(
@@ -114,21 +118,10 @@ class VadAudioChunker(
 
         chunkIndex++
         frameAccumulator.clear()
-        qualityAccumulator.clear()
         speechDurationMs = 0
         silenceDurationMs = 0
 
         return chunk
-    }
-
-    private fun averageQuality(): AudioQuality? {
-        if (qualityAccumulator.isEmpty()) return null
-        return AudioQuality(
-            snr = qualityAccumulator.map { it.snr }.average().toFloat(),
-            clipping = qualityAccumulator.map { it.clipping }.average().toFloat(),
-            loudness = qualityAccumulator.map { it.loudness }.average().toFloat(),
-            overallScore = qualityAccumulator.map { it.overallScore }.average().toFloat()
-        )
     }
 
     private fun calculateAmplitude(pcm: ShortArray): Float {

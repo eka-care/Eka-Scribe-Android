@@ -4,25 +4,25 @@ import androidx.annotation.Keep
 import com.google.gson.annotations.SerializedName
 
 @Keep
-internal data class InitTransactionResponse(
+internal data class UpdateSessionResponse(
     @SerializedName("b_id")
-    val bId: String?,
+    var bId: String?,
     @SerializedName("message")
-    val message: String?,
+    var message: String?,
     @SerializedName("status")
-    val status: String?,
+    var status: String?,
     @SerializedName("txn_id")
-    val txnId: String?,
+    var txnId: String?,
     @SerializedName("error")
-    val error: ErrorDetails?
+    var error: UpdateSessionError? = null
 )
 
 @Keep
-internal data class ErrorDetails(
+internal data class UpdateSessionError(
     @SerializedName("code")
-    val code: String?,
+    var code: String?,
     @SerializedName("display_message")
-    val displayMessage: String?,
+    var displayMessage: String?,
     @SerializedName("message")
-    val message: String?
+    var message: String?
 )

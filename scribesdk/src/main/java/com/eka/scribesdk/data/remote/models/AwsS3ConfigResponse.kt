@@ -4,7 +4,7 @@ import androidx.annotation.Keep
 import com.google.gson.annotations.SerializedName
 
 @Keep
-data class AwsS3ConfigResponse(
+internal data class AwsS3ConfigResponse(
     @SerializedName("credentials")
     val credentials: Credentials?,
     @SerializedName("expiry")
@@ -16,7 +16,7 @@ data class AwsS3ConfigResponse(
 )
 
 @Keep
-data class Credentials(
+internal data class Credentials(
     @SerializedName("AccessKeyId")
     val accessKeyId: String?,
     @SerializedName("Expiration")

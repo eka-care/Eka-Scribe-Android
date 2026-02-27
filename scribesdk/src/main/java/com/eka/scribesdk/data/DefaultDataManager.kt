@@ -9,7 +9,7 @@ import com.eka.scribesdk.data.local.db.entity.SessionEntity
 import com.eka.scribesdk.data.local.db.entity.UploadState
 import kotlinx.coroutines.flow.Flow
 
-class DefaultDataManager(
+internal class DefaultDataManager(
     private val sessionDao: SessionDao,
     private val chunkDao: AudioChunkDao,
     private val timeProvider: TimeProvider,
@@ -113,5 +113,9 @@ class DefaultDataManager(
     override suspend fun updateFolderAndBid(sessionId: String, folderName: String, bid: String) {
         sessionDao.updateFolderAndBid(sessionId, folderName, bid, timeProvider.nowMillis())
         logger.debug(TAG, "Folder/bid updated: $sessionId -> $folderName, $bid")
+    }
+
+    override suspend fun getAllSessions(): List<SessionEntity> {
+        return sessionDao.getAll()
     }
 }

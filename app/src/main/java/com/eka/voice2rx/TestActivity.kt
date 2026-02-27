@@ -41,8 +41,8 @@ import com.eka.scribesdk.api.EkaScribeCallback
 import com.eka.scribesdk.api.EkaScribeConfig
 import com.eka.scribesdk.api.models.ScribeError
 import com.eka.scribesdk.api.models.SessionConfig
+import com.eka.scribesdk.api.models.SessionResult
 import com.eka.scribesdk.api.models.SessionState
-import com.eka.scribesdk.data.remote.models.responses.ScribeResultResponse
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -236,9 +236,9 @@ class TestActivity : ComponentActivity() {
             showToast("Error: ${error.message}")
         }
 
-        override fun onSessionCompleted(sessionId: String, result: ScribeResultResponse) {
+        override fun onSessionCompleted(sessionId: String, result: SessionResult) {
             Log.d(TAG, "Session completed: $sessionId")
-            val outputCount = result.data?.output?.size ?: 0
+            val outputCount = result.templates.size
             resultInfo.value = "Completed! Outputs: $outputCount"
             showToast("Session completed with $outputCount outputs")
         }

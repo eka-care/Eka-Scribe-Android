@@ -18,7 +18,7 @@ import androidx.room.PrimaryKey
     ],
     indices = [Index("session_id")]
 )
-data class AudioChunkEntity(
+internal data class AudioChunkEntity(
     @PrimaryKey
     @ColumnInfo(name = "chunk_id")
     val chunkId: String,

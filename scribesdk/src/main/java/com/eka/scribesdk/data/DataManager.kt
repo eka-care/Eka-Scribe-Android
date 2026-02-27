@@ -4,7 +4,7 @@ import com.eka.scribesdk.data.local.db.entity.AudioChunkEntity
 import com.eka.scribesdk.data.local.db.entity.SessionEntity
 import kotlinx.coroutines.flow.Flow
 
-interface DataManager {
+internal interface DataManager {
     suspend fun saveSession(session: SessionEntity)
     suspend fun saveChunk(chunk: AudioChunkEntity)
     suspend fun getSession(sessionId: String): SessionEntity?
@@ -25,4 +25,5 @@ interface DataManager {
     suspend fun getSessionsByStage(stage: String): List<SessionEntity>
     suspend fun getAllChunks(sessionId: String): List<AudioChunkEntity>
     suspend fun updateFolderAndBid(sessionId: String, folderName: String, bid: String)
+    suspend fun getAllSessions(): List<SessionEntity>
 }

@@ -1,5 +1,7 @@
 package com.eka.scribesdk.session
 
+import com.eka.scribesdk.api.models.OutputTemplate
+import com.eka.scribesdk.api.models.PatientDetail
 import com.eka.scribesdk.api.models.SessionConfig
 import com.eka.scribesdk.common.logging.Logger
 import com.eka.scribesdk.data.DataManager
@@ -312,10 +314,15 @@ internal class TransactionManager(
 
     /**
      * Idempotent resume from any stage. Used for session recovery.
+     *
+     * @param force If true, proceed with stop/commit even if some chunks
+     *              failed to upload. If false, returns an error when not
+     *              all chunks are uploaded.
      */
     suspend fun checkAndProgress(
         sessionId: String,
-        sessionConfig: SessionConfig? = null
+        sessionConfig: SessionConfig? = null,
+        force: Boolean = false
     ): TransactionResult {
         val session = dataManager.getSession(sessionId)
             ?: return TransactionResult.Error("Session not found: $sessionId")
@@ -328,7 +335,22 @@ internal class TransactionManager(
             }
 
             TransactionStage.STOP -> {
-                retryFailedUploads(sessionId)
+                val allUploaded = retryFailedUploads(sessionId)
+                if (!allUploaded && !force) {
+                    logger.warn(
+                        TAG,
+                        "Not all chunks uploaded for session: $sessionId. Use force=true to proceed."
+                    )
+                    return TransactionResult.Error(
+                        "Not all audio chunks were uploaded. Use forceCommit=true to proceed with partial upload."
+                    )
+                }
+                if (!allUploaded) {
+                    logger.warn(
+                        TAG,
+                        "Force-committing session with partial uploads: $sessionId"
+                    )
+                }
                 stopTransaction(sessionId)
             }
 
@@ -359,14 +381,14 @@ internal class TransactionManager(
                 mode = request.mode,
                 modelType = request.modelType,
                 outputTemplates = request.outputFormatTemplate?.map {
-                    com.eka.scribesdk.api.models.OutputTemplate(
+                    OutputTemplate(
                         templateId = it.templateId ?: "",
                         templateType = it.type,
                         templateName = it.name
                     )
                 },
                 patientDetails = request.patientDetails?.let {
-                    com.eka.scribesdk.api.models.PatientDetail(
+                    PatientDetail(
                         age = it.age,
                         biologicalSex = it.biologicalSex,
                         name = it.name,

@@ -35,18 +35,20 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.File
 
 /**
  * Wires all pipeline stages together:
- * AudioRecorder -> PreBuffer -> FrameProducer -> [FrameChannel] -> AudioAnalyser
- *                                                                      |
- *                                                                      v
+ * AudioRecorder -> PreBuffer -> FrameProducer -> [FrameChannel] -> Chunking Coroutine
+ *                                                                       |
+ *                                                                       v
  *                    DataManager + Upload <- [ChunkChannel] <- AudioChunker
+ *
+ * SQUIM analyser runs independently — receives frames via fire-and-forget
+ * submitFrame() and publishes quality to qualityFlow asynchronously.
  */
-class Pipeline(
+internal class Pipeline(
     private val recorder: AudioRecorder,
     private val preBuffer: PreBuffer,
     private val frameProducer: FrameProducer,
@@ -57,7 +59,6 @@ class Pipeline(
     private val dataManager: DataManager,
     private val encoder: AudioEncoder,
     private val chunkUploader: ChunkUploader,
-    private val monitor: PipelineMonitor,
     private val sessionId: String,
     private val folderName: String,
     private val bid: String,
@@ -69,8 +70,9 @@ class Pipeline(
         private const val TAG = "Pipeline"
     }
 
-    private var analyserJob: Job? = null
+    private var chunkingJob: Job? = null
     private var persistenceJob: Job? = null
+    private var qualityForwardJob: Job? = null
 
     val audioQualityFlow: Flow<AudioQualityMetrics>?
         get() = analyser.qualityFlow.map { it.toMetrics() }
@@ -90,8 +92,9 @@ class Pipeline(
 
     fun startCoroutines(scope: CoroutineScope) {
         frameProducer.start(scope)
-        startAnalyserCoroutine(scope)
+        startChunkingCoroutine(scope)
         startPersistenceCoroutine(scope)
+        startQualityForwardCoroutine(scope)
     }
 
     fun pause() {
@@ -102,57 +105,78 @@ class Pipeline(
         recorder.resume()
     }
 
-    fun stop() {
+    /**
+     * Graceful shutdown — drains ALL data through the entire pipeline.
+     *
+     * 1. Stop recorder (no new frames)
+     * 2. Drain PreBuffer → frameChannel → close frameChannel
+     * 3. Wait for chunking coroutine to finish (processes all frames, flushes, closes chunkChannel)
+     * 4. Wait for persistence coroutine to finish (encodes + uploads all chunks)
+     * 5. Cancel quality forwarding (observational, safe to cancel)
+     * 6. Release resources
+     */
+    suspend fun stop() {
+        // 1. Stop recording — no more PCM frames produced
         recorder.stop()
-        frameProducer.stop()
 
-        val lastChunk = chunker.flush()
-        if (lastChunk != null) {
-            chunkChannel.trySend(lastChunk)
-        }
+        // 2. Drain PreBuffer into frameChannel, then close frameChannel
+        frameProducer.stopAndDrain()
 
-        frameChannel.close()
-        chunkChannel.close()
+        // 3. Wait for chunking coroutine to process all frames + flush + close chunkChannel
+        chunkingJob?.join()
 
-        analyserJob?.cancel()
-        persistenceJob?.cancel()
+        // 4. Wait for persistence coroutine to encode + persist + upload all chunks
+        persistenceJob?.join()
 
+        // 5. Cancel quality forward (observational, safe to cancel anytime)
+        qualityForwardJob?.cancel()
+
+        // 6. Release resources
         analyser.release()
         chunker.release()
-
         preBuffer.clear()
+
         logger.info(TAG, "Pipeline stopped for session: $sessionId")
     }
 
-    private fun startAnalyserCoroutine(scope: CoroutineScope) {
-        analyserJob = scope.launch(Dispatchers.Default) {
+    /**
+     * Reads frames from [frameChannel], submits to analyser (fire-and-forget),
+     * feeds to chunker, and sends resulting chunks to [chunkChannel].
+     *
+     * After frameChannel closes (all frames consumed), flushes the chunker
+     * and closes chunkChannel — cascading shutdown to persistence.
+     */
+    private fun startChunkingCoroutine(scope: CoroutineScope) {
+        chunkingJob = scope.launch(Dispatchers.Default) {
             for (frame in frameChannel) {
-                if (!isActive) break
+                // Submit to SQUIM asynchronously — never blocks
+                analyser.submitFrame(frame)
 
-                val analysed = if (monitor.shouldSkipAnalyser()) {
-                    com.eka.scribesdk.analyser.AnalysedFrame(frame = frame, quality = null)
-                } else {
-                    analyser.analyse(frame)
-                }
-
-                val chunk = chunker.feed(analysed)
+                // Feed directly to chunker (VAD + accumulation)
+                val chunk = chunker.feed(frame)
                 if (chunk != null) {
                     chunkChannel.send(chunk)
                 }
             }
+
+            // frameChannel is closed and drained — flush remaining data
+            val lastChunk = chunker.flush()
+            if (lastChunk != null) {
+                chunkChannel.send(lastChunk)
+            }
+            chunkChannel.close()
         }
     }
 
     /**
      * Coroutine: reads from [chunkChannel], encodes, persists to DB,
      * then uploads immediately via [ChunkUploader].
-     * The uploader's in-flight tracking prevents double-uploading.
+     *
+     * Terminates naturally when chunkChannel is closed and drained.
      */
     private fun startPersistenceCoroutine(scope: CoroutineScope) {
         persistenceJob = scope.launch(Dispatchers.IO) {
             for (chunk in chunkChannel) {
-                if (!isActive) break
-
                 try {
                     // 1-based file naming: 1.m4a, 2.m4a, ...
                     val fileName = "${chunk.index + 1}.m4a"
@@ -197,7 +221,6 @@ class Pipeline(
                     when (val result = chunkUploader.upload(file, metadata)) {
                         is UploadResult.Success -> {
                             dataManager.markUploaded(chunk.chunkId)
-                            // Delete local chunk file after successful upload
                             file.delete()
                             logger.info(TAG, "Chunk uploaded & cleaned: ${chunk.chunkId}")
                         }
@@ -213,6 +236,18 @@ class Pipeline(
                 } catch (e: Exception) {
                     logger.error(TAG, "Failed to process chunk: ${chunk.chunkId}", e)
                 }
+            }
+        }
+    }
+
+    /**
+     * Forwards SQUIM quality readings to the chunker so chunks
+     * carry the latest quality snapshot when created.
+     */
+    private fun startQualityForwardCoroutine(scope: CoroutineScope) {
+        qualityForwardJob = scope.launch(Dispatchers.Default) {
+            analyser.qualityFlow.collect { quality ->
+                chunker.setLatestQuality(quality)
             }
         }
     }
@@ -264,7 +299,11 @@ class Pipeline(
                 if (pipelineConfig.enableAnalyser && squimModelPath != null) {
                     val modelProvider = SquimModelProvider(squimModelPath, logger)
                     modelProvider.load()
-                    SquimAudioAnalyser(modelProvider, logger = logger)
+                    SquimAudioAnalyser(
+                        modelProvider = modelProvider,
+                        scope = scope,
+                        logger = logger
+                    )
                 } else {
                     NoOpAudioAnalyser()
                 }
@@ -286,12 +325,6 @@ class Pipeline(
                 logger = logger
             )
 
-            val monitor = PipelineMonitor(
-                preBuffer = preBuffer,
-                frameChannelCapacity = pipelineConfig.frameChannelCapacity,
-                chunkChannelCapacity = pipelineConfig.chunkChannelCapacity
-            )
-
             val pipeline = Pipeline(
                 recorder = recorder,
                 preBuffer = preBuffer,
@@ -303,7 +336,6 @@ class Pipeline(
                 dataManager = dataManager,
                 encoder = encoder,
                 chunkUploader = chunkUploader,
-                monitor = monitor,
                 sessionId = sessionId,
                 folderName = folderName,
                 bid = bid,
