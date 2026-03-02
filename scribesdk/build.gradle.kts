@@ -5,6 +5,7 @@ plugins {
     alias(libs.plugins.jetbrains.kotlin.android)
     id("com.google.devtools.ksp")
     id("maven-publish")
+    id("jacoco")
 }
 
 val config =
@@ -40,6 +41,8 @@ android {
             )
         }
         debug {
+            enableUnitTestCoverage = true
+            enableAndroidTestCoverage = true
             buildConfigField(
                 "String",
                 "COG_URL",
@@ -62,6 +65,70 @@ android {
     buildFeatures {
         buildConfig = true
     }
+}
+
+jacoco {
+    toolVersion = "0.8.10"
+}
+
+tasks.withType<Test>().configureEach {
+    extensions.configure<JacocoTaskExtension> {
+        isIncludeNoLocationClasses = true
+        excludes = listOf("jdk.internal.*")
+    }
+}
+
+tasks.register<JacocoReport>("jacocoTestReport") {
+
+    dependsOn("testDebugUnitTest")
+
+    reports {
+        xml.required.set(true)
+        html.required.set(true)
+    }
+
+    val fileFilter = listOf(
+        "**/R.class",
+        "**/R$*.class",
+        "**/BuildConfig.*",
+        "**/Manifest*.*",
+        "**/*Test*.*",
+        // Android-dependent classes (require device/emulator, not JVM-testable)
+        "**/recorder/**",
+        "**/encoder/**",
+        "**/analyser/**",
+        "**/data/remote/upload/S3ChunkUploader*",
+        "**/data/remote/ScribeApiClient*",
+        "**/data/local/db/ScribeDatabase*",
+        "**/data/local/db/ScribeDao*",
+        "**/data/local/file/**",
+        "**/data/DefaultDataManager*",
+        "**/common/logging/DefaultLogger*",
+        "**/common/logging/LogLevel*",
+        "**/common/logging/LogInterceptor*",
+        "**/common/util/DefaultTimeProvider*",
+        // Public facade depends on Android Context
+        "**/api/EkaScribe*",
+        "**/api/EkaScribeConfig*"
+    )
+
+    val debugTree = fileTree("${buildDir}/tmp/kotlin-classes/debug") {
+        exclude(fileFilter)
+    }
+
+    val mainSrc = "${project.projectDir}/src/main/java"
+
+    sourceDirectories.setFrom(files(mainSrc))
+    classDirectories.setFrom(files(debugTree))
+
+    executionData.setFrom(
+        fileTree(buildDir) {
+            include(
+                "jacoco/testDebugUnitTest.exec",
+                "outputs/unit_test_code_coverage/debugUnitTest/testDebugUnitTest.exec"
+            )
+        }
+    )
 }
 
 afterEvaluate {
@@ -119,6 +186,8 @@ dependencies {
 
     // Testing
     testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.mockk)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
 }
