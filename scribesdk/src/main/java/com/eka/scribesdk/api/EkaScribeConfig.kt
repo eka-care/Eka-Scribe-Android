@@ -9,6 +9,7 @@ data class EkaScribeConfig(
     val desperationChunkDurationSec: Int = 20,
     val maxChunkDurationSec: Int = 25,
     val enableAnalyser: Boolean = true,
+    val overlapDurationSec: Double = 0.5,
     val debugMode: Boolean = false,
     val networkConfig: NetworkConfig,
     val maxUploadRetries: Int = 2

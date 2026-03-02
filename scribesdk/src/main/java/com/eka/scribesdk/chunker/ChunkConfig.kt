@@ -5,5 +5,6 @@ data class ChunkConfig(
     val desperationDurationSec: Int = 20,
     val maxDurationSec: Int = 25,
     val longSilenceSec: Double = 0.5,
-    val shortSilenceSec: Double = 0.1
+    val shortSilenceSec: Double = 0.1,
+    val overlapDurationSec: Double = 0.5
 )

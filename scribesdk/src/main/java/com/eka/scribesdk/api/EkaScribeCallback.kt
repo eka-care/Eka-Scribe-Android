@@ -1,6 +1,7 @@
 package com.eka.scribesdk.api
 
 import com.eka.scribesdk.api.models.ScribeError
+import com.eka.scribesdk.api.models.SessionEvent
 import com.eka.scribesdk.api.models.SessionResult
 
 interface EkaScribeCallback {
@@ -12,4 +13,5 @@ interface EkaScribeCallback {
     fun onSessionCompleted(sessionId: String, result: SessionResult) {}
     fun onSessionFailed(sessionId: String, error: ScribeError) {}
     fun onAudioFocusChanged(hasFocus: Boolean) {}
+    fun onSessionEvent(event: SessionEvent) {}
 }

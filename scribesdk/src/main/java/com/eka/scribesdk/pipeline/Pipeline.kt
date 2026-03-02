@@ -8,6 +8,8 @@ import com.eka.scribesdk.analyser.SquimAudioAnalyser
 import com.eka.scribesdk.analyser.SquimModelProvider
 import com.eka.scribesdk.api.EkaScribeConfig
 import com.eka.scribesdk.api.models.AudioQualityMetrics
+import com.eka.scribesdk.api.models.EventType
+import com.eka.scribesdk.api.models.SessionEventName
 import com.eka.scribesdk.api.models.VoiceActivityData
 import com.eka.scribesdk.chunker.AudioChunk
 import com.eka.scribesdk.chunker.AudioChunker
@@ -66,7 +68,8 @@ internal class Pipeline(
     private val bid: String,
     private val outputDir: File,
     private val timeProvider: TimeProvider,
-    private val logger: Logger
+    private val logger: Logger,
+    private val onEvent: ((SessionEventName, EventType, String, Map<String, String>) -> Unit)? = null
 ) {
     companion object {
         private const val TAG = "Pipeline"
@@ -75,6 +78,7 @@ internal class Pipeline(
     private var chunkingJob: Job? = null
     private var persistenceJob: Job? = null
     private var qualityForwardJob: Job? = null
+    private val allFrames = mutableListOf<AudioFrame>()
 
     private val _audioFocusFlow = MutableSharedFlow<Boolean>(replay = 1, extraBufferCapacity = 4)
     val audioFocusFlow: Flow<Boolean> = _audioFocusFlow.asSharedFlow()
@@ -124,7 +128,7 @@ internal class Pipeline(
      * 5. Cancel quality forwarding (observational, safe to cancel)
      * 6. Release resources
      */
-    suspend fun stop() {
+    suspend fun stop(): FullAudioResult? {
         // 1. Stop recording — no more PCM frames produced
         recorder.stop()
 
@@ -140,12 +144,49 @@ internal class Pipeline(
         // 5. Cancel quality forward (observational, safe to cancel anytime)
         qualityForwardJob?.cancel()
 
-        // 6. Release resources
+        // 6. Generate full audio file from accumulated frames
+        val fullAudioResult = generateFullAudio()
+
+        // 7. Release resources
         analyser.release()
         chunker.release()
         preBuffer.clear()
 
         logger.info(TAG, "Pipeline stopped for session: $sessionId")
+        return fullAudioResult
+    }
+
+    private fun generateFullAudio(): FullAudioResult? {
+        if (allFrames.isEmpty()) return null
+        return try {
+            val sampleRate = allFrames.first().sampleRate
+            // Encode as .m4a first (encoder internally does outputPath.replace(".m4a", ".wav"))
+            val m4aPath = File(outputDir, "${sessionId}_full_audio.m4a").absolutePath
+            encoder.encode(allFrames, sampleRate, m4aPath)
+
+            // Rename to .m4a_ per naming convention
+            val m4aFile = File(m4aPath)
+            val m4a_File = File(outputDir, "${sessionId}_full_audio.m4a_")
+            m4aFile.renameTo(m4a_File)
+
+            allFrames.clear()
+            logger.info(TAG, "Full audio generated: ${m4a_File.absolutePath}")
+            onEvent?.invoke(
+                SessionEventName.FULL_AUDIO_GENERATED, EventType.SUCCESS,
+                "Full audio file generated",
+                mapOf("filePath" to m4a_File.absolutePath)
+            )
+            FullAudioResult(m4a_File.absolutePath, sessionId, folderName, bid)
+        } catch (e: Exception) {
+            logger.error(TAG, "Full audio generation failed", e)
+            onEvent?.invoke(
+                SessionEventName.FULL_AUDIO_GENERATION_FAILED, EventType.ERROR,
+                "Full audio encoding failed: ${e.message}",
+                mapOf("error" to (e.message ?: "unknown"))
+            )
+            allFrames.clear()
+            null
+        }
     }
 
     /**
@@ -158,6 +199,9 @@ internal class Pipeline(
     private fun startChunkingCoroutine(scope: CoroutineScope) {
         chunkingJob = scope.launch(Dispatchers.Default) {
             for (frame in frameChannel) {
+                // Accumulate for full audio generation at end
+                allFrames.add(frame)
+
                 // Submit to SQUIM asynchronously — never blocks
                 analyser.submitFrame(frame)
 
@@ -206,7 +250,7 @@ internal class Pipeline(
                         fileName = fileName,
                         startTimeMs = chunk.startTimeMs,
                         endTimeMs = chunk.endTimeMs,
-                        durationMs = chunk.durationMs,
+                        durationMs = encoded.durationMs,
                         uploadState = UploadState.PENDING.name,
                         qualityScore = chunk.quality?.overallScore,
                         createdAt = timeProvider.nowMillis()
@@ -232,6 +276,14 @@ internal class Pipeline(
                             dataManager.markUploaded(chunk.chunkId)
                             file.delete()
                             logger.info(TAG, "Chunk uploaded & cleaned: ${chunk.chunkId}")
+                            onEvent?.invoke(
+                                SessionEventName.CHUNK_UPLOADED, EventType.SUCCESS,
+                                "Chunk uploaded successfully",
+                                mapOf(
+                                    "chunkId" to chunk.chunkId,
+                                    "chunkIndex" to chunk.index.toString()
+                                )
+                            )
                         }
 
                         is UploadResult.Failure -> {
@@ -240,10 +292,27 @@ internal class Pipeline(
                                 TAG,
                                 "Chunk upload failed: ${chunk.chunkId} - ${result.error}"
                             )
+                            onEvent?.invoke(
+                                SessionEventName.CHUNK_UPLOAD_FAILED, EventType.ERROR,
+                                "Chunk upload failed: ${result.error}",
+                                mapOf(
+                                    "chunkId" to chunk.chunkId,
+                                    "chunkIndex" to chunk.index.toString(),
+                                    "error" to result.error
+                                )
+                            )
                         }
                     }
                 } catch (e: Exception) {
                     logger.error(TAG, "Failed to process chunk: ${chunk.chunkId}", e)
+                    onEvent?.invoke(
+                        SessionEventName.CHUNK_PROCESSING_FAILED, EventType.ERROR,
+                        "Chunk processing failed: ${e.message}",
+                        mapOf(
+                            "chunkId" to chunk.chunkId,
+                            "error" to (e.message ?: "unknown")
+                        )
+                    )
                 }
             }
         }
@@ -286,7 +355,8 @@ internal class Pipeline(
             sessionId: String,
             folderName: String,
             bid: String,
-            scope: CoroutineScope
+            scope: CoroutineScope,
+            onEvent: ((SessionEventName, EventType, String, Map<String, String>) -> Unit)? = null
         ): Pipeline {
             val pipelineConfig = PipelineConfig(
                 enableAnalyser = config.enableAnalyser
@@ -324,7 +394,8 @@ internal class Pipeline(
             val chunkConfig = ChunkConfig(
                 preferredDurationSec = config.preferredChunkDurationSec,
                 desperationDurationSec = config.desperationChunkDurationSec,
-                maxDurationSec = config.maxChunkDurationSec
+                maxDurationSec = config.maxChunkDurationSec,
+                overlapDurationSec = config.overlapDurationSec
             )
 
             val chunker: AudioChunker = VadAudioChunker(
@@ -351,7 +422,8 @@ internal class Pipeline(
                 bid = bid,
                 outputDir = outputDir,
                 timeProvider = timeProvider,
-                logger = logger
+                logger = logger,
+                onEvent = onEvent
             )
 
             pipeline.startCoroutines(scope)

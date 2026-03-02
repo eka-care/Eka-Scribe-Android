@@ -174,10 +174,10 @@ object EkaScribe {
         transactionManager = txnManager
 
         sessionManager = SessionManager(
-            config = config,
             dataManager = dm,
             pipelineFactory = pipelineFactory,
             transactionManager = txnManager,
+            chunkUploader = chunkUploader,
             timeProvider = timeProvider,
             logger = logger
         ).also {
@@ -387,6 +387,8 @@ object EkaScribe {
 
     /**
      * Update the session output (e.g., after user edits).
+     * @param updatedData List of updated session data
+     * SessionData includes data and templateId where data is encoded in base64 string.
      */
     suspend fun updateSessionResult(
         sessionId: String,

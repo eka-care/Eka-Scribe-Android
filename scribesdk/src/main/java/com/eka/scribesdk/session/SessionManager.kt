@@ -1,10 +1,11 @@
 package com.eka.scribesdk.session
 
 import com.eka.scribesdk.api.EkaScribeCallback
-import com.eka.scribesdk.api.EkaScribeConfig
 import com.eka.scribesdk.api.models.AudioQualityMetrics
+import com.eka.scribesdk.api.models.EventType
 import com.eka.scribesdk.api.models.ScribeError
 import com.eka.scribesdk.api.models.SessionConfig
+import com.eka.scribesdk.api.models.SessionEventName
 import com.eka.scribesdk.api.models.SessionState
 import com.eka.scribesdk.api.models.VoiceActivityData
 import com.eka.scribesdk.common.error.ErrorCode
@@ -16,6 +17,10 @@ import com.eka.scribesdk.data.DataManager
 import com.eka.scribesdk.data.local.db.entity.SessionEntity
 import com.eka.scribesdk.data.local.db.entity.TransactionStage
 import com.eka.scribesdk.data.remote.models.responses.toSessionResult
+import com.eka.scribesdk.data.remote.upload.ChunkUploader
+import com.eka.scribesdk.data.remote.upload.UploadMetadata
+import com.eka.scribesdk.data.remote.upload.UploadResult
+import com.eka.scribesdk.pipeline.FullAudioResult
 import com.eka.scribesdk.pipeline.Pipeline
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -29,17 +34,19 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
+import java.io.File
 
 internal class SessionManager(
-    private val config: EkaScribeConfig,
     private val dataManager: DataManager,
     private val pipelineFactory: Pipeline.Factory,
     private val transactionManager: TransactionManager,
+    private val chunkUploader: ChunkUploader,
     private val timeProvider: TimeProvider,
     private val logger: Logger
 ) {
     companion object {
         private const val TAG = "SessionManager"
+        private val deferredUploadScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     }
 
     private val _stateFlow = MutableStateFlow(SessionState.IDLE)
@@ -58,6 +65,7 @@ internal class SessionManager(
     private var activeSessionConfig: SessionConfig? = null
     private var pipeline: Pipeline? = null
     private var callback: EkaScribeCallback? = null
+    private var eventEmitter: SessionEventEmitter? = null
     private var sessionScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     val currentState: SessionState get() = _stateFlow.value
@@ -88,6 +96,15 @@ internal class SessionManager(
         activeSessionConfig = sessionConfig
         sessionScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
+        val emitter = SessionEventEmitter(callback, sessionId)
+        eventEmitter = emitter
+
+        emitter.emit(
+            SessionEventName.SESSION_START_INITIATED,
+            EventType.INFO,
+            "Session start initiated"
+        )
+
         val scope = sessionScope
 
         scope.launch(Dispatchers.IO) {
@@ -105,6 +122,11 @@ internal class SessionManager(
                 val initResult = transactionManager.initTransaction(sessionId, sessionConfig)
                 if (initResult is TransactionResult.Error) {
                     logger.error(TAG, "Init transaction failed: ${initResult.message}")
+                    emitter.emit(
+                        SessionEventName.INIT_TRANSACTION_FAILED, EventType.ERROR,
+                        "Init transaction failed: ${initResult.message}",
+                        mapOf("error" to initResult.message)
+                    )
                     transition(SessionState.ERROR)
                     callback?.onError(
                         ScribeError(ErrorCode.INIT_TRANSACTION_FAILED, initResult.message)
@@ -115,9 +137,18 @@ internal class SessionManager(
                 // Extract folderName and bid from init response
                 val folderName = (initResult as TransactionResult.Success).folderName
                 val bid = initResult.bid
+                emitter.emit(
+                    SessionEventName.INIT_TRANSACTION_SUCCESS, EventType.SUCCESS,
+                    "Init transaction succeeded",
+                    mapOf("folderName" to folderName, "bid" to bid)
+                )
 
                 // Start pipeline after init succeeds
-                val newPipeline = pipelineFactory.create(sessionId, folderName, bid, scope)
+                val newPipeline = pipelineFactory.create(
+                    sessionId, folderName, bid, scope
+                ) { eventName, eventType, message, metadata ->
+                    emitter.emit(eventName, eventType, message, metadata)
+                }
                 pipeline = newPipeline
 
                 // Forward pipeline flows to stable shared flows
@@ -132,6 +163,11 @@ internal class SessionManager(
                         if (!hasFocus) {
                             pause()
                         }
+                        emitter.emit(
+                            SessionEventName.AUDIO_FOCUS_CHANGED, EventType.INFO,
+                            if (hasFocus) "Audio focus gained" else "Audio focus lost",
+                            mapOf("hasFocus" to hasFocus.toString())
+                        )
                         callback?.onAudioFocusChanged(hasFocus)
                     }
                 }
@@ -140,9 +176,19 @@ internal class SessionManager(
 
                 transition(SessionState.RECORDING)
                 callback?.onSessionStarted(sessionId)
+                emitter.emit(
+                    SessionEventName.RECORDING_STARTED,
+                    EventType.SUCCESS,
+                    "Recording started"
+                )
                 logger.info(TAG, "Session started: $sessionId")
             } catch (e: Exception) {
                 logger.error(TAG, "Failed to start session", e)
+                emitter.emit(
+                    SessionEventName.SESSION_START_FAILED, EventType.ERROR,
+                    "Session start failed: ${e.message}",
+                    mapOf("error" to (e.message ?: "unknown"))
+                )
                 transition(SessionState.ERROR)
                 callback?.onError(
                     ScribeError(ErrorCode.UNKNOWN, e.message ?: "Failed to start session")
@@ -158,6 +204,7 @@ internal class SessionManager(
         pipeline?.pause()
         transition(SessionState.PAUSED)
         activeSessionId?.let { callback?.onSessionPaused(it) }
+        eventEmitter?.emit(SessionEventName.SESSION_PAUSED, EventType.INFO, "Session paused")
         logger.info(TAG, "Session paused: $activeSessionId")
     }
 
@@ -166,6 +213,7 @@ internal class SessionManager(
         pipeline?.resume()
         transition(SessionState.RECORDING)
         activeSessionId?.let { callback?.onSessionResumed(it) }
+        eventEmitter?.emit(SessionEventName.SESSION_RESUMED, EventType.INFO, "Session resumed")
         logger.info(TAG, "Session resumed: $activeSessionId")
     }
 
@@ -180,26 +228,53 @@ internal class SessionManager(
 
         transition(SessionState.STOPPING)
         val sessionId = activeSessionId ?: return
+        val emitter = eventEmitter
 
-        sessionScope?.launch(Dispatchers.IO) {
+        emitter?.emit(
+            SessionEventName.SESSION_STOP_INITIATED,
+            EventType.INFO,
+            "Session stop initiated"
+        )
+
+        sessionScope.launch(Dispatchers.IO) {
             try {
                 // 1. Stop the audio pipeline
-                pipeline?.stop()
+                val fullAudioResult = pipeline?.stop()
 
                 val chunkCount = dataManager.getChunkCount(sessionId)
                 callback?.onSessionStopped(sessionId, chunkCount)
+                emitter?.emit(
+                    SessionEventName.PIPELINE_STOPPED, EventType.SUCCESS,
+                    "Pipeline stopped, chunks=$chunkCount",
+                    mapOf("chunkCount" to chunkCount.toString())
+                )
                 logger.info(TAG, "Pipeline stopped: $sessionId, chunks=$chunkCount")
 
                 // 2. Transition to PROCESSING for API calls
                 transition(SessionState.PROCESSING)
 
                 // 3. Retry any failed uploads — block if not all uploaded
+                emitter?.emit(
+                    SessionEventName.UPLOAD_RETRY_STARTED, EventType.INFO,
+                    "Retrying failed chunk uploads"
+                )
                 val allUploaded = transactionManager.retryFailedUploads(sessionId)
+                emitter?.emit(
+                    SessionEventName.UPLOAD_RETRY_COMPLETED,
+                    if (allUploaded) EventType.SUCCESS else EventType.ERROR,
+                    if (allUploaded) "All chunks uploaded" else "Some chunks still failed after retry",
+                    mapOf("allUploaded" to allUploaded.toString())
+                )
 
                 // 4. Stop transaction API
                 val stopResult = transactionManager.stopTransaction(sessionId)
                 if (stopResult is TransactionResult.Error) {
                     logger.error(TAG, "Stop transaction failed: ${stopResult.message}")
+                    emitter?.emit(
+                        SessionEventName.STOP_TRANSACTION_FAILED, EventType.ERROR,
+                        "Stop transaction failed: ${stopResult.message}",
+                        mapOf("error" to stopResult.message)
+                    )
                     handleTransactionError(
                         sessionId,
                         ErrorCode.STOP_TRANSACTION_FAILED,
@@ -207,11 +282,20 @@ internal class SessionManager(
                     )
                     return@launch
                 }
+                emitter?.emit(
+                    SessionEventName.STOP_TRANSACTION_SUCCESS, EventType.SUCCESS,
+                    "Stop transaction succeeded"
+                )
 
                 if (!allUploaded) {
                     logger.error(
                         TAG,
                         "Not all chunks uploaded for session: $sessionId"
+                    )
+                    emitter?.emit(
+                        SessionEventName.SESSION_FAILED, EventType.ERROR,
+                        "Not all chunks uploaded",
+                        mapOf("errorCode" to ErrorCode.RETRY_EXHAUSTED.name)
                     )
                     handleTransactionError(
                         sessionId,
@@ -225,6 +309,11 @@ internal class SessionManager(
                 val commitResult = transactionManager.commitTransaction(sessionId)
                 if (commitResult is TransactionResult.Error) {
                     logger.error(TAG, "Commit transaction failed: ${commitResult.message}")
+                    emitter?.emit(
+                        SessionEventName.COMMIT_TRANSACTION_FAILED, EventType.ERROR,
+                        "Commit transaction failed: ${commitResult.message}",
+                        mapOf("error" to commitResult.message)
+                    )
                     handleTransactionError(
                         sessionId,
                         ErrorCode.COMMIT_TRANSACTION_FAILED,
@@ -232,6 +321,10 @@ internal class SessionManager(
                     )
                     return@launch
                 }
+                emitter?.emit(
+                    SessionEventName.COMMIT_TRANSACTION_SUCCESS, EventType.SUCCESS,
+                    "Commit transaction succeeded"
+                )
 
                 // 6. Poll for results
                 val pollResult = transactionManager.pollResult(sessionId)
@@ -241,10 +334,19 @@ internal class SessionManager(
                         transition(SessionState.COMPLETED)
                         val sessionResult = pollResult.result.toSessionResult(sessionId)
                         callback?.onSessionCompleted(sessionId, sessionResult)
+                        emitter?.emit(
+                            SessionEventName.SESSION_COMPLETED, EventType.SUCCESS,
+                            "Session completed successfully"
+                        )
                         logger.info(TAG, "Session completed: $sessionId")
                     }
 
                     is TransactionPollResult.Failed -> {
+                        emitter?.emit(
+                            SessionEventName.POLL_RESULT_FAILED, EventType.ERROR,
+                            "Poll result failed: ${pollResult.error}",
+                            mapOf("error" to pollResult.error)
+                        )
                         handleTransactionError(
                             sessionId,
                             ErrorCode.TRANSCRIPTION_FAILED,
@@ -256,11 +358,25 @@ internal class SessionManager(
                         // Timeout is not necessarily an error — results may arrive later
                         dataManager.updateSessionState(sessionId, SessionState.COMPLETED.name)
                         transition(SessionState.COMPLETED)
+                        emitter?.emit(
+                            SessionEventName.POLL_RESULT_TIMEOUT, EventType.ERROR,
+                            "Poll timed out, session may complete later"
+                        )
                         logger.warn(TAG, "Poll timeout, session may complete later: $sessionId")
                     }
                 }
+
+                // Launch deferred full audio upload (fire-and-forget, survives session cleanup)
+                if (fullAudioResult != null) {
+                    launchDeferredFullAudioUpload(fullAudioResult)
+                }
             } catch (e: Exception) {
                 logger.error(TAG, "Error stopping session", e)
+                emitter?.emit(
+                    SessionEventName.SESSION_FAILED, EventType.ERROR,
+                    "Session failed with exception: ${e.message}",
+                    mapOf("error" to (e.message ?: "unknown"))
+                )
                 transition(SessionState.ERROR)
                 callback?.onError(
                     ScribeError(ErrorCode.UNKNOWN, e.message ?: "Failed to stop session")
@@ -317,6 +433,59 @@ internal class SessionManager(
         pipeline = null
         activeSessionId = null
         activeSessionConfig = null
+        eventEmitter = null
         sessionScope.cancel()
+    }
+
+    private fun launchDeferredFullAudioUpload(result: FullAudioResult) {
+        val emitter = eventEmitter
+        deferredUploadScope.launch {
+            try {
+                val file = File(result.filePath)
+                if (!file.exists()) {
+                    logger.warn(TAG, "Full audio file not found: ${result.filePath}")
+                    return@launch
+                }
+
+                val metadata = UploadMetadata(
+                    chunkId = "${result.sessionId}_full_audio",
+                    sessionId = result.sessionId,
+                    chunkIndex = -1,
+                    fileName = "full_audio.m4a_",
+                    folderName = result.folderName,
+                    bid = result.bid
+                )
+
+                when (val uploadResult = chunkUploader.upload(file, metadata)) {
+                    is UploadResult.Success -> {
+                        file.delete()
+                        logger.info(TAG, "Full audio uploaded & cleaned: ${result.sessionId}")
+                        emitter?.emit(
+                            SessionEventName.FULL_AUDIO_UPLOADED, EventType.SUCCESS,
+                            "Full audio uploaded successfully"
+                        )
+                    }
+
+                    is UploadResult.Failure -> {
+                        logger.warn(
+                            TAG,
+                            "Full audio upload failed: ${result.sessionId} - ${uploadResult.error}"
+                        )
+                        emitter?.emit(
+                            SessionEventName.FULL_AUDIO_UPLOAD_FAILED, EventType.ERROR,
+                            "Full audio upload failed: ${uploadResult.error}",
+                            mapOf("error" to uploadResult.error)
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                logger.error(TAG, "Deferred full audio upload failed", e)
+                emitter?.emit(
+                    SessionEventName.FULL_AUDIO_UPLOAD_FAILED, EventType.ERROR,
+                    "Full audio upload exception: ${e.message}",
+                    mapOf("error" to (e.message ?: "unknown"))
+                )
+            }
+        }
     }
 }

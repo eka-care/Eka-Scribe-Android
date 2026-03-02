@@ -31,12 +31,16 @@ class VadAudioChunker(
     private val maxLengthSamples = config.maxDurationSec * sampleRate
     private val longSilenceThreshold = (config.longSilenceSec * sampleRate).toInt()
     private val shortSilenceThreshold = (config.shortSilenceSec * sampleRate).toInt()
+    private val overlapSamples = (config.overlapDurationSec * sampleRate).toInt()
 
     private val frameAccumulator = mutableListOf<AudioFrame>()
     private var chunkIndex = 0
-    private var chunkStartTimeMs = 0L
     private var accumulatedSamples = 0L
     private var silenceSamples = 0L
+
+    // Sample-based offset tracking for accurate timing
+    private var totalSamplesProcessed = 0L
+    private var chunkStartSampleOffset = 0L
 
     @Volatile
     private var latestQuality: AudioQuality? = null
@@ -50,12 +54,9 @@ class VadAudioChunker(
             timestampMs = frame.timestampMs
         )
 
-        if (frameAccumulator.isEmpty()) {
-            chunkStartTimeMs = frame.timestampMs
-        }
-
         frameAccumulator.add(frame)
         accumulatedSamples += frame.pcm.size
+        totalSamplesProcessed += frame.pcm.size
 
         if (vadResult.isSpeech) {
             silenceSamples = 0
@@ -64,7 +65,7 @@ class VadAudioChunker(
         }
 
         return if (shouldChunk()) {
-            createChunk(frame.timestampMs)
+            createChunk()
         } else {
             null
         }
@@ -79,8 +80,7 @@ class VadAudioChunker(
             silenceSamples = 0
             return null
         }
-        val now = frameAccumulator.last().timestampMs
-        return createChunk(now)
+        return createChunk(isFlush = true)
     }
 
     override fun setLatestQuality(quality: AudioQuality?) {
@@ -113,25 +113,46 @@ class VadAudioChunker(
         return false
     }
 
-    private fun createChunk(endTimeMs: Long): AudioChunk {
+    private fun createChunk(isFlush: Boolean = false): AudioChunk {
+        val startTimeMs = chunkStartSampleOffset * 1000 / sampleRate
+        val endTimeMs = totalSamplesProcessed * 1000 / sampleRate
+
         val chunk = AudioChunk(
             chunkId = IdGenerator.chunkId(sessionId, chunkIndex),
             sessionId = sessionId,
             index = chunkIndex,
             frames = frameAccumulator.toList(),
-            startTimeMs = chunkStartTimeMs,
+            startTimeMs = startTimeMs,
             endTimeMs = endTimeMs,
             quality = latestQuality
         )
 
         logger.debug(
             TAG,
-            "Chunk #$chunkIndex created: ${chunk.durationMs}ms, ${chunk.frames.size} frames"
+            "Chunk #$chunkIndex created: ${chunk.durationMs}ms, ${chunk.frames.size} frames, " +
+                    "st=${startTimeMs}ms, et=${endTimeMs}ms"
         )
 
         chunkIndex++
-        frameAccumulator.clear()
-        accumulatedSamples = 0
+
+        if (isFlush) {
+            // Last chunk — no overlap needed, just clear
+            frameAccumulator.clear()
+            accumulatedSamples = 0
+        } else {
+            // Keep the last overlapSamples worth of frames for the next chunk
+            var keptSamples = 0L
+            val overlapFrames = mutableListOf<AudioFrame>()
+            for (frame in frameAccumulator.reversed()) {
+                if (keptSamples >= overlapSamples) break
+                overlapFrames.add(0, frame)
+                keptSamples += frame.pcm.size
+            }
+            frameAccumulator.clear()
+            frameAccumulator.addAll(overlapFrames)
+            accumulatedSamples = keptSamples
+            chunkStartSampleOffset = totalSamplesProcessed - keptSamples
+        }
         silenceSamples = 0
 
         return chunk

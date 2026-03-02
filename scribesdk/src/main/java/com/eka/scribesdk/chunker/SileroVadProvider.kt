@@ -56,6 +56,12 @@ class SileroVadProvider(
 
     override fun detect(pcm: ShortArray): VadResult {
         val vadInstance = vad ?: return VadResult(isSpeech = false, confidence = 0f)
+        // Silero ONNX model requires exactly frameSize samples; partial frames
+        // (e.g. the last buffer from AudioRecord after stop()) skip VAD but are
+        // still accumulated by the chunker for encoding.
+        if (pcm.size != frameSize) {
+            return VadResult(isSpeech = false, confidence = 0f)
+        }
         val isSpeech = vadInstance.isSpeech(pcm)
         return VadResult(isSpeech = isSpeech, confidence = if (isSpeech) 1f else 0f)
     }
