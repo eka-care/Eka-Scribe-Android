@@ -568,6 +568,7 @@ internal class PipelineTest {
             emptyList<AudioChunkEntity>()
 
         override suspend fun resetRetryCount(chunkId: String) {}
+        override suspend fun updateStageAndBid(sessionId: String, stage: String, bid: String) {}
     }
 
     /**

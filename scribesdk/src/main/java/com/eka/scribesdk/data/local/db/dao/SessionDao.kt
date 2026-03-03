@@ -47,4 +47,12 @@ internal interface SessionDao {
         bid: String,
         updatedAt: Long
     )
+
+    @Query("UPDATE scribe_session_table SET upload_stage = :stage, bid = :bid, updated_at = :updatedAt WHERE session_id = :sessionId")
+    suspend fun updateStageAndBid(
+        sessionId: String,
+        stage: String,
+        bid: String,
+        updatedAt: Long
+    )
 }

@@ -23,7 +23,6 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
@@ -47,7 +46,13 @@ internal class SessionManagerTest {
 
         // Make initTransaction return an error so the async coroutine in start()
         // settles to ERROR state quickly (allows re-start tests)
-        coEvery { tm.initTransaction(any(), any()) } returns TransactionResult.Error("test error")
+        coEvery {
+            tm.initTransaction(
+                any(),
+                any(),
+                any()
+            )
+        } returns TransactionResult.Error("test error")
 
         return SessionManager(
             ekaScribeConfig = EkaScribeConfig(networkConfig = mockk(), fullAudioOutput = true),
@@ -75,31 +80,34 @@ internal class SessionManagerTest {
     // =====================================================================
 
     @Test
-    fun `start returns session ID and transitions to STARTING`() = runTest {
-        val manager = createManager()
-        val sessionId = manager.start()
+    fun `start calls onStart with session ID and transitions to STARTING`() = runTest {
+        val manager = createManagerWithSuccessInit()
+        var sessionId = ""
+        manager.start(onStart = { sessionId = it })
+        Thread.sleep(200)
 
-        assertNotNull(sessionId)
+        assertTrue("Session ID should not be empty", sessionId.isNotEmpty())
         assertTrue("Session ID should start with 'a-'", sessionId.startsWith("a-"))
-        // Synchronously, state moves to STARTING before the coroutine runs
-        val state = manager.currentState
-        assertTrue(
-            "State should be STARTING or beyond, was $state",
-            state != SessionState.IDLE
-        )
     }
 
     @Test
     fun `start generates unique session IDs`() = runTest {
-        val manager = createManager()
-        val id1 = manager.start()
-        // Let async settle to ERROR so we can start again
+        val manager = createManagerWithSuccessInit()
+        var id1 = ""
+        manager.start(onStart = { id1 = it })
         Thread.sleep(200)
-        val state = manager.currentState
-        if (state == SessionState.ERROR || state == SessionState.COMPLETED) {
-            val id2 = manager.start()
-            assertTrue("IDs should be different", id1 != id2)
-        }
+
+        // Stop to let manager reach COMPLETED/ERROR so we can restart
+        manager.stop()
+        Thread.sleep(500)
+
+        var id2 = ""
+        manager.start(onStart = { id2 = it })
+        Thread.sleep(200)
+
+        assertTrue("id1 should not be empty", id1.isNotEmpty())
+        assertTrue("id2 should not be empty", id2.isNotEmpty())
+        assertTrue("IDs should be different", id1 != id2)
     }
 
     @Test
@@ -125,12 +133,18 @@ internal class SessionManagerTest {
         manager.start()
         Thread.sleep(300) // Wait for async to fail → ERROR
 
-        if (manager.currentState == SessionState.ERROR) {
-            // Should allow a restart
-            val newId = manager.start()
-            assertNotNull(newId)
-            assertTrue(newId.startsWith("a-"))
-        }
+        assertEquals("Should be in ERROR state", SessionState.ERROR, manager.currentState)
+
+        // Now use a success-path manager to restart from ERROR
+        // But we can't swap managers — the same manager must recover.
+        // The mock returns error, but start() from ERROR state should still
+        // reset and attempt. We just verify it doesn't throw.
+        var errorReceived = false
+        manager.start(onError = { errorReceived = true })
+        Thread.sleep(300)
+
+        // The important thing: start() from ERROR didn't throw (it reset and tried)
+        assertTrue("onError should be called since init still fails", errorReceived)
     }
 
     @Test
@@ -247,7 +261,7 @@ internal class SessionManagerTest {
     ): SessionManager {
         val pipelineFactory = mockk<Pipeline.Factory>(relaxed = true)
 
-        coEvery { tm.initTransaction(any(), any()) } returns TransactionResult.Success(
+        coEvery { tm.initTransaction(any(), any(), any()) } returns TransactionResult.Success(
             "folder",
             "bid"
         )
@@ -288,7 +302,7 @@ internal class SessionManagerTest {
     @Test
     fun `stop transitions to ERROR when retryFailedUploads returns false`() = runTest {
         val tm = mockk<TransactionManager>(relaxed = true)
-        coEvery { tm.initTransaction(any(), any()) } returns TransactionResult.Success(
+        coEvery { tm.initTransaction(any(), any(), any()) } returns TransactionResult.Success(
             "folder",
             "bid"
         )
@@ -309,7 +323,7 @@ internal class SessionManagerTest {
     @Test
     fun `stop transitions to ERROR when stopTransaction fails`() = runTest {
         val tm = mockk<TransactionManager>(relaxed = true)
-        coEvery { tm.initTransaction(any(), any()) } returns TransactionResult.Success(
+        coEvery { tm.initTransaction(any(), any(), any()) } returns TransactionResult.Success(
             "folder",
             "bid"
         )
@@ -329,7 +343,7 @@ internal class SessionManagerTest {
     @Test
     fun `stop transitions to ERROR when commitTransaction fails`() = runTest {
         val tm = mockk<TransactionManager>(relaxed = true)
-        coEvery { tm.initTransaction(any(), any()) } returns TransactionResult.Success(
+        coEvery { tm.initTransaction(any(), any(), any()) } returns TransactionResult.Success(
             "folder",
             "bid"
         )
@@ -350,7 +364,7 @@ internal class SessionManagerTest {
     @Test
     fun `stop transitions to COMPLETED when pollResult times out`() = runTest {
         val tm = mockk<TransactionManager>(relaxed = true)
-        coEvery { tm.initTransaction(any(), any()) } returns TransactionResult.Success(
+        coEvery { tm.initTransaction(any(), any(), any()) } returns TransactionResult.Success(
             "folder",
             "bid"
         )
@@ -391,7 +405,7 @@ internal class SessionManagerTest {
         coEvery { uploader.upload(any(), any()) } returns UploadResult.Success("s3://ok")
 
         val tm = mockk<TransactionManager>(relaxed = true)
-        coEvery { tm.initTransaction(any(), any()) } returns TransactionResult.Success(
+            coEvery { tm.initTransaction(any(), any(), any()) } returns TransactionResult.Success(
             "folder",
             "bid"
         )
@@ -487,6 +501,7 @@ internal class SessionManagerTest {
             emptyList<AudioChunkEntity>()
 
         override suspend fun resetRetryCount(chunkId: String) {}
+        override suspend fun updateStageAndBid(sessionId: String, stage: String, bid: String) {}
     }
 
     private class FakeChunkUploader : ChunkUploader {

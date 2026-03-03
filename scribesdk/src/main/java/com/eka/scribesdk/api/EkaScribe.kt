@@ -6,12 +6,12 @@ import com.eka.scribesdk.BuildConfig
 import com.eka.scribesdk.analyser.AnalyserState
 import com.eka.scribesdk.analyser.ModelDownloader
 import com.eka.scribesdk.api.models.AudioQualityMetrics
+import com.eka.scribesdk.api.models.ScribeError
 import com.eka.scribesdk.api.models.ScribeHistoryItem
 import com.eka.scribesdk.api.models.ScribeSession
 import com.eka.scribesdk.api.models.SelectedUserPreferences
 import com.eka.scribesdk.api.models.SessionConfig
 import com.eka.scribesdk.api.models.SessionData
-import com.eka.scribesdk.api.models.SessionInfo
 import com.eka.scribesdk.api.models.SessionResult
 import com.eka.scribesdk.api.models.SessionState
 import com.eka.scribesdk.api.models.TemplateItem
@@ -237,10 +237,16 @@ object EkaScribe {
      * @return SessionInfo with the new session ID
      * @throws ScribeException if SDK is not initialized or session is already active
      */
-    suspend fun startSession(sessionConfig: SessionConfig = SessionConfig()): SessionInfo {
-        val manager = requireInitialized()
-        val sessionId = manager.start(sessionConfig)
-        return SessionInfo(sessionId = sessionId, state = SessionState.STARTING)
+    suspend fun startSession(
+        sessionConfig: SessionConfig = SessionConfig(),
+        onStart: (String) -> Unit = {},
+        onError: (ScribeError) -> Unit = {}
+    ) {
+        requireInitialized().start(
+            sessionConfig = sessionConfig,
+            onStart = onStart,
+            onError = onError
+        )
     }
 
     fun pauseSession() {

@@ -124,27 +124,28 @@ internal class TransactionManagerTest {
         val dm = FakeDataManager()
         val (manager, _, _) = createManager(api = api, dataManager = dm)
 
-        val result = manager.initTransaction(SESSION_ID, defaultConfig())
+        val result = manager.initTransaction(SESSION_ID, defaultConfig(), "260303")
 
         assertTrue("Should be Success", result is TransactionResult.Success)
         val success = result as TransactionResult.Success
         assertEquals("bid-001", success.bid)
-        assertTrue("folderName should be date-based", success.folderName.length == 6)
+        assertEquals("260303", success.folderName)
         assertEquals(TransactionStage.STOP.name, dm.uploadStages[SESSION_ID])
-        assertTrue(dm.folderBidUpdated)
+        assertTrue(dm.stageAndBidUpdated)
     }
 
     @Test
-    fun `initTransaction saves session metadata for recovery`() = runTest {
+    fun `initTransaction does not save metadata (caller responsibility)`() = runTest {
         val api = FakeApiService()
         api.initResponse = netSuccess(initOk("bid-002"))
         val dm = FakeDataManager()
         val (manager, _, _) = createManager(api = api, dataManager = dm)
 
-        manager.initTransaction(SESSION_ID, defaultConfig())
+        manager.initTransaction(SESSION_ID, defaultConfig(), "260303")
 
-        assertTrue(dm.sessionMetadataMap.containsKey(SESSION_ID))
-        assertTrue(dm.sessionMetadataMap[SESSION_ID]!!.contains("input_language"))
+        // Metadata is now saved by SessionManager.start() in the initial INSERT,
+        // not by initTransaction()
+        assertFalse(dm.sessionMetadataMap.containsKey(SESSION_ID))
     }
 
     @Test
@@ -156,7 +157,7 @@ internal class TransactionManagerTest {
         api.initResponse = netServerError(errBody, 401)
         val (manager, _, _) = createManager(api = api)
 
-        val result = manager.initTransaction(SESSION_ID, defaultConfig())
+        val result = manager.initTransaction(SESSION_ID, defaultConfig(), "260303")
 
         assertTrue(result is TransactionResult.Error)
         assertTrue((result as TransactionResult.Error).message.contains("Unauthorized"))
@@ -168,7 +169,7 @@ internal class TransactionManagerTest {
         api.initResponse = NetworkResponse.NetworkError(IOException("Connection refused"))
         val (manager, _, _) = createManager(api = api)
 
-        val result = manager.initTransaction(SESSION_ID, defaultConfig())
+        val result = manager.initTransaction(SESSION_ID, defaultConfig(), "260303")
 
         assertTrue(result is TransactionResult.Error)
         assertTrue((result as TransactionResult.Error).message.contains("Network error"))
@@ -180,7 +181,7 @@ internal class TransactionManagerTest {
         api.initResponse = NetworkResponse.UnknownError(RuntimeException("Unexpected"), null)
         val (manager, _, _) = createManager(api = api)
 
-        val result = manager.initTransaction(SESSION_ID, defaultConfig())
+        val result = manager.initTransaction(SESSION_ID, defaultConfig(), "260303")
 
         assertTrue(result is TransactionResult.Error)
         assertTrue((result as TransactionResult.Error).message.contains("Unknown error"))
@@ -195,7 +196,7 @@ internal class TransactionManagerTest {
         api.initResponse = netSuccess(body)
         val (manager, _, _) = createManager(api = api)
 
-        val result = manager.initTransaction(SESSION_ID, defaultConfig())
+        val result = manager.initTransaction(SESSION_ID, defaultConfig(), "260303")
 
         assertTrue(result is TransactionResult.Success)
         assertEquals("", (result as TransactionResult.Success).bid)
@@ -789,10 +790,10 @@ internal class TransactionManagerTest {
             )
         )
 
-        val result = manager.initTransaction(SESSION_ID, config)
+        val result = manager.initTransaction(SESSION_ID, config, "260303")
 
         assertTrue(result is TransactionResult.Success)
-        assertTrue(dm.sessionMetadataMap.containsKey(SESSION_ID))
+        assertTrue(dm.stageAndBidUpdated)
     }
 
     @Test
@@ -815,11 +816,10 @@ internal class TransactionManagerTest {
             )
         )
 
-        val result = manager.initTransaction(SESSION_ID, config)
+        val result = manager.initTransaction(SESSION_ID, config, "260303")
 
         assertTrue(result is TransactionResult.Success)
-        assertTrue(dm.sessionMetadataMap.containsKey(SESSION_ID))
-        assertTrue(dm.sessionMetadataMap[SESSION_ID]!!.contains("John Doe"))
+        assertTrue(dm.stageAndBidUpdated)
     }
 
     @Test
@@ -831,7 +831,7 @@ internal class TransactionManagerTest {
         api.initResponse = netServerError(errBody, 500)
         val (manager, _, _) = createManager(api = api)
 
-        val result = manager.initTransaction(SESSION_ID, defaultConfig())
+        val result = manager.initTransaction(SESSION_ID, defaultConfig(), "260303")
 
         assertTrue(result is TransactionResult.Error)
         assertTrue((result as TransactionResult.Error).message == "Init failed")
@@ -1207,6 +1207,7 @@ internal class TransactionManagerTest {
         val uploadedChunkIds = mutableSetOf<String>()
         val failedChunkIds = mutableSetOf<String>()
         var folderBidUpdated = false
+        var stageAndBidUpdated = false
         var sessionEntity: SessionEntity? = null
         var uploadedChunksList: List<AudioChunkEntity> = emptyList()
         var failedChunksList: List<AudioChunkEntity> = emptyList()
@@ -1227,6 +1228,13 @@ internal class TransactionManagerTest {
             bid: String
         ) {
             folderBidUpdated = true
+        }
+
+        override suspend fun updateStageAndBid(sessionId: String, stage: String, bid: String) {
+            stageAndBidUpdated = true
+            uploadStages[sessionId] = stage
+            sessionEntity = sessionEntity?.copy(uploadStage = stage, bid = bid)
+                ?: makeSessionEntity(uploadStage = stage)
         }
 
         override suspend fun updateSessionMetadata(sessionId: String, metadata: String) {

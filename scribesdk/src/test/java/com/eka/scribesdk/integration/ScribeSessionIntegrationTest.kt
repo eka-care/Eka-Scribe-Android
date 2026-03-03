@@ -33,7 +33,6 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.emptyFlow
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -156,8 +155,8 @@ internal class ScribeSessionIntegrationTest {
         fakeDm.allChunksUploaded = true
 
         val manager = createSessionManager()
-        val sessionId = kotlinx.coroutines.runBlocking { manager.start() }
-        assertNotNull(sessionId)
+        var sessionId = ""
+        kotlinx.coroutines.runBlocking { manager.start(onStart = { sessionId = it }) }
 
         waitFor(2000) { manager.currentState == SessionState.RECORDING }
         assertEquals(SessionState.RECORDING, manager.currentState)
@@ -191,8 +190,8 @@ internal class ScribeSessionIntegrationTest {
         fakeApi.initResponse = NetworkResponse.NetworkError(IOException("Connection refused"))
 
         val manager = createSessionManager()
-        val sessionId = kotlinx.coroutines.runBlocking { manager.start() }
-        assertNotNull(sessionId)
+        var sessionId = ""
+        kotlinx.coroutines.runBlocking { manager.start(onStart = { sessionId = it }) }
 
         waitFor(2000) { manager.currentState == SessionState.ERROR }
         assertEquals(SessionState.ERROR, manager.currentState)
@@ -302,8 +301,8 @@ internal class ScribeSessionIntegrationTest {
         fakeDm.allChunksUploaded = true
 
         val manager = createSessionManager()
-        val sessionId = kotlinx.coroutines.runBlocking { manager.start() }
-
+        var sessionId = ""
+        kotlinx.coroutines.runBlocking { manager.start(onStart = { sessionId = it }) }
         waitFor(2000) { manager.currentState == SessionState.RECORDING }
         assertEquals(SessionState.RECORDING, manager.currentState)
 
@@ -408,7 +407,8 @@ internal class ScribeSessionIntegrationTest {
         fakeDm.allChunksUploaded = true
 
         val manager = createSessionManager()
-        val sessionId = kotlinx.coroutines.runBlocking { manager.start() }
+        var sessionId = ""
+        kotlinx.coroutines.runBlocking { manager.start(onStart = { sessionId = it }) }
 
         waitFor(2000) { manager.currentState == SessionState.RECORDING }
         assertEquals(SessionState.RECORDING, manager.currentState)
@@ -591,6 +591,12 @@ internal class ScribeSessionIntegrationTest {
             retryExhaustedChunksList
 
         override suspend fun resetRetryCount(chunkId: String) {}
+        override suspend fun updateStageAndBid(sessionId: String, stage: String, bid: String) {
+            uploadStages[sessionId] = stage
+            sessionEntity = sessionEntity?.copy(uploadStage = stage, bid = bid)
+            sessions[sessionId] = sessions[sessionId]?.copy(uploadStage = stage, bid = bid)
+                ?: SessionEntity(sessionId, 0L, 0L, "RECORDING", uploadStage = stage, bid = bid)
+        }
     }
 
     internal class FakeChunkUploader(

@@ -115,6 +115,11 @@ internal class DefaultDataManager(
         logger.debug(TAG, "Folder/bid updated: $sessionId -> $folderName, $bid")
     }
 
+    override suspend fun updateStageAndBid(sessionId: String, stage: String, bid: String) {
+        sessionDao.updateStageAndBid(sessionId, stage, bid, timeProvider.nowMillis())
+        logger.debug(TAG, "Stage/bid updated: $sessionId -> $stage, $bid")
+    }
+
     override suspend fun getAllSessions(): List<SessionEntity> {
         return sessionDao.getAll()
     }

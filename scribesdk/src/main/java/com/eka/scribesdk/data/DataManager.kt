@@ -25,6 +25,7 @@ internal interface DataManager {
     suspend fun getSessionsByStage(stage: String): List<SessionEntity>
     suspend fun getAllChunks(sessionId: String): List<AudioChunkEntity>
     suspend fun updateFolderAndBid(sessionId: String, folderName: String, bid: String)
+    suspend fun updateStageAndBid(sessionId: String, stage: String, bid: String)
     suspend fun getAllSessions(): List<SessionEntity>
     suspend fun getRetryExhaustedChunks(sessionId: String, maxRetries: Int): List<AudioChunkEntity>
     suspend fun resetRetryCount(chunkId: String)

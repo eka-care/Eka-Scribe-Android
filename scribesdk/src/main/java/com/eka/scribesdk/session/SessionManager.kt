@@ -17,12 +17,16 @@ import com.eka.scribesdk.common.util.TimeProvider
 import com.eka.scribesdk.data.DataManager
 import com.eka.scribesdk.data.local.db.entity.SessionEntity
 import com.eka.scribesdk.data.local.db.entity.TransactionStage
+import com.eka.scribesdk.data.remote.models.requests.InitTransactionRequest
+import com.eka.scribesdk.data.remote.models.requests.OutputFormatTemplate
+import com.eka.scribesdk.data.remote.models.requests.PatientDetails
 import com.eka.scribesdk.data.remote.models.responses.toSessionResult
 import com.eka.scribesdk.data.remote.upload.ChunkUploader
 import com.eka.scribesdk.data.remote.upload.UploadMetadata
 import com.eka.scribesdk.data.remote.upload.UploadResult
 import com.eka.scribesdk.pipeline.FullAudioResult
 import com.eka.scribesdk.pipeline.Pipeline
+import com.google.gson.Gson
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -37,6 +41,9 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 internal class SessionManager(
     private val ekaScribeConfig: EkaScribeConfig,
@@ -77,7 +84,11 @@ internal class SessionManager(
         this.callback = callback
     }
 
-    suspend fun start(sessionConfig: SessionConfig = SessionConfig()): String {
+    suspend fun start(
+        sessionConfig: SessionConfig = SessionConfig(),
+        onStart: (String) -> Unit = {},
+        onError: (ScribeError) -> Unit = {}
+    ) {
         val currentState = _stateFlow.value
         if (currentState != SessionState.IDLE) {
             if (currentState == SessionState.COMPLETED || currentState == SessionState.ERROR) {
@@ -112,17 +123,53 @@ internal class SessionManager(
 
         withContext(Dispatchers.IO) {
             try {
+                val folderName = SimpleDateFormat("yyMMdd", Locale.getDefault()).format(Date())
+
+                // Build the init request and serialize metadata upfront
+                // so it can be included in the initial INSERT (avoids a separate UPDATE)
+                val bucketName = transactionManager.bucketName
+                val s3Url = "s3://$bucketName/$folderName/$sessionId"
+                val initRequest = InitTransactionRequest(
+                    inputLanguage = sessionConfig.languages,
+                    mode = sessionConfig.mode,
+                    outputFormatTemplate = sessionConfig.outputTemplates?.map {
+                        OutputFormatTemplate(
+                            templateId = it.templateId,
+                            type = it.templateType,
+                            name = it.templateName
+                        )
+                    },
+                    s3Url = s3Url,
+                    section = sessionConfig.section,
+                    speciality = sessionConfig.speciality,
+                    modelType = sessionConfig.modelType,
+                    patientDetails = sessionConfig.patientDetails?.let {
+                        PatientDetails(
+                            age = it.age,
+                            biologicalSex = it.biologicalSex,
+                            name = it.name,
+                            patientId = it.patientId,
+                            visitId = it.visitId
+                        )
+                    }
+                )
+                val metadataJson = Gson().toJson(initRequest)
+
+                // DB CALL #1: Single INSERT with ALL pre-API data
                 val session = SessionEntity(
                     sessionId = sessionId,
                     createdAt = timeProvider.nowMillis(),
                     updatedAt = timeProvider.nowMillis(),
                     state = SessionState.RECORDING.name,
-                    uploadStage = TransactionStage.INIT.name
+                    uploadStage = TransactionStage.INIT.name,
+                    folderName = folderName,
+                    sessionMetadata = metadataJson
                 )
                 dataManager.saveSession(session)
 
                 // Call init transaction API before starting recording
-                val initResult = transactionManager.initTransaction(sessionId, sessionConfig)
+                val initResult =
+                    transactionManager.initTransaction(sessionId, sessionConfig, folderName)
                 if (initResult is TransactionResult.Error) {
                     logger.error(TAG, "Init transaction failed: ${initResult.message}")
                     emitter.emit(
@@ -134,12 +181,12 @@ internal class SessionManager(
                     callback?.onError(
                         ScribeError(ErrorCode.INIT_TRANSACTION_FAILED, initResult.message)
                     )
+                    onError(ScribeError(ErrorCode.INIT_TRANSACTION_FAILED, initResult.message))
                     return@withContext
                 }
 
                 // Extract folderName and bid from init response
-                val folderName = (initResult as TransactionResult.Success).folderName
-                val bid = initResult.bid
+                val bid = (initResult as TransactionResult.Success).bid
                 emitter.emit(
                     SessionEventName.INIT_TRANSACTION_SUCCESS, EventType.SUCCESS,
                     "Init transaction succeeded",
@@ -185,6 +232,7 @@ internal class SessionManager(
                     "Recording started"
                 )
                 logger.info(TAG, "Session started: $sessionId")
+                onStart(sessionId)
             } catch (e: Exception) {
                 logger.error(TAG, "Failed to start session", e)
                 emitter.emit(
@@ -193,13 +241,14 @@ internal class SessionManager(
                     mapOf("error" to (e.message ?: "unknown"))
                 )
                 transition(SessionState.ERROR)
+                val error = ScribeError(ErrorCode.UNKNOWN, e.message ?: "Failed to start session")
                 callback?.onError(
-                    ScribeError(ErrorCode.UNKNOWN, e.message ?: "Failed to start session")
+                    error
                 )
+                onError(error)
+                return@withContext
             }
         }
-
-        return sessionId
     }
 
     fun pause() {

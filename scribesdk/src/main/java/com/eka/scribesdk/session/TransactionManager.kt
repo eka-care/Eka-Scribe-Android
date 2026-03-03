@@ -28,11 +28,12 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+
 internal class TransactionManager(
     private val apiService: ScribeApiService,
     private val dataManager: DataManager,
     private val chunkUploader: ChunkUploader,
-    private val bucketName: String,
+    internal val bucketName: String,
     private val maxUploadRetries: Int,
     private val logger: Logger
 ) {
@@ -50,9 +51,9 @@ internal class TransactionManager(
      */
     suspend fun initTransaction(
         sessionId: String,
-        sessionConfig: SessionConfig
+        sessionConfig: SessionConfig,
+        folderName: String
     ): TransactionResult {
-        val folderName = SimpleDateFormat("yyMMdd", Locale.getDefault()).format(Date())
         val s3Url = "s3://$bucketName/$folderName/$sessionId"
 
         val request = InitTransactionRequest(
@@ -80,19 +81,11 @@ internal class TransactionManager(
             }
         )
 
-        // Save metadata for recovery
-        try {
-            val metadataJson = gson.toJson(request)
-            dataManager.updateSessionMetadata(sessionId, metadataJson)
-        } catch (e: Exception) {
-            logger.warn(TAG, "Failed to save session metadata", e)
-        }
-
         return when (val response = apiService.initTransaction(sessionId, request)) {
             is NetworkResponse.Success -> {
                 val bid = response.body.bId ?: ""
-                dataManager.updateUploadStage(sessionId, TransactionStage.STOP.name)
-                dataManager.updateFolderAndBid(sessionId, folderName, bid)
+                // Single DB call for post-API data (stage + bid)
+                dataManager.updateStageAndBid(sessionId, TransactionStage.STOP.name, bid)
                 logger.info(
                     TAG,
                     "Init transaction success: $sessionId, bid=$bid, folder=$folderName"
@@ -338,7 +331,9 @@ internal class TransactionManager(
                 val config = sessionConfig ?: deserializeSessionConfig(session.sessionMetadata)
                 ?: return TransactionResult.Error("No session config available for recovery")
 
-                val initResult = initTransaction(sessionId, config)
+                val folderName = session.folderName
+                    ?: SimpleDateFormat("yyMMdd", Locale.getDefault()).format(Date())
+                val initResult = initTransaction(sessionId, config, folderName)
                 if (initResult is TransactionResult.Success) {
                     // Automatically progress to next stage if successful
                     checkAndProgress(sessionId, sessionConfig, force)
