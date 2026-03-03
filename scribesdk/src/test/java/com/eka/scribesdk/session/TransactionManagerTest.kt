@@ -281,6 +281,43 @@ internal class TransactionManagerTest {
         assertTrue(result is TransactionResult.Error)
     }
 
+    @Test
+    fun `commitTransaction network error returns Error`() = runTest {
+        val api = FakeApiService()
+        api.commitResponse = NetworkResponse.NetworkError(IOException("timeout"))
+        val (manager, _, _) = createManager(api = api)
+
+        val result = manager.commitTransaction(SESSION_ID)
+
+        assertTrue(result is TransactionResult.Error)
+        assertTrue((result as TransactionResult.Error).message.contains("Network error"))
+    }
+
+    @Test
+    fun `commitTransaction unknown error returns Error`() = runTest {
+        val api = FakeApiService()
+        api.commitResponse = NetworkResponse.UnknownError(RuntimeException("unexpected"), null)
+        val (manager, _, _) = createManager(api = api)
+
+        val result = manager.commitTransaction(SESSION_ID)
+
+        assertTrue(result is TransactionResult.Error)
+        assertTrue((result as TransactionResult.Error).message.contains("Unknown error"))
+    }
+
+    @Test
+    fun `stopTransaction unknown error returns Error`() = runTest {
+        val api = FakeApiService()
+        api.stopResponse = NetworkResponse.UnknownError(RuntimeException("crash"), null)
+        val dm = FakeDataManager()
+        val (manager, _, _) = createManager(api = api, dataManager = dm)
+
+        val result = manager.stopTransaction(SESSION_ID)
+
+        assertTrue(result is TransactionResult.Error)
+        assertTrue((result as TransactionResult.Error).message.contains("Unknown error"))
+    }
+
     // =====================================================================
     // POLL RESULT
     // =====================================================================
@@ -375,6 +412,35 @@ internal class TransactionManagerTest {
         val api = FakeApiService()
         api.pollResponses = mutableListOf(
             NetworkResponse.NetworkError(IOException("timeout")),
+            netSuccess(makeResultResponse(ResultStatus.SUCCESS))
+        )
+        val (manager, _, _) = createManager(api = api)
+
+        val result = manager.pollResult(SESSION_ID)
+
+        assertTrue(result is TransactionPollResult.Success)
+    }
+
+    @Test
+    fun `pollResult retries on unknown error then succeeds`() = runTest {
+        val api = FakeApiService()
+        api.pollResponses = mutableListOf(
+            NetworkResponse.UnknownError(RuntimeException("oops"), null),
+            netSuccess(makeResultResponse(ResultStatus.SUCCESS))
+        )
+        val (manager, _, _) = createManager(api = api)
+
+        val result = manager.pollResult(SESSION_ID)
+
+        assertTrue(result is TransactionPollResult.Success)
+    }
+
+    @Test
+    fun `pollResult still-in-progress status continues polling`() = runTest {
+        val api = FakeApiService()
+        // First response: success but status is neither SUCCESS nor FAILURE (still in progress)
+        api.pollResponses = mutableListOf(
+            netSuccess(makeResultResponse(ResultStatus.IN_PROGRESS)),
             netSuccess(makeResultResponse(ResultStatus.SUCCESS))
         )
         val (manager, _, _) = createManager(api = api)

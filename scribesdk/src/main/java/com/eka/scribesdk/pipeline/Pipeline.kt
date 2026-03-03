@@ -3,6 +3,7 @@ package com.eka.scribesdk.pipeline
 import android.content.Context
 import com.eka.scribesdk.analyser.AudioAnalyser
 import com.eka.scribesdk.analyser.AudioQuality
+import com.eka.scribesdk.analyser.ModelDownloader
 import com.eka.scribesdk.analyser.NoOpAudioAnalyser
 import com.eka.scribesdk.analyser.SquimAudioAnalyser
 import com.eka.scribesdk.analyser.SquimModelProvider
@@ -332,9 +333,9 @@ internal class Pipeline(
     }
 
     private fun AudioQuality.toMetrics() = AudioQualityMetrics(
-        snr = snr,
-        clipping = clipping,
-        loudness = loudness,
+        stoi = stoi,
+        pesq = pesq,
+        siSDR = siSDR,
         overallScore = overallScore
     )
 
@@ -347,7 +348,7 @@ internal class Pipeline(
         private val dataManager: DataManager,
         private val encoder: AudioEncoder,
         private val chunkUploader: ChunkUploader,
-        private val squimModelPath: String?,
+        private val modelDownloader: ModelDownloader,
         private val outputDir: File,
         private val timeProvider: TimeProvider,
         private val logger: Logger
@@ -376,14 +377,25 @@ internal class Pipeline(
             val frameProducer = FrameProducer(preBuffer, frameChannel, logger)
 
             val analyser: AudioAnalyser =
-                if (pipelineConfig.enableAnalyser && squimModelPath != null) {
-                    val modelProvider = SquimModelProvider(squimModelPath, logger)
-                    modelProvider.load()
-                    SquimAudioAnalyser(
-                        modelProvider = modelProvider,
-                        scope = scope,
-                        logger = logger
-                    )
+                if (pipelineConfig.enableAnalyser) {
+                    val modelPath = modelDownloader.getModelPath()
+                    if (modelPath != null) {
+                        try {
+                            val modelProvider = SquimModelProvider(modelPath, logger)
+                            modelProvider.load()
+                            SquimAudioAnalyser(
+                                modelProvider = modelProvider,
+                                scope = scope,
+                                logger = logger
+                            )
+                        } catch (e: Exception) {
+                            logger.warn(TAG, "Failed to load SQUIM model, using NoOp", e)
+                            NoOpAudioAnalyser()
+                        }
+                    } else {
+                        logger.info(TAG, "SQUIM model not yet downloaded, using NoOp analyser")
+                        NoOpAudioAnalyser()
+                    }
                 } else {
                     NoOpAudioAnalyser()
                 }

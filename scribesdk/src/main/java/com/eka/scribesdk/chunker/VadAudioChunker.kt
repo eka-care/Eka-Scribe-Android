@@ -160,10 +160,8 @@ class VadAudioChunker(
 
     private fun calculateAmplitude(pcm: ShortArray): Float {
         if (pcm.isEmpty()) return 0f
-        var sum = 0L
-        for (sample in pcm) {
-            sum += sample * sample
-        }
-        return kotlin.math.sqrt(sum.toDouble() / pcm.size).toFloat()
+        val maxAmplitude = 32767f
+        val maxValue = pcm.maxOfOrNull { kotlin.math.abs(it.toInt()) } ?: 0
+        return (maxValue / maxAmplitude).coerceIn(0f, 1f)
     }
 }

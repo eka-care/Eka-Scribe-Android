@@ -3,6 +3,8 @@ package com.eka.scribesdk.api
 import android.content.Context
 import com.eka.networking.client.EkaNetwork
 import com.eka.scribesdk.BuildConfig
+import com.eka.scribesdk.analyser.AnalyserState
+import com.eka.scribesdk.analyser.ModelDownloader
 import com.eka.scribesdk.api.models.AudioQualityMetrics
 import com.eka.scribesdk.api.models.ScribeHistoryItem
 import com.eka.scribesdk.api.models.ScribeSession
@@ -43,8 +45,13 @@ import com.eka.scribesdk.session.TransactionManager
 import com.haroldadmin.cnradapter.NetworkResponse
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -74,9 +81,14 @@ object EkaScribe {
     private var transactionManager: TransactionManager? = null
     private var apiService: ScribeApiService? = null
     private var dataManager: DataManager? = null
+    private var modelDownloader: ModelDownloader? = null
     private var config: EkaScribeConfig? = null
     private var logger: Logger = DefaultLogger()
     private var isInitialized = false
+    private var sdkScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    private val _analyserStateFlow = MutableStateFlow<AnalyserState>(AnalyserState.Idle)
+    val analyserStateFlow: StateFlow<AnalyserState> = _analyserStateFlow.asStateFlow()
 
     /**
      * Initialize the SDK. Must be called before any other method.
@@ -149,7 +161,18 @@ object EkaScribe {
         val outputDir = File(context.filesDir, OUTPUT_DIR)
         if (!outputDir.exists()) outputDir.mkdirs()
 
-        val squimModelPath: String? = findSquimModel(context)
+        val downloader =
+            ModelDownloader(filesDir = context.applicationContext.filesDir, logger = logger)
+        modelDownloader = downloader
+
+        if (!config.enableAnalyser) {
+            _analyserStateFlow.value = AnalyserState.Disabled
+        } else if (downloader.isModelDownloaded()) {
+            _analyserStateFlow.value =
+                AnalyserState.Ready(downloader.getLocalModelFile().absolutePath)
+        } else {
+            _analyserStateFlow.value = AnalyserState.Idle
+        }
 
         val pipelineFactory = Pipeline.Factory(
             context = context.applicationContext,
@@ -157,7 +180,7 @@ object EkaScribe {
             dataManager = dm,
             encoder = encoder,
             chunkUploader = chunkUploader,
-            squimModelPath = squimModelPath,
+            modelDownloader = downloader,
             outputDir = outputDir,
             timeProvider = timeProvider,
             logger = logger
@@ -182,6 +205,22 @@ object EkaScribe {
             logger = logger
         ).also {
             it.setCallback(callback)
+        }
+
+        // Deferred model download (non-blocking)
+        if (config.enableAnalyser) {
+            sdkScope.launch {
+                try {
+                    launch {
+                        downloader.stateFlow.collect { state ->
+                            _analyserStateFlow.value = state
+                        }
+                    }
+                    downloader.downloadModelIfNeeded()
+                } catch (e: Exception) {
+                    logger.warn(TAG, "Model download failed: ${e.message}", e)
+                }
+            }
         }
 
         isInitialized = true
@@ -582,7 +621,11 @@ object EkaScribe {
         transactionManager = null
         apiService = null
         dataManager = null
+        modelDownloader = null
         config = null
+        sdkScope.cancel()
+        sdkScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        _analyserStateFlow.value = AnalyserState.Idle
         isInitialized = false
         logger.info(TAG, "SDK destroyed")
     }
@@ -613,32 +656,4 @@ object EkaScribe {
         )
     }
 
-    private fun findSquimModel(context: Context): String? {
-        return try {
-            val assetFiles = context.assets.list("") ?: emptyArray()
-            val modelFile = assetFiles.firstOrNull {
-                it.contains(
-                    "squim",
-                    ignoreCase = true
-                ) && it.endsWith(".onnx")
-            }
-            if (modelFile != null) {
-                val outFile = File(context.filesDir, modelFile)
-                if (!outFile.exists()) {
-                    context.assets.open(modelFile).use { input ->
-                        outFile.outputStream().use { output ->
-                            input.copyTo(output)
-                        }
-                    }
-                }
-                outFile.absolutePath
-            } else {
-                logger.info(TAG, "No SQUIM model found in assets, analyser disabled")
-                null
-            }
-        } catch (e: Exception) {
-            logger.warn(TAG, "Failed to load SQUIM model", e)
-            null
-        }
-    }
 }

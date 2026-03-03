@@ -41,11 +41,11 @@ class NoOpAudioAnalyserTest {
     @Test
     fun `AudioQuality data class holds correct values`() {
         val quality =
-            AudioQuality(snr = 25.0f, clipping = 0.1f, loudness = -20.0f, overallScore = 0.85f)
-        assertEquals(25.0f, quality.snr, 0.001f)
-        assertEquals(0.1f, quality.clipping, 0.001f)
-        assertEquals(-20.0f, quality.loudness, 0.001f)
-        assertEquals(0.85f, quality.overallScore, 0.001f)
+            AudioQuality(stoi = 0.85f, pesq = 3.5f, siSDR = 15.0f, overallScore = 0.75f)
+        assertEquals(0.85f, quality.stoi, 0.001f)
+        assertEquals(3.5f, quality.pesq, 0.001f)
+        assertEquals(15.0f, quality.siSDR, 0.001f)
+        assertEquals(0.75f, quality.overallScore, 0.001f)
     }
 
     private fun assertEquals(expected: Float, actual: Float, delta: Float) {

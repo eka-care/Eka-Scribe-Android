@@ -29,6 +29,12 @@ enum class SessionEventName {
     // Audio
     AUDIO_FOCUS_CHANGED,
 
+    // Model download
+    MODEL_DOWNLOAD_STARTED,
+    MODEL_DOWNLOAD_COMPLETED,
+    MODEL_DOWNLOAD_FAILED,
+    MODEL_DOWNLOAD_CACHED,
+
     // Pipeline
     PIPELINE_STOPPED,
 

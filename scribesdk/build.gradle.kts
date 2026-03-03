@@ -93,6 +93,8 @@ tasks.register<JacocoReport>("jacocoTestReport") {
         "**/BuildConfig.*",
         "**/Manifest*.*",
         "**/*Test*.*",
+        // data models is not considered used in requests and responses
+        "**/data/remote/models/**",
         // Android-dependent classes (require device/emulator, not JVM-testable)
         "**/recorder/**",
         "**/encoder/**",

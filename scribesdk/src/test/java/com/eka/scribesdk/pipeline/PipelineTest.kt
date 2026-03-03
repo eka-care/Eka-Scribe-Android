@@ -27,6 +27,7 @@ import com.eka.scribesdk.recorder.FrameCallback
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -455,6 +456,10 @@ internal class PipelineTest {
         fun emitFrame(frame: AudioFrame) {
             frameCallback?.onFrame(frame)
         }
+
+        fun emitFocusChange(hasFocus: Boolean) {
+            focusCallback?.onFocusChanged(hasFocus)
+        }
     }
 
     internal class FakeAnalyser : AudioAnalyser {
@@ -622,5 +627,130 @@ internal class PipelineTest {
         override fun info(tag: String, message: String) {}
         override fun warn(tag: String, message: String, throwable: Throwable?) {}
         override fun error(tag: String, message: String, throwable: Throwable?) {}
+    }
+
+    // =====================================================================
+    // FULL AUDIO GENERATION TESTS
+    // =====================================================================
+
+    @Test
+    fun `stop returns FullAudioResult when frames exist`() = runTest {
+        val setup = createTestPipeline()
+        setup.pipeline.startCoroutines(this)
+
+        for (i in 0L until 5L) {
+            setup.preBuffer.write(makeFrame(i))
+        }
+        kotlinx.coroutines.delay(100)
+
+        val result = setup.pipeline.stop()
+
+        assertTrue("FullAudioResult should be non-null", result != null)
+        assertEquals(SESSION_ID, result!!.sessionId)
+        assertEquals(FOLDER_NAME, result.folderName)
+        assertEquals(BID, result.bid)
+        assertTrue(
+            "File path should contain full_audio",
+            result.filePath.contains("full_audio")
+        )
+
+        // Verify FULL_AUDIO_GENERATED event was emitted
+        val audioGenEvents = setup.events.filter {
+            it.name == SessionEventName.FULL_AUDIO_GENERATED
+        }
+        assertTrue(
+            "FULL_AUDIO_GENERATED event should be emitted",
+            audioGenEvents.isNotEmpty()
+        )
+    }
+
+    @Test
+    fun `stop returns null when no frames recorded`() = runTest {
+        val setup = createTestPipeline()
+        setup.pipeline.startCoroutines(this)
+
+        // Don't write any frames — stop immediately
+        kotlinx.coroutines.delay(50)
+        val result = setup.pipeline.stop()
+
+        assertTrue("FullAudioResult should be null when no frames", result == null)
+    }
+
+    @Test
+    fun `stop returns null and emits error event when encoder throws during full audio`() =
+        runTest {
+            val failEncoder = FakeEncoder(tempFolder.newFolder("fail_enc_output"))
+            // FakeChunker flush produces 1 chunk → persistence calls encode once (index 0)
+            // generateFullAudio calls encode second time (index 1) — fail here
+            failEncoder.failOnChunkIndex = 1
+
+            val setup = createTestPipeline(
+                encoder = failEncoder,
+                chunker = FakeChunker(chunkEveryN = Int.MAX_VALUE)
+            )
+            setup.pipeline.startCoroutines(this)
+
+            // Write frames so allFrames is non-empty
+            for (i in 0L until 3L) {
+                setup.preBuffer.write(makeFrame(i))
+            }
+            kotlinx.coroutines.delay(100)
+
+            val result = setup.pipeline.stop()
+
+            assertTrue(
+                "FullAudioResult should be null when encoder fails",
+                result == null
+            )
+
+            // Verify FULL_AUDIO_GENERATION_FAILED event
+            val failEvents = setup.events.filter {
+                it.name == SessionEventName.FULL_AUDIO_GENERATION_FAILED
+            }
+            assertTrue(
+                "FULL_AUDIO_GENERATION_FAILED event should be emitted",
+                failEvents.isNotEmpty()
+            )
+        }
+
+    @Test
+    fun `audioFocusFlow emits when recorder fires focus callback`() = runTest {
+        val setup = createTestPipeline()
+        setup.pipeline.start()
+
+        // Simulate focus loss
+        setup.recorder.emitFocusChange(false)
+
+        // The SharedFlow has replay=1, so we can read the last emitted value
+        val firstValue = setup.pipeline.audioFocusFlow.first()
+        assertEquals(false, firstValue)
+
+        // Simulate focus gain
+        setup.recorder.emitFocusChange(true)
+        val secondValue = setup.pipeline.audioFocusFlow.first()
+        assertEquals(true, secondValue)
+    }
+
+    @Test
+    fun `PipelineConfig has expected defaults`() {
+        val config = PipelineConfig()
+        assertEquals(true, config.enableAnalyser)
+        assertEquals(2000, config.preBufferCapacity)
+        assertEquals(640, config.frameChannelCapacity)
+        assertEquals(80, config.chunkChannelCapacity)
+    }
+
+    @Test
+    fun `PipelineConfig custom values are preserved`() {
+        val config = PipelineConfig(
+            enableAnalyser = true,
+            preBufferCapacity = 100,
+            frameChannelCapacity = 50,
+            chunkChannelCapacity = 10
+        )
+        assertEquals(true, config.enableAnalyser)
+        assertEquals(100, config.preBufferCapacity)
+        assertEquals(50, config.frameChannelCapacity)
+        assertEquals(10, config.chunkChannelCapacity)
     }
 }

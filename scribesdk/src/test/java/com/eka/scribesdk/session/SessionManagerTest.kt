@@ -13,8 +13,10 @@ import com.eka.scribesdk.data.local.db.entity.SessionEntity
 import com.eka.scribesdk.data.remote.upload.ChunkUploader
 import com.eka.scribesdk.data.remote.upload.UploadMetadata
 import com.eka.scribesdk.data.remote.upload.UploadResult
+import com.eka.scribesdk.pipeline.FullAudioResult
 import com.eka.scribesdk.pipeline.Pipeline
 import io.mockk.coEvery
+import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
@@ -232,6 +234,178 @@ internal class SessionManagerTest {
                 assertEquals(ErrorCode.INVALID_STATE_TRANSITION, e.code)
             }
         }
+    }
+
+    private fun createManagerWithSuccessInit(
+        tm: TransactionManager = mockk(relaxed = true),
+        pipeline: Pipeline = mockk(relaxed = true),
+        dm: DataManager = FakeDataManager(),
+        uploader: ChunkUploader = FakeChunkUploader()
+    ): SessionManager {
+        val pipelineFactory = mockk<Pipeline.Factory>(relaxed = true)
+
+        coEvery { tm.initTransaction(any(), any()) } returns TransactionResult.Success(
+            "folder",
+            "bid"
+        )
+        every { pipelineFactory.create(any(), any(), any(), any(), any()) } returns pipeline
+        every { pipeline.voiceActivityFlow } returns emptyFlow()
+        every { pipeline.audioQualityFlow } returns emptyFlow()
+        every { pipeline.audioFocusFlow } returns emptyFlow()
+
+        return SessionManager(
+            dataManager = dm,
+            pipelineFactory = pipelineFactory,
+            transactionManager = tm,
+            chunkUploader = uploader,
+            timeProvider = FakeTimeProvider(),
+            logger = NoOpLogger()
+        )
+    }
+
+    @Test
+    fun `stop transitions to ERROR when pipeline stop throws exception`() {
+        val pipeline = mockk<Pipeline>(relaxed = true)
+        every { pipeline.voiceActivityFlow } returns emptyFlow()
+        every { pipeline.audioQualityFlow } returns emptyFlow()
+        every { pipeline.audioFocusFlow } returns emptyFlow()
+        coEvery { pipeline.stop() } throws RuntimeException("Pipeline crash")
+
+        val manager = createManagerWithSuccessInit(pipeline = pipeline)
+        manager.start()
+        Thread.sleep(200)
+
+        manager.stop()
+        Thread.sleep(200)
+
+        assertEquals(SessionState.ERROR, manager.currentState)
+    }
+
+    @Test
+    fun `stop transitions to ERROR when retryFailedUploads returns false`() {
+        val tm = mockk<TransactionManager>(relaxed = true)
+        coEvery { tm.initTransaction(any(), any()) } returns TransactionResult.Success(
+            "folder",
+            "bid"
+        )
+        coEvery { tm.retryFailedUploads(any()) } returns false // Simulate incomplete uploads
+
+        val manager = createManagerWithSuccessInit(tm = tm)
+        manager.start()
+        Thread.sleep(200)
+
+        manager.stop()
+        Thread.sleep(200)
+
+        // Should be in ERROR state and not proceed to stopTransaction
+        assertEquals(SessionState.ERROR, manager.currentState)
+        io.mockk.coVerify(exactly = 0) { tm.stopTransaction(any()) }
+    }
+
+    @Test
+    fun `stop transitions to ERROR when stopTransaction fails`() {
+        val tm = mockk<TransactionManager>(relaxed = true)
+        coEvery { tm.initTransaction(any(), any()) } returns TransactionResult.Success(
+            "folder",
+            "bid"
+        )
+        coEvery { tm.retryFailedUploads(any()) } returns true
+        coEvery { tm.stopTransaction(any()) } returns TransactionResult.Error("API fails")
+
+        val manager = createManagerWithSuccessInit(tm = tm)
+        manager.start()
+        Thread.sleep(200)
+
+        manager.stop()
+        Thread.sleep(200)
+
+        assertEquals(SessionState.ERROR, manager.currentState)
+    }
+
+    @Test
+    fun `stop transitions to ERROR when commitTransaction fails`() {
+        val tm = mockk<TransactionManager>(relaxed = true)
+        coEvery { tm.initTransaction(any(), any()) } returns TransactionResult.Success(
+            "folder",
+            "bid"
+        )
+        coEvery { tm.retryFailedUploads(any()) } returns true
+        coEvery { tm.stopTransaction(any()) } returns TransactionResult.Success()
+        coEvery { tm.commitTransaction(any()) } returns TransactionResult.Error("API fails")
+
+        val manager = createManagerWithSuccessInit(tm = tm)
+        manager.start()
+        Thread.sleep(200)
+
+        manager.stop()
+        Thread.sleep(200)
+
+        assertEquals(SessionState.ERROR, manager.currentState)
+    }
+
+    @Test
+    fun `stop transitions to COMPLETED when pollResult times out`() {
+        val tm = mockk<TransactionManager>(relaxed = true)
+        coEvery { tm.initTransaction(any(), any()) } returns TransactionResult.Success(
+            "folder",
+            "bid"
+        )
+        coEvery { tm.retryFailedUploads(any()) } returns true
+        coEvery { tm.stopTransaction(any()) } returns TransactionResult.Success()
+        coEvery { tm.commitTransaction(any()) } returns TransactionResult.Success()
+        coEvery { tm.pollResult(any()) } returns TransactionPollResult.Timeout
+
+        val manager = createManagerWithSuccessInit(tm = tm)
+        manager.start()
+        Thread.sleep(200)
+
+        manager.stop()
+        Thread.sleep(200)
+
+        assertEquals(SessionState.COMPLETED, manager.currentState)
+    }
+
+    @Test
+    fun `deferred full audio upload triggers when pipeline stop returns FullAudioResult`() {
+        val pipeline = mockk<Pipeline>(relaxed = true)
+        every { pipeline.voiceActivityFlow } returns emptyFlow()
+        every { pipeline.audioQualityFlow } returns emptyFlow()
+        every { pipeline.audioFocusFlow } returns emptyFlow()
+
+        val tempFile = File.createTempFile("test_audio", ".m4a")
+        tempFile.deleteOnExit()
+
+        coEvery { pipeline.stop() } returns FullAudioResult(
+            sessionId = "a-123",
+            folderName = "folder",
+            bid = "bid",
+            filePath = tempFile.absolutePath
+        )
+
+        val uploader = mockk<ChunkUploader>(relaxed = true)
+        coEvery { uploader.upload(any(), any()) } returns UploadResult.Success("s3://ok")
+
+        val tm = mockk<TransactionManager>(relaxed = true)
+        coEvery { tm.initTransaction(any(), any()) } returns TransactionResult.Success(
+            "folder",
+            "bid"
+        )
+        coEvery { tm.retryFailedUploads(any()) } returns true
+        coEvery { tm.stopTransaction(any()) } returns TransactionResult.Success()
+        coEvery { tm.commitTransaction(any()) } returns TransactionResult.Success()
+        coEvery { tm.pollResult(any()) } returns TransactionPollResult.Success(
+            com.eka.scribesdk.data.remote.models.responses.ScribeResultResponse(null)
+        )
+
+        val manager =
+            createManagerWithSuccessInit(tm = tm, pipeline = pipeline, uploader = uploader)
+        manager.start()
+        Thread.sleep(200)
+
+        manager.stop()
+        Thread.sleep(500) // Wait for deferred upload coroutine
+
+        io.mockk.coVerify(exactly = 1) { uploader.upload(any(), any()) }
     }
 
     // =====================================================================
