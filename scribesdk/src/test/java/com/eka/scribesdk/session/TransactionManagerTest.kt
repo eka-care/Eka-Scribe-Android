@@ -521,7 +521,7 @@ internal class TransactionManagerTest {
     }
 
     @Test
-    fun `retryFailedUploads resets and retries exhausted chunks`() = runTest {
+    fun `retryFailedUploads retries chunks that were previously exhausted`() = runTest {
         val chunkFile = tempFolder.newFile("exhausted_chunk.m4a")
         val dm = FakeDataManager()
         dm.failedChunksList = emptyList()
@@ -536,14 +536,14 @@ internal class TransactionManagerTest {
         val result = manager.retryFailedUploads(SESSION_ID)
 
         assertTrue(result)
-        assertTrue(dm.resetRetryCountIds.contains("c-exhaust"))
         assertTrue(dm.inProgressChunks.contains("c-exhaust"))
         assertTrue(dm.uploadedChunkIds.contains("c-exhaust"))
         assertEquals(1, uploader.uploadCount)
     }
 
     @Test
-    fun `retryFailedUploads returns true when exhausted chunks are recovered`() = runTest {
+    fun `retryFailedUploads returns true when previously exhausted chunks are recovered`() =
+        runTest {
         val chunkFile1 = tempFolder.newFile("failed.m4a")
         val chunkFile2 = tempFolder.newFile("exhausted.m4a")
         val dm = FakeDataManager()
@@ -561,7 +561,6 @@ internal class TransactionManagerTest {
         val result = manager.retryFailedUploads(SESSION_ID)
 
         assertTrue(result)
-        assertTrue(dm.resetRetryCountIds.contains("c-exhaust2"))
         assertTrue(dm.uploadedChunkIds.contains("c-fail"))
         assertTrue(dm.uploadedChunkIds.contains("c-exhaust2"))
         assertEquals(2, uploader.uploadCount)
@@ -587,7 +586,11 @@ internal class TransactionManagerTest {
     fun `checkAndProgress INIT stage calls initTransaction`() = runTest {
         val api = FakeApiService()
         api.initResponse = netSuccess(initOk("bid-init"))
+        api.stopResponse = netSuccess(stopOk())
+        api.commitResponse = netSuccess(stopOk())
+        api.pollResponses = mutableListOf(netSuccess(makeResultResponse(ResultStatus.SUCCESS)))
         val dm = FakeDataManager()
+        dm.allChunksUploaded = true
         dm.sessionEntity = makeSessionEntity(uploadStage = TransactionStage.INIT.name)
         val (manager, _, _) = createManager(api = api, dataManager = dm)
 
@@ -595,13 +598,19 @@ internal class TransactionManagerTest {
 
         assertTrue(result is TransactionResult.Success)
         assertTrue(api.initCalled)
+        assertTrue(api.stopCalled)
+        assertTrue(api.commitCalled)
     }
 
     @Test
     fun `checkAndProgress INIT stage without config tries deserialization`() = runTest {
         val api = FakeApiService()
         api.initResponse = netSuccess(initOk("bid-r"))
+        api.stopResponse = netSuccess(stopOk())
+        api.commitResponse = netSuccess(stopOk())
+        api.pollResponses = mutableListOf(netSuccess(makeResultResponse(ResultStatus.SUCCESS)))
         val dm = FakeDataManager()
+        dm.allChunksUploaded = true
         val metadataJson = """{"input_language":["en-IN"],"mode":"dictation","model_type":"pro"}"""
         dm.sessionEntity = makeSessionEntity(
             uploadStage = TransactionStage.INIT.name,
@@ -633,6 +642,8 @@ internal class TransactionManagerTest {
     fun `checkAndProgress STOP stage retries uploads then calls stop`() = runTest {
         val api = FakeApiService()
         api.stopResponse = netSuccess(stopOk())
+        api.commitResponse = netSuccess(stopOk())
+        api.pollResponses = mutableListOf(netSuccess(makeResultResponse(ResultStatus.SUCCESS)))
         val dm = FakeDataManager()
         dm.sessionEntity = makeSessionEntity(uploadStage = TransactionStage.STOP.name)
         dm.failedChunksList = emptyList()
@@ -643,6 +654,7 @@ internal class TransactionManagerTest {
 
         assertTrue(result is TransactionResult.Success)
         assertTrue(api.stopCalled)
+        assertTrue(api.commitCalled)
     }
 
     @Test
@@ -663,6 +675,8 @@ internal class TransactionManagerTest {
     fun `checkAndProgress STOP stage not all uploaded with force proceeds`() = runTest {
         val api = FakeApiService()
         api.stopResponse = netSuccess(stopOk())
+        api.commitResponse = netSuccess(stopOk())
+        api.pollResponses = mutableListOf(netSuccess(makeResultResponse(ResultStatus.SUCCESS)))
         val dm = FakeDataManager()
         dm.sessionEntity = makeSessionEntity(uploadStage = TransactionStage.STOP.name)
         dm.failedChunksList = emptyList()
@@ -673,12 +687,14 @@ internal class TransactionManagerTest {
 
         assertTrue(result is TransactionResult.Success)
         assertTrue(api.stopCalled)
+        assertTrue(api.commitCalled)
     }
 
     @Test
     fun `checkAndProgress COMMIT stage calls commitTransaction`() = runTest {
         val api = FakeApiService()
         api.commitResponse = netSuccess(stopOk())
+        api.pollResponses = mutableListOf(netSuccess(makeResultResponse(ResultStatus.SUCCESS)))
         val dm = FakeDataManager()
         dm.sessionEntity = makeSessionEntity(uploadStage = TransactionStage.COMMIT.name)
         val (manager, _, _) = createManager(api = api, dataManager = dm)
@@ -687,6 +703,7 @@ internal class TransactionManagerTest {
 
         assertTrue(result is TransactionResult.Success)
         assertTrue(api.commitCalled)
+        assertEquals(1, api.pollCallCount)
     }
 
     @Test
@@ -876,7 +893,7 @@ internal class TransactionManagerTest {
         override suspend fun getHistory(queries: Map<String, String>) = throw NotImplementedError()
     }
 
-    internal class FakeDataManager : DataManager {
+    internal inner class FakeDataManager : DataManager {
         val uploadStages = mutableMapOf<String, String>()
         val sessionMetadataMap = mutableMapOf<String, String>()
         val inProgressChunks = mutableSetOf<String>()
@@ -892,6 +909,9 @@ internal class TransactionManagerTest {
 
         override suspend fun updateUploadStage(sessionId: String, stage: String) {
             uploadStages[sessionId] = stage
+            // Automatically update the session entity so that checkAndProgress loop progresses
+            sessionEntity = sessionEntity?.copy(uploadStage = stage)
+                ?: makeSessionEntity(uploadStage = stage)
         }
 
         override suspend fun updateFolderAndBid(
@@ -938,7 +958,8 @@ internal class TransactionManagerTest {
         override fun sessionFlow(sessionId: String): Flow<SessionEntity?> = emptyFlow()
         override suspend fun deleteSession(sessionId: String) {}
         override suspend fun getSessionsByStage(stage: String) = emptyList<SessionEntity>()
-        override suspend fun getAllChunks(sessionId: String) = emptyList<AudioChunkEntity>()
+        override suspend fun getAllChunks(sessionId: String) =
+            uploadedChunksList + failedChunksList + retryExhaustedChunksList
         override suspend fun getAllSessions() = emptyList<SessionEntity>()
     }
 

@@ -13,7 +13,6 @@ import com.eka.scribesdk.common.error.ScribeException
 import com.eka.scribesdk.common.logging.Logger
 import com.eka.scribesdk.common.util.IdGenerator
 import com.eka.scribesdk.common.util.TimeProvider
-import com.eka.scribesdk.common.util.deleteFile
 import com.eka.scribesdk.data.DataManager
 import com.eka.scribesdk.data.local.db.entity.SessionEntity
 import com.eka.scribesdk.data.local.db.entity.TransactionStage
@@ -34,6 +33,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 
@@ -75,7 +75,7 @@ internal class SessionManager(
         this.callback = callback
     }
 
-    fun start(sessionConfig: SessionConfig = SessionConfig()): String {
+    suspend fun start(sessionConfig: SessionConfig = SessionConfig()): String {
         val currentState = _stateFlow.value
         if (currentState != SessionState.IDLE) {
             if (currentState == SessionState.COMPLETED || currentState == SessionState.ERROR) {
@@ -108,7 +108,7 @@ internal class SessionManager(
 
         val scope = sessionScope
 
-        scope.launch(Dispatchers.IO) {
+        withContext(Dispatchers.IO) {
             try {
                 val session = SessionEntity(
                     sessionId = sessionId,
@@ -132,7 +132,7 @@ internal class SessionManager(
                     callback?.onError(
                         ScribeError(ErrorCode.INIT_TRANSACTION_FAILED, initResult.message)
                     )
-                    return@launch
+                    return@withContext
                 }
 
                 // Extract folderName and bid from init response
@@ -460,7 +460,6 @@ internal class SessionManager(
 
                 when (val uploadResult = chunkUploader.upload(file, metadata)) {
                     is UploadResult.Success -> {
-                        deleteFile(file = file, logger = logger)
                         logger.info(TAG, "Full audio uploaded & cleaned: ${result.sessionId}")
                         emitter?.emit(
                             SessionEventName.FULL_AUDIO_UPLOADED, EventType.SUCCESS,

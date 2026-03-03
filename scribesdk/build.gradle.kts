@@ -100,6 +100,8 @@ tasks.register<JacocoReport>("jacocoTestReport") {
         "**/encoder/**",
         "**/analyser/**",
         "**/data/remote/upload/S3ChunkUploader*",
+        "**/data/remote/S3CredentialProvider*",
+        "**/data/remote/S3Credentials*",
         "**/data/remote/ScribeApiClient*",
         "**/data/local/db/ScribeDatabase*",
         "**/data/local/db/ScribeDao*",
@@ -147,6 +149,7 @@ afterEvaluate {
     }
     tasks.named("publishReleasePublicationToMavenLocal") {
         dependsOn(tasks.named("bundleReleaseAar"))
+        dependsOn(tasks.named("testReleaseUnitTest"))
     }
 }
 

@@ -154,7 +154,7 @@ internal class ScribeSessionIntegrationTest {
         fakeDm.allChunksUploaded = true
 
         val manager = createSessionManager()
-        val sessionId = manager.start()
+        val sessionId = kotlinx.coroutines.runBlocking { manager.start() }
         assertNotNull(sessionId)
 
         waitFor(2000) { manager.currentState == SessionState.RECORDING }
@@ -189,7 +189,7 @@ internal class ScribeSessionIntegrationTest {
         fakeApi.initResponse = NetworkResponse.NetworkError(IOException("Connection refused"))
 
         val manager = createSessionManager()
-        val sessionId = manager.start()
+        val sessionId = kotlinx.coroutines.runBlocking { manager.start() }
         assertNotNull(sessionId)
 
         waitFor(2000) { manager.currentState == SessionState.ERROR }
@@ -227,7 +227,7 @@ internal class ScribeSessionIntegrationTest {
         fakeUploader.result = UploadResult.Success("s3://ok")
 
         val manager = createSessionManager()
-        manager.start()
+        kotlinx.coroutines.runBlocking { manager.start() }
 
         waitFor(2000) { manager.currentState == SessionState.RECORDING }
         manager.stop()
@@ -300,7 +300,7 @@ internal class ScribeSessionIntegrationTest {
         fakeDm.allChunksUploaded = true
 
         val manager = createSessionManager()
-        val sessionId = manager.start()
+        val sessionId = kotlinx.coroutines.runBlocking { manager.start() }
 
         waitFor(2000) { manager.currentState == SessionState.RECORDING }
         assertEquals(SessionState.RECORDING, manager.currentState)
@@ -342,7 +342,7 @@ internal class ScribeSessionIntegrationTest {
         fakeDm.allChunksUploaded = true
 
         val manager = createSessionManager()
-        manager.start()
+        kotlinx.coroutines.runBlocking { manager.start() }
 
         waitFor(2000) { manager.currentState == SessionState.RECORDING }
         manager.stop()
@@ -374,7 +374,7 @@ internal class ScribeSessionIntegrationTest {
         fakeDm.allChunksUploaded = true
 
         val manager = createSessionManager()
-        manager.start()
+        kotlinx.coroutines.runBlocking { manager.start() }
 
         waitFor(2000) { manager.currentState == SessionState.RECORDING }
         manager.stop()
@@ -406,7 +406,7 @@ internal class ScribeSessionIntegrationTest {
         fakeDm.allChunksUploaded = true
 
         val manager = createSessionManager()
-        val sessionId = manager.start()
+        val sessionId = kotlinx.coroutines.runBlocking { manager.start() }
 
         waitFor(2000) { manager.currentState == SessionState.RECORDING }
         assertEquals(SessionState.RECORDING, manager.currentState)
@@ -556,6 +556,9 @@ internal class ScribeSessionIntegrationTest {
         override suspend fun deleteSession(sessionId: String) {}
         override suspend fun updateUploadStage(sessionId: String, stage: String) {
             uploadStages[sessionId] = stage
+            sessionEntity = sessionEntity?.copy(uploadStage = stage)
+            sessions[sessionId] = sessions[sessionId]?.copy(uploadStage = stage)
+                ?: SessionEntity(sessionId, 0L, 0L, "RECORDING", uploadStage = stage)
         }
 
         override suspend fun updateSessionMetadata(sessionId: String, metadata: String) {}
@@ -572,7 +575,8 @@ internal class ScribeSessionIntegrationTest {
         }
 
         override suspend fun getSessionsByStage(stage: String) = emptyList<SessionEntity>()
-        override suspend fun getAllChunks(sessionId: String) = emptyList<AudioChunkEntity>()
+        override suspend fun getAllChunks(sessionId: String) =
+            failedChunksList + retryExhaustedChunksList
         override suspend fun updateFolderAndBid(
             sessionId: String,
             folderName: String,

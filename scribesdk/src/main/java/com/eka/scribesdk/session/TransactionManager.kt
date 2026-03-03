@@ -3,10 +3,12 @@ package com.eka.scribesdk.session
 import com.eka.scribesdk.api.models.OutputTemplate
 import com.eka.scribesdk.api.models.PatientDetail
 import com.eka.scribesdk.api.models.SessionConfig
+import com.eka.scribesdk.api.models.SessionState
 import com.eka.scribesdk.common.logging.Logger
 import com.eka.scribesdk.common.util.deleteFile
 import com.eka.scribesdk.data.DataManager
 import com.eka.scribesdk.data.local.db.entity.TransactionStage
+import com.eka.scribesdk.data.local.db.entity.UploadState
 import com.eka.scribesdk.data.remote.models.requests.ChunkData
 import com.eka.scribesdk.data.remote.models.requests.InitTransactionRequest
 import com.eka.scribesdk.data.remote.models.requests.OutputFormatTemplate
@@ -268,30 +270,16 @@ internal class TransactionManager(
      * Returns true if all chunks are now uploaded.
      */
     suspend fun retryFailedUploads(sessionId: String): Boolean {
-        val failedChunks = dataManager.getFailedChunks(sessionId, maxUploadRetries)
-        val exhaustedChunks = dataManager.getRetryExhaustedChunks(sessionId, maxUploadRetries)
+        val allChunks = dataManager.getAllChunks(sessionId = sessionId)
+        val allChunksToRetry = allChunks.filterNot { it.uploadState == UploadState.SUCCESS.name }
 
-        if (failedChunks.isEmpty() && exhaustedChunks.isEmpty()) {
+        if (allChunksToRetry.isEmpty()) {
             return dataManager.areAllChunksUploaded(sessionId)
         }
 
         val session = dataManager.getSession(sessionId)
         val folderName = session?.folderName ?: ""
         val bid = session?.bid ?: ""
-
-        // Reset exhausted chunks so they become retryable again
-        if (exhaustedChunks.isNotEmpty()) {
-            logger.info(
-                TAG,
-                "Resetting ${exhaustedChunks.size} retry-exhausted chunks for session: $sessionId"
-            )
-            for (chunk in exhaustedChunks) {
-                dataManager.resetRetryCount(chunk.chunkId)
-            }
-        }
-
-        // Combine both lists for retry
-        val allChunksToRetry = failedChunks + exhaustedChunks
 
         logger.info(TAG, "Retrying ${allChunksToRetry.size} failed chunks for session: $sessionId")
 
@@ -349,7 +337,14 @@ internal class TransactionManager(
             TransactionStage.INIT -> {
                 val config = sessionConfig ?: deserializeSessionConfig(session.sessionMetadata)
                 ?: return TransactionResult.Error("No session config available for recovery")
-                initTransaction(sessionId, config)
+
+                val initResult = initTransaction(sessionId, config)
+                if (initResult is TransactionResult.Success) {
+                    // Automatically progress to next stage if successful
+                    checkAndProgress(sessionId, sessionConfig, force)
+                } else {
+                    initResult
+                }
             }
 
             TransactionStage.STOP -> {
@@ -369,16 +364,32 @@ internal class TransactionManager(
                         "Force-committing session with partial uploads: $sessionId"
                     )
                 }
-                stopTransaction(sessionId)
+                val stopResult = stopTransaction(sessionId)
+                if (stopResult is TransactionResult.Success) {
+                    // Continue to COMMIT
+                    checkAndProgress(sessionId, sessionConfig, force)
+                } else {
+                    stopResult
+                }
             }
 
             TransactionStage.COMMIT -> {
-                commitTransaction(sessionId)
+                val commitResult = commitTransaction(sessionId)
+                if (commitResult is TransactionResult.Success) {
+                    // Continue to ANALYZING
+                    checkAndProgress(sessionId, sessionConfig, force)
+                } else {
+                    commitResult
+                }
             }
 
             TransactionStage.ANALYZING -> {
                 when (val pollResult = pollResult(sessionId)) {
-                    is TransactionPollResult.Success -> TransactionResult.Success()
+                    is TransactionPollResult.Success -> {
+                        // Mark as completed explicitly to end flow
+                        dataManager.updateSessionState(sessionId, SessionState.COMPLETED.name)
+                        TransactionResult.Success()
+                    }
                     is TransactionPollResult.Failed -> TransactionResult.Error(pollResult.error)
                     is TransactionPollResult.Timeout -> TransactionResult.Error("Poll timeout")
                 }
@@ -424,7 +435,7 @@ internal class TransactionManager(
     }
 }
 
-internal sealed class TransactionResult {
+sealed class TransactionResult {
     data class Success(val folderName: String = "", val bid: String = "") : TransactionResult()
     data class Error(val message: String) : TransactionResult()
 }

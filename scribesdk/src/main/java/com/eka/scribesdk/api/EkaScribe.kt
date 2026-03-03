@@ -42,6 +42,7 @@ import com.eka.scribesdk.encoder.M4aAudioEncoder
 import com.eka.scribesdk.pipeline.Pipeline
 import com.eka.scribesdk.session.SessionManager
 import com.eka.scribesdk.session.TransactionManager
+import com.eka.scribesdk.session.TransactionResult
 import com.haroldadmin.cnradapter.NetworkResponse
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -235,7 +236,7 @@ object EkaScribe {
      * @return SessionInfo with the new session ID
      * @throws ScribeException if SDK is not initialized or session is already active
      */
-    fun startSession(sessionConfig: SessionConfig = SessionConfig()): SessionInfo {
+    suspend fun startSession(sessionConfig: SessionConfig = SessionConfig()): SessionInfo {
         val manager = requireInitialized()
         val sessionId = manager.start(sessionConfig)
         return SessionInfo(sessionId = sessionId, state = SessionState.STARTING)
@@ -311,15 +312,13 @@ object EkaScribe {
      * @param forceCommit If true, proceed with stop/commit even if some
      *                    chunks failed to upload. Default is false.
      */
-    fun retrySession(sessionId: String, forceCommit: Boolean = false) {
+    suspend fun retrySession(sessionId: String, forceCommit: Boolean = false): TransactionResult {
         val txnManager = transactionManager
             ?: throw ScribeException(
                 ErrorCode.INVALID_CONFIG,
                 "EkaScribe SDK not initialized. Call EkaScribe.init() first."
             )
-        CoroutineScope(Dispatchers.IO).launch {
-            txnManager.checkAndProgress(sessionId, force = forceCommit)
-        }
+        return txnManager.checkAndProgress(sessionId, force = forceCommit)
     }
 
     /**

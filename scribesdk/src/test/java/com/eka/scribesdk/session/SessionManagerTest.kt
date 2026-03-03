@@ -20,6 +20,7 @@ import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -72,7 +73,7 @@ internal class SessionManagerTest {
     // =====================================================================
 
     @Test
-    fun `start returns session ID and transitions to STARTING`() {
+    fun `start returns session ID and transitions to STARTING`() = runTest {
         val manager = createManager()
         val sessionId = manager.start()
 
@@ -87,7 +88,7 @@ internal class SessionManagerTest {
     }
 
     @Test
-    fun `start generates unique session IDs`() {
+    fun `start generates unique session IDs`() = runTest {
         val manager = createManager()
         val id1 = manager.start()
         // Let async settle to ERROR so we can start again
@@ -100,7 +101,7 @@ internal class SessionManagerTest {
     }
 
     @Test
-    fun `start from RECORDING state throws`() {
+    fun `start from RECORDING state throws`() = runTest {
         val manager = createManager()
         manager.start()
         Thread.sleep(200)
@@ -117,7 +118,7 @@ internal class SessionManagerTest {
     }
 
     @Test
-    fun `start from ERROR state resets and starts new session`() {
+    fun `start from ERROR state resets and starts new session`() = runTest {
         val manager = createManager()
         manager.start()
         Thread.sleep(300) // Wait for async to fail → ERROR
@@ -131,7 +132,7 @@ internal class SessionManagerTest {
     }
 
     @Test
-    fun `start from PAUSED state throws`() {
+    fun `start from PAUSED state throws`() = runTest {
         val manager = createManager()
         manager.start()
         Thread.sleep(200)
@@ -163,7 +164,7 @@ internal class SessionManagerTest {
     }
 
     @Test
-    fun `pause from STARTING throws`() {
+    fun `pause from STARTING throws`() = runTest {
         val manager = createManager()
         manager.start()
         if (manager.currentState == SessionState.STARTING) {
@@ -192,7 +193,7 @@ internal class SessionManagerTest {
     }
 
     @Test
-    fun `resume from RECORDING throws`() {
+    fun `resume from RECORDING throws`() = runTest {
         val manager = createManager()
         manager.start()
         Thread.sleep(200)
@@ -223,7 +224,7 @@ internal class SessionManagerTest {
     }
 
     @Test
-    fun `stop from STARTING throws`() {
+    fun `stop from STARTING throws`() = runTest {
         val manager = createManager()
         manager.start()
         if (manager.currentState == SessionState.STARTING) {
@@ -264,7 +265,7 @@ internal class SessionManagerTest {
     }
 
     @Test
-    fun `stop transitions to ERROR when pipeline stop throws exception`() {
+    fun `stop transitions to ERROR when pipeline stop throws exception`() = runTest {
         val pipeline = mockk<Pipeline>(relaxed = true)
         every { pipeline.voiceActivityFlow } returns emptyFlow()
         every { pipeline.audioQualityFlow } returns emptyFlow()
@@ -282,7 +283,7 @@ internal class SessionManagerTest {
     }
 
     @Test
-    fun `stop transitions to ERROR when retryFailedUploads returns false`() {
+    fun `stop transitions to ERROR when retryFailedUploads returns false`() = runTest {
         val tm = mockk<TransactionManager>(relaxed = true)
         coEvery { tm.initTransaction(any(), any()) } returns TransactionResult.Success(
             "folder",
@@ -303,7 +304,7 @@ internal class SessionManagerTest {
     }
 
     @Test
-    fun `stop transitions to ERROR when stopTransaction fails`() {
+    fun `stop transitions to ERROR when stopTransaction fails`() = runTest {
         val tm = mockk<TransactionManager>(relaxed = true)
         coEvery { tm.initTransaction(any(), any()) } returns TransactionResult.Success(
             "folder",
@@ -323,7 +324,7 @@ internal class SessionManagerTest {
     }
 
     @Test
-    fun `stop transitions to ERROR when commitTransaction fails`() {
+    fun `stop transitions to ERROR when commitTransaction fails`() = runTest {
         val tm = mockk<TransactionManager>(relaxed = true)
         coEvery { tm.initTransaction(any(), any()) } returns TransactionResult.Success(
             "folder",
@@ -344,7 +345,7 @@ internal class SessionManagerTest {
     }
 
     @Test
-    fun `stop transitions to COMPLETED when pollResult times out`() {
+    fun `stop transitions to COMPLETED when pollResult times out`() = runTest {
         val tm = mockk<TransactionManager>(relaxed = true)
         coEvery { tm.initTransaction(any(), any()) } returns TransactionResult.Success(
             "folder",
@@ -366,7 +367,8 @@ internal class SessionManagerTest {
     }
 
     @Test
-    fun `deferred full audio upload triggers when pipeline stop returns FullAudioResult`() {
+    fun `deferred full audio upload triggers when pipeline stop returns FullAudioResult`() =
+        runTest {
         val pipeline = mockk<Pipeline>(relaxed = true)
         every { pipeline.voiceActivityFlow } returns emptyFlow()
         every { pipeline.audioQualityFlow } returns emptyFlow()
@@ -420,7 +422,7 @@ internal class SessionManagerTest {
     }
 
     @Test
-    fun `destroy after start resets to IDLE`() {
+    fun `destroy after start resets to IDLE`() = runTest {
         val manager = createManager()
         manager.start()
         Thread.sleep(50)
