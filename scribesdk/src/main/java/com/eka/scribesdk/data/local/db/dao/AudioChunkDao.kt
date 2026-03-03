@@ -41,4 +41,10 @@ internal interface AudioChunkDao {
 
     @Query("SELECT COUNT(*) FROM scribe_audio_chunk_table WHERE session_id = :sessionId AND upload_state != 'SUCCESS'")
     suspend fun getNotUploadedCount(sessionId: String): Int
+
+    @Query("SELECT * FROM scribe_audio_chunk_table WHERE session_id = :sessionId AND upload_state = 'FAILED' AND retry_count >= :maxRetries ORDER BY chunk_index ASC")
+    suspend fun getRetryExhaustedChunks(sessionId: String, maxRetries: Int): List<AudioChunkEntity>
+
+    @Query("UPDATE scribe_audio_chunk_table SET retry_count = 0, upload_state = 'FAILED' WHERE chunk_id = :chunkId")
+    suspend fun resetRetryCount(chunkId: String)
 }

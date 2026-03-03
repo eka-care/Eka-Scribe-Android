@@ -118,4 +118,16 @@ internal class DefaultDataManager(
     override suspend fun getAllSessions(): List<SessionEntity> {
         return sessionDao.getAll()
     }
+
+    override suspend fun getRetryExhaustedChunks(
+        sessionId: String,
+        maxRetries: Int
+    ): List<AudioChunkEntity> {
+        return chunkDao.getRetryExhaustedChunks(sessionId, maxRetries)
+    }
+
+    override suspend fun resetRetryCount(chunkId: String) {
+        chunkDao.resetRetryCount(chunkId)
+        logger.debug(TAG, "Chunk retry count reset: $chunkId")
+    }
 }

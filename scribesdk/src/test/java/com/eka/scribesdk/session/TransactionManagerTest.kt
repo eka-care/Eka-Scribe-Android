@@ -454,6 +454,53 @@ internal class TransactionManagerTest {
         assertEquals(0, uploader.uploadCount)
     }
 
+    @Test
+    fun `retryFailedUploads resets and retries exhausted chunks`() = runTest {
+        val chunkFile = tempFolder.newFile("exhausted_chunk.m4a")
+        val dm = FakeDataManager()
+        dm.failedChunksList = emptyList()
+        dm.retryExhaustedChunksList = listOf(
+            makeChunkEntity("c-exhaust", "1.m4a", filePath = chunkFile.absolutePath)
+        )
+        dm.sessionEntity = makeSessionEntity(folderName = "260302", bid = "bid-1")
+        dm.allChunksUploaded = true
+        val uploader = FakeChunkUploader(UploadResult.Success("s3://ok"))
+        val (manager, _, _) = createManager(dataManager = dm, uploader = uploader)
+
+        val result = manager.retryFailedUploads(SESSION_ID)
+
+        assertTrue(result)
+        assertTrue(dm.resetRetryCountIds.contains("c-exhaust"))
+        assertTrue(dm.inProgressChunks.contains("c-exhaust"))
+        assertTrue(dm.uploadedChunkIds.contains("c-exhaust"))
+        assertEquals(1, uploader.uploadCount)
+    }
+
+    @Test
+    fun `retryFailedUploads returns true when exhausted chunks are recovered`() = runTest {
+        val chunkFile1 = tempFolder.newFile("failed.m4a")
+        val chunkFile2 = tempFolder.newFile("exhausted.m4a")
+        val dm = FakeDataManager()
+        dm.failedChunksList = listOf(
+            makeChunkEntity("c-fail", "1.m4a", filePath = chunkFile1.absolutePath)
+        )
+        dm.retryExhaustedChunksList = listOf(
+            makeChunkEntity("c-exhaust2", "2.m4a", filePath = chunkFile2.absolutePath)
+        )
+        dm.sessionEntity = makeSessionEntity(folderName = "260302", bid = "bid-1")
+        dm.allChunksUploaded = true
+        val uploader = FakeChunkUploader(UploadResult.Success("s3://ok"))
+        val (manager, _, _) = createManager(dataManager = dm, uploader = uploader)
+
+        val result = manager.retryFailedUploads(SESSION_ID)
+
+        assertTrue(result)
+        assertTrue(dm.resetRetryCountIds.contains("c-exhaust2"))
+        assertTrue(dm.uploadedChunkIds.contains("c-fail"))
+        assertTrue(dm.uploadedChunkIds.contains("c-exhaust2"))
+        assertEquals(2, uploader.uploadCount)
+    }
+
     // =====================================================================
     // CHECK AND PROGRESS (STATE MACHINE)
     // =====================================================================
@@ -773,6 +820,8 @@ internal class TransactionManagerTest {
         var sessionEntity: SessionEntity? = null
         var uploadedChunksList: List<AudioChunkEntity> = emptyList()
         var failedChunksList: List<AudioChunkEntity> = emptyList()
+        var retryExhaustedChunksList: List<AudioChunkEntity> = emptyList()
+        val resetRetryCountIds = mutableSetOf<String>()
         var allChunksUploaded = false
 
         override suspend fun updateUploadStage(sessionId: String, stage: String) {
@@ -795,6 +844,12 @@ internal class TransactionManagerTest {
         override suspend fun getUploadedChunks(sessionId: String) = uploadedChunksList
         override suspend fun getFailedChunks(sessionId: String, maxRetries: Int) = failedChunksList
         override suspend fun areAllChunksUploaded(sessionId: String) = allChunksUploaded
+        override suspend fun getRetryExhaustedChunks(sessionId: String, maxRetries: Int) =
+            retryExhaustedChunksList
+
+        override suspend fun resetRetryCount(chunkId: String) {
+            resetRetryCountIds.add(chunkId)
+        }
         override suspend fun markInProgress(chunkId: String) {
             inProgressChunks.add(chunkId)
         }

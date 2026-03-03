@@ -13,6 +13,7 @@ import com.eka.scribesdk.common.error.ScribeException
 import com.eka.scribesdk.common.logging.Logger
 import com.eka.scribesdk.common.util.IdGenerator
 import com.eka.scribesdk.common.util.TimeProvider
+import com.eka.scribesdk.common.util.deleteFile
 import com.eka.scribesdk.data.DataManager
 import com.eka.scribesdk.data.local.db.entity.SessionEntity
 import com.eka.scribesdk.data.local.db.entity.TransactionStage
@@ -266,7 +267,26 @@ internal class SessionManager(
                     mapOf("allUploaded" to allUploaded.toString())
                 )
 
-                // 4. Stop transaction API
+                // 4. Check uploads BEFORE calling stop API to avoid server-side inconsistency
+                if (!allUploaded) {
+                    logger.error(
+                        TAG,
+                        "Not all chunks uploaded for session: $sessionId"
+                    )
+                    emitter?.emit(
+                        SessionEventName.SESSION_FAILED, EventType.ERROR,
+                        "Not all chunks uploaded",
+                        mapOf("errorCode" to ErrorCode.RETRY_EXHAUSTED.name)
+                    )
+                    handleTransactionError(
+                        sessionId,
+                        ErrorCode.RETRY_EXHAUSTED,
+                        "Not all audio chunks were uploaded. Use retrySession() to retry or forceCommit to proceed."
+                    )
+                    return@launch
+                }
+
+                // 5. Stop transaction API (only after all chunks uploaded)
                 val stopResult = transactionManager.stopTransaction(sessionId)
                 if (stopResult is TransactionResult.Error) {
                     logger.error(TAG, "Stop transaction failed: ${stopResult.message}")
@@ -287,25 +307,7 @@ internal class SessionManager(
                     "Stop transaction succeeded"
                 )
 
-                if (!allUploaded) {
-                    logger.error(
-                        TAG,
-                        "Not all chunks uploaded for session: $sessionId"
-                    )
-                    emitter?.emit(
-                        SessionEventName.SESSION_FAILED, EventType.ERROR,
-                        "Not all chunks uploaded",
-                        mapOf("errorCode" to ErrorCode.RETRY_EXHAUSTED.name)
-                    )
-                    handleTransactionError(
-                        sessionId,
-                        ErrorCode.RETRY_EXHAUSTED,
-                        "Not all audio chunks were uploaded. Use retrySession() to retry or forceCommit to proceed."
-                    )
-                    return@launch
-                }
-
-                // 5. Commit transaction API
+                // 6. Commit transaction API
                 val commitResult = transactionManager.commitTransaction(sessionId)
                 if (commitResult is TransactionResult.Error) {
                     logger.error(TAG, "Commit transaction failed: ${commitResult.message}")
@@ -458,7 +460,7 @@ internal class SessionManager(
 
                 when (val uploadResult = chunkUploader.upload(file, metadata)) {
                     is UploadResult.Success -> {
-                        file.delete()
+                        deleteFile(file = file, logger = logger)
                         logger.info(TAG, "Full audio uploaded & cleaned: ${result.sessionId}")
                         emitter?.emit(
                             SessionEventName.FULL_AUDIO_UPLOADED, EventType.SUCCESS,

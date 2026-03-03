@@ -304,6 +304,10 @@ internal class SessionManagerTest {
         }
 
         override suspend fun getAllSessions() = emptyList<SessionEntity>()
+        override suspend fun getRetryExhaustedChunks(sessionId: String, maxRetries: Int) =
+            emptyList<AudioChunkEntity>()
+
+        override suspend fun resetRetryCount(chunkId: String) {}
     }
 
     private class FakeChunkUploader : ChunkUploader {

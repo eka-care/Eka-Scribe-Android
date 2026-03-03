@@ -18,6 +18,7 @@ import com.eka.scribesdk.chunker.SileroVadProvider
 import com.eka.scribesdk.chunker.VadAudioChunker
 import com.eka.scribesdk.common.logging.Logger
 import com.eka.scribesdk.common.util.TimeProvider
+import com.eka.scribesdk.common.util.deleteFile
 import com.eka.scribesdk.data.DataManager
 import com.eka.scribesdk.data.local.db.entity.AudioChunkEntity
 import com.eka.scribesdk.data.local.db.entity.UploadState
@@ -274,7 +275,7 @@ internal class Pipeline(
                     when (val result = chunkUploader.upload(file, metadata)) {
                         is UploadResult.Success -> {
                             dataManager.markUploaded(chunk.chunkId)
-                            file.delete()
+                            deleteFile(file = file, logger = logger)
                             logger.info(TAG, "Chunk uploaded & cleaned: ${chunk.chunkId}")
                             onEvent?.invoke(
                                 SessionEventName.CHUNK_UPLOADED, EventType.SUCCESS,

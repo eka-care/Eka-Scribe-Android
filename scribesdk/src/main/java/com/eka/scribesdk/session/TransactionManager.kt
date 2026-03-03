@@ -4,6 +4,7 @@ import com.eka.scribesdk.api.models.OutputTemplate
 import com.eka.scribesdk.api.models.PatientDetail
 import com.eka.scribesdk.api.models.SessionConfig
 import com.eka.scribesdk.common.logging.Logger
+import com.eka.scribesdk.common.util.deleteFile
 import com.eka.scribesdk.data.DataManager
 import com.eka.scribesdk.data.local.db.entity.TransactionStage
 import com.eka.scribesdk.data.remote.models.requests.ChunkData
@@ -262,12 +263,15 @@ internal class TransactionManager(
 
     /**
      * Retry uploading any failed chunks for the given session.
+     * Also resets and retries chunks whose retry count has been exhausted
+     * (e.g. from a previous network outage).
      * Returns true if all chunks are now uploaded.
      */
     suspend fun retryFailedUploads(sessionId: String): Boolean {
         val failedChunks = dataManager.getFailedChunks(sessionId, maxUploadRetries)
+        val exhaustedChunks = dataManager.getRetryExhaustedChunks(sessionId, maxUploadRetries)
 
-        if (failedChunks.isEmpty()) {
+        if (failedChunks.isEmpty() && exhaustedChunks.isEmpty()) {
             return dataManager.areAllChunksUploaded(sessionId)
         }
 
@@ -275,9 +279,23 @@ internal class TransactionManager(
         val folderName = session?.folderName ?: ""
         val bid = session?.bid ?: ""
 
-        logger.info(TAG, "Retrying ${failedChunks.size} failed chunks for session: $sessionId")
+        // Reset exhausted chunks so they become retryable again
+        if (exhaustedChunks.isNotEmpty()) {
+            logger.info(
+                TAG,
+                "Resetting ${exhaustedChunks.size} retry-exhausted chunks for session: $sessionId"
+            )
+            for (chunk in exhaustedChunks) {
+                dataManager.resetRetryCount(chunk.chunkId)
+            }
+        }
 
-        for (chunk in failedChunks) {
+        // Combine both lists for retry
+        val allChunksToRetry = failedChunks + exhaustedChunks
+
+        logger.info(TAG, "Retrying ${allChunksToRetry.size} failed chunks for session: $sessionId")
+
+        for (chunk in allChunksToRetry) {
             val file = File(chunk.filePath)
             if (!file.exists()) {
                 logger.warn(TAG, "Chunk file missing, skipping retry: ${chunk.chunkId}")
@@ -298,7 +316,7 @@ internal class TransactionManager(
             when (val result = chunkUploader.upload(file, metadata)) {
                 is UploadResult.Success -> {
                     dataManager.markUploaded(chunk.chunkId)
-                    file.delete()
+                    deleteFile(file = file, logger = logger)
                     logger.info(TAG, "Retry upload success & cleaned: ${chunk.chunkId}")
                 }
 
