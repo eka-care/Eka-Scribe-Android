@@ -34,6 +34,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import com.eka.networking.client.NetworkConfig
 import com.eka.networking.token.TokenStorage
 import com.eka.scribesdk.api.EkaScribe
@@ -141,11 +142,13 @@ class TestActivity : ComponentActivity() {
                 mode = "dictation",
                 modelType = "pro"
             )
-            val sessionInfo = EkaScribe.startSession(sessionConfig)
-            currentSessionId.value = sessionInfo.sessionId
-            currentState.value = sessionInfo.state
-            Log.d(TAG, "Session starting: ${sessionInfo.sessionId}")
-            showToast("Session starting")
+            lifecycleScope.launch {
+                val sessionInfo = EkaScribe.startSession(sessionConfig)
+                currentSessionId.value = sessionInfo.sessionId
+                currentState.value = sessionInfo.state
+                Log.d(TAG, "Session starting: ${sessionInfo.sessionId}")
+                showToast("Session starting")
+            }
 
             // Collect voice activity updates
             CoroutineScope(Dispatchers.Main).launch {

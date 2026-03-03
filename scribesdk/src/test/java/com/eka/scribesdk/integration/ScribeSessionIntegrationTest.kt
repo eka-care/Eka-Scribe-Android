@@ -1,6 +1,7 @@
 package com.eka.scribesdk.integration
 
 import com.eka.scribesdk.api.EkaScribeCallback
+import com.eka.scribesdk.api.EkaScribeConfig
 import com.eka.scribesdk.api.models.ScribeError
 import com.eka.scribesdk.api.models.SessionEvent
 import com.eka.scribesdk.api.models.SessionResult
@@ -100,6 +101,7 @@ internal class ScribeSessionIntegrationTest {
             logger = NoOpLogger()
         )
         val manager = SessionManager(
+            ekaScribeConfig = EkaScribeConfig(networkConfig = mockk(), fullAudioOutput = true),
             dataManager = fakeDm,
             pipelineFactory = mockPipelineFactory,
             transactionManager = tm,

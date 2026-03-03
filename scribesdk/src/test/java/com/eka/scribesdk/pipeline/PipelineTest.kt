@@ -753,4 +753,202 @@ internal class PipelineTest {
         assertEquals(50, config.frameChannelCapacity)
         assertEquals(10, config.chunkChannelCapacity)
     }
+
+    // =====================================================================
+    // BRANCH COVERAGE IMPROVEMENT TESTS
+    // =====================================================================
+
+    @Test
+    fun `pipeline works without onEvent callback (null onEvent)`() = runTest {
+        val outputDir = tempFolder.newFolder("no_event_output")
+        val fakeRecorder = FakeRecorder()
+        val preBuffer = PreBuffer(200)
+        val frameChannel = Channel<AudioFrame>(100)
+        val chunkChannel = Channel<AudioChunk>(20)
+        val frameProducer = FrameProducer(preBuffer, frameChannel, logger)
+        val fakeChunker = FakeChunker(chunkEveryN = 10)
+        val fakeEncoder = FakeEncoder(outputDir)
+
+        val pipeline = Pipeline(
+            recorder = fakeRecorder,
+            preBuffer = preBuffer,
+            frameProducer = frameProducer,
+            frameChannel = frameChannel,
+            analyser = FakeAnalyser(),
+            chunker = fakeChunker,
+            chunkChannel = chunkChannel,
+            dataManager = FakeDataManager(),
+            encoder = fakeEncoder,
+            chunkUploader = FakeChunkUploader(),
+            sessionId = SESSION_ID,
+            folderName = FOLDER_NAME,
+            bid = BID,
+            outputDir = outputDir,
+            timeProvider = FakeTimeProvider(),
+            logger = logger,
+            onEvent = null // Explicitly null
+        )
+
+        pipeline.startCoroutines(this)
+
+        for (i in 0L until 15L) {
+            preBuffer.write(makeFrame(i))
+        }
+        kotlinx.coroutines.delay(100)
+
+        // Stop should work fine even without event callback
+        val result = pipeline.stop()
+        assertTrue("Should still generate full audio", result != null)
+    }
+
+    @Test
+    fun `chunk with quality score is persisted correctly`() = runTest {
+        // Chunker that attaches quality to chunks
+        val chunkerWithQuality = object : AudioChunker {
+            val fedFrames = mutableListOf<AudioFrame>()
+            var flushed = false
+            private val accumulator = mutableListOf<AudioFrame>()
+            private var chunkIndex = 0
+            private var quality: AudioQuality? = AudioQuality(
+                stoi = 0.9f, pesq = 3.5f, siSDR = 15.0f, overallScore = 0.85f
+            )
+
+            override fun feed(frame: AudioFrame): AudioChunk? {
+                fedFrames.add(frame)
+                accumulator.add(frame)
+                return if (accumulator.size >= 10) {
+                    val frames = accumulator.toList()
+                    accumulator.clear()
+                    val chunk = AudioChunk(
+                        chunkId = "${SESSION_ID}_$chunkIndex",
+                        sessionId = SESSION_ID,
+                        index = chunkIndex,
+                        frames = frames,
+                        startTimeMs = 0,
+                        endTimeMs = frames.size.toLong() * FRAME_SIZE * 1000 / SAMPLE_RATE,
+                        quality = quality
+                    )
+                    chunkIndex++
+                    chunk
+                } else null
+            }
+
+            override fun flush(): AudioChunk? {
+                flushed = true
+                return if (accumulator.isNotEmpty()) {
+                    val frames = accumulator.toList()
+                    accumulator.clear()
+                    AudioChunk(
+                        chunkId = "${SESSION_ID}_$chunkIndex",
+                        sessionId = SESSION_ID,
+                        index = chunkIndex,
+                        frames = frames,
+                        startTimeMs = 0,
+                        endTimeMs = frames.size.toLong() * FRAME_SIZE * 1000 / SAMPLE_RATE,
+                        quality = quality
+                    )
+                } else null
+            }
+
+            override fun setLatestQuality(quality: AudioQuality?) {
+                this.quality = quality
+            }
+
+            override val activityFlow: Flow<com.eka.scribesdk.api.models.VoiceActivityData> =
+                emptyFlow()
+
+            override fun release() {}
+        }
+
+        val outputDir = tempFolder.newFolder("quality_output")
+        val dataManager = FakeDataManager()
+        val fakeRecorder = FakeRecorder()
+        val preBuffer = PreBuffer(200)
+        val frameChannel = Channel<AudioFrame>(100)
+        val chunkChannel = Channel<AudioChunk>(20)
+        val frameProducer = FrameProducer(preBuffer, frameChannel, logger)
+        val events = mutableListOf<TestEvent>()
+
+        val pipeline = Pipeline(
+            recorder = fakeRecorder,
+            preBuffer = preBuffer,
+            frameProducer = frameProducer,
+            frameChannel = frameChannel,
+            analyser = FakeAnalyser(),
+            chunker = chunkerWithQuality,
+            chunkChannel = chunkChannel,
+            dataManager = dataManager,
+            encoder = FakeEncoder(outputDir),
+            chunkUploader = FakeChunkUploader(),
+            sessionId = SESSION_ID,
+            folderName = FOLDER_NAME,
+            bid = BID,
+            outputDir = outputDir,
+            timeProvider = FakeTimeProvider(),
+            logger = logger,
+            onEvent = { name, type, msg, meta -> events.add(TestEvent(name, type, msg, meta)) }
+        )
+
+        pipeline.startCoroutines(this)
+
+        for (i in 0L until 15L) {
+            preBuffer.write(makeFrame(i))
+        }
+        kotlinx.coroutines.delay(100)
+        pipeline.stop()
+
+        // Verify quality score was persisted
+        val savedWithQuality = dataManager.savedChunks.filter { it.qualityScore != null }
+        assertTrue("At least one chunk should have quality score", savedWithQuality.isNotEmpty())
+        assertEquals(0.85f, savedWithQuality[0].qualityScore!!, 0.01f)
+    }
+
+    @Test
+    fun `upload failure does not delete audio file`() = runTest {
+        val uploader = FakeChunkUploader(
+            result = UploadResult.Failure("Storage full", isRetryable = false)
+        )
+        val chunker = FakeChunker(chunkEveryN = 10)
+        val setup = createTestPipeline(chunker = chunker, uploader = uploader)
+
+        simulateRecording(setup, 15, this)
+
+        // Non-retryable failure — files should still be preserved
+        for (chunk in setup.dataManager.savedChunks) {
+            val file = File(chunk.filePath)
+            assertTrue(
+                "Audio file should be preserved on failure: ${chunk.filePath}",
+                file.exists()
+            )
+        }
+    }
+
+    @Test
+    fun `PipelineConfig enableAnalyser false`() {
+        val config = PipelineConfig(enableAnalyser = false)
+        assertEquals(false, config.enableAnalyser)
+    }
+
+    @Test
+    fun `audioQualityFlow returns mapped flow`() = runTest {
+        val setup = createTestPipeline()
+        // audioQualityFlow should be non-null even with FakeAnalyser (emptyFlow)
+        assertTrue("audioQualityFlow should be non-null", setup.pipeline.audioQualityFlow != null)
+    }
+
+    @Test
+    fun `voiceActivityFlow returns chunker activity flow`() = runTest {
+        val setup = createTestPipeline()
+        assertTrue("voiceActivityFlow should be non-null", setup.pipeline.voiceActivityFlow != null)
+    }
+
+    @Test
+    fun `pause and resume delegate to recorder`() = runTest {
+        val setup = createTestPipeline()
+        setup.pipeline.start()
+
+        // These should not throw
+        setup.pipeline.pause()
+        setup.pipeline.resume()
+    }
 }

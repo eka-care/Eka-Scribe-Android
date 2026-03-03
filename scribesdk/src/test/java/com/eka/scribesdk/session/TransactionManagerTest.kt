@@ -1,5 +1,7 @@
 package com.eka.scribesdk.session
 
+import com.eka.scribesdk.api.models.OutputTemplate
+import com.eka.scribesdk.api.models.PatientDetail
 import com.eka.scribesdk.api.models.SessionConfig
 import com.eka.scribesdk.common.logging.Logger
 import com.eka.scribesdk.data.DataManager
@@ -761,6 +763,311 @@ internal class TransactionManagerTest {
         val (manager, _, _) = createManager(dataManager = dm)
 
         assertTrue(manager.checkAndProgress(SESSION_ID) is TransactionResult.Success)
+    }
+
+    // =====================================================================
+    // BRANCH COVERAGE IMPROVEMENT
+    // =====================================================================
+
+    @Test
+    fun `initTransaction with outputTemplates maps correctly`() = runTest {
+        val api = FakeApiService()
+        api.initResponse = netSuccess(initOk("bid-tpl"))
+        val dm = FakeDataManager()
+        val (manager, _, _) = createManager(api = api, dataManager = dm)
+
+        val config = SessionConfig(
+            languages = listOf("en-IN"),
+            mode = "dictation",
+            modelType = "pro",
+            outputTemplates = listOf(
+                OutputTemplate(
+                    templateId = "tpl-1",
+                    templateType = "soap",
+                    templateName = "SOAP Note"
+                )
+            )
+        )
+
+        val result = manager.initTransaction(SESSION_ID, config)
+
+        assertTrue(result is TransactionResult.Success)
+        assertTrue(dm.sessionMetadataMap.containsKey(SESSION_ID))
+    }
+
+    @Test
+    fun `initTransaction with patientDetails maps correctly`() = runTest {
+        val api = FakeApiService()
+        api.initResponse = netSuccess(initOk("bid-pt"))
+        val dm = FakeDataManager()
+        val (manager, _, _) = createManager(api = api, dataManager = dm)
+
+        val config = SessionConfig(
+            languages = listOf("en-IN"),
+            mode = "dictation",
+            modelType = "pro",
+            patientDetails = PatientDetail(
+                age = 45,
+                biologicalSex = "male",
+                name = "John Doe",
+                patientId = "P123",
+                visitId = "V456"
+            )
+        )
+
+        val result = manager.initTransaction(SESSION_ID, config)
+
+        assertTrue(result is TransactionResult.Success)
+        assertTrue(dm.sessionMetadataMap.containsKey(SESSION_ID))
+        assertTrue(dm.sessionMetadataMap[SESSION_ID]!!.contains("John Doe"))
+    }
+
+    @Test
+    fun `initTransaction server error with null body message falls back`() = runTest {
+        val api = FakeApiService()
+        val errBody = InitTransactionResponse(
+            bId = null, message = null, status = null, txnId = null, error = null
+        )
+        api.initResponse = netServerError(errBody, 500)
+        val (manager, _, _) = createManager(api = api)
+
+        val result = manager.initTransaction(SESSION_ID, defaultConfig())
+
+        assertTrue(result is TransactionResult.Error)
+        assertTrue((result as TransactionResult.Error).message == "Init failed")
+    }
+
+    @Test
+    fun `stopTransaction with no uploaded chunks sends empty lists`() = runTest {
+        val api = FakeApiService()
+        api.stopResponse = netSuccess(stopOk())
+        val dm = FakeDataManager()
+        dm.uploadedChunksList = emptyList()
+        val (manager, _, _) = createManager(api = api, dataManager = dm)
+
+        val result = manager.stopTransaction(SESSION_ID)
+
+        assertTrue(result is TransactionResult.Success)
+        assertEquals(0, api.lastStopRequest!!.audioFiles.size)
+    }
+
+    @Test
+    fun `stopTransaction server error with null body falls back`() = runTest {
+        val api = FakeApiService()
+        val errBody = StopTransactionResponse(message = null, status = null, error = null)
+        api.stopResponse = netServerError(errBody, 500)
+        val (manager, _, _) = createManager(api = api)
+
+        val result = manager.stopTransaction(SESSION_ID)
+
+        assertTrue(result is TransactionResult.Error)
+        assertTrue((result as TransactionResult.Error).message == "Stop failed")
+    }
+
+    @Test
+    fun `commitTransaction server error with null body falls back`() = runTest {
+        val api = FakeApiService()
+        val errBody = StopTransactionResponse(message = null, status = null, error = null)
+        api.commitResponse = netServerError(errBody, 500)
+        val (manager, _, _) = createManager(api = api)
+
+        val result = manager.commitTransaction(SESSION_ID)
+
+        assertTrue(result is TransactionResult.Error)
+        assertTrue((result as TransactionResult.Error).message == "Commit failed")
+    }
+
+    @Test
+    fun `pollResult with null data returns Timeout after max retries`() = runTest {
+        val api = FakeApiService()
+        val emptyResult = ScribeResultResponse(data = null)
+        api.pollResponses = MutableList(10) { netSuccess(emptyResult) }
+        val (manager, _, _) = createManager(api = api)
+
+        val result = manager.pollResult(SESSION_ID)
+
+        assertTrue(result is TransactionPollResult.Timeout)
+    }
+
+    @Test
+    fun `pollResult with null output list returns Timeout`() = runTest {
+        val api = FakeApiService()
+        val resultWithNullOutput = ScribeResultResponse(
+            data = ScribeResultResponse.Data(
+                audioMatrix = null,
+                createdAt = null,
+                output = null,
+                templateResults = null
+            )
+        )
+        api.pollResponses = MutableList(10) { netSuccess(resultWithNullOutput) }
+        val (manager, _, _) = createManager(api = api)
+
+        val result = manager.pollResult(SESSION_ID)
+
+        assertTrue(result is TransactionPollResult.Timeout)
+    }
+
+    @Test
+    fun `pollResult with empty output list returns Failed (vacuous all-failure)`() = runTest {
+        val api = FakeApiService()
+        val resultWithEmptyOutput = ScribeResultResponse(
+            data = ScribeResultResponse.Data(
+                audioMatrix = null,
+                createdAt = null,
+                output = emptyList(),
+                templateResults = null
+            )
+        )
+        api.pollResponses = MutableList(10) { netSuccess(resultWithEmptyOutput) }
+        val dm = FakeDataManager()
+        val (manager, _, _) = createManager(api = api, dataManager = dm)
+
+        val result = manager.pollResult(SESSION_ID)
+
+        // Empty list: any{} = false, all{} = true (vacuously), so returns Failed
+        assertTrue(result is TransactionPollResult.Failed)
+        assertEquals(TransactionStage.FAILURE.name, dm.uploadStages[SESSION_ID])
+    }
+
+    @Test
+    fun `retryFailedUploads with null session uses empty folderName and bid`() = runTest {
+        val chunkFile = tempFolder.newFile("null_session_chunk.m4a")
+        val dm = FakeDataManager()
+        dm.failedChunksList = listOf(
+            makeChunkEntity("c-null", "1.m4a", filePath = chunkFile.absolutePath)
+        )
+        dm.sessionEntity = null
+        dm.allChunksUploaded = true
+        val uploader = FakeChunkUploader(UploadResult.Success("s3://ok"))
+        val (manager, _, _) = createManager(dataManager = dm, uploader = uploader)
+
+        val result = manager.retryFailedUploads(SESSION_ID)
+
+        assertTrue(result)
+        assertEquals(1, uploader.uploadCount)
+    }
+
+    @Test
+    fun `retryFailedUploads with session having null folderName uses empty string`() = runTest {
+        val chunkFile = tempFolder.newFile("null_folder_chunk.m4a")
+        val dm = FakeDataManager()
+        dm.failedChunksList = listOf(
+            makeChunkEntity("c-nf", "1.m4a", filePath = chunkFile.absolutePath)
+        )
+        dm.sessionEntity = makeSessionEntity(folderName = null, bid = null)
+        dm.allChunksUploaded = true
+        val uploader = FakeChunkUploader(UploadResult.Success("s3://ok"))
+        val (manager, _, _) = createManager(dataManager = dm, uploader = uploader)
+
+        val result = manager.retryFailedUploads(SESSION_ID)
+
+        assertTrue(result)
+    }
+
+    @Test
+    fun `checkAndProgress INIT stage with invalid metadata JSON returns error`() = runTest {
+        val dm = FakeDataManager()
+        dm.sessionEntity = makeSessionEntity(
+            uploadStage = TransactionStage.INIT.name,
+            sessionMetadata = "{{invalid json}}"
+        )
+        val (manager, _, _) = createManager(dataManager = dm)
+
+        val result = manager.checkAndProgress(SESSION_ID, sessionConfig = null)
+
+        assertTrue(result is TransactionResult.Error)
+        assertTrue((result as TransactionResult.Error).message.contains("config"))
+    }
+
+    @Test
+    fun `checkAndProgress ANALYZING stage poll failure returns error`() = runTest {
+        val api = FakeApiService()
+        api.pollResponses = mutableListOf(netSuccess(makeResultResponse(ResultStatus.FAILURE)))
+        val dm = FakeDataManager()
+        dm.sessionEntity = makeSessionEntity(uploadStage = TransactionStage.ANALYZING.name)
+        val (manager, _, _) = createManager(api = api, dataManager = dm)
+
+        val result = manager.checkAndProgress(SESSION_ID)
+
+        assertTrue(result is TransactionResult.Error)
+    }
+
+    @Test
+    fun `checkAndProgress STOP stage retry fails then returns error`() = runTest {
+        val dm = FakeDataManager()
+        dm.sessionEntity = makeSessionEntity(uploadStage = TransactionStage.STOP.name)
+        dm.failedChunksList = listOf(
+            makeChunkEntity("c-stuck", "1.m4a", filePath = "/nonexistent/1.m4a")
+        )
+        dm.allChunksUploaded = false
+        val (manager, _, _) = createManager(dataManager = dm)
+
+        val result = manager.checkAndProgress(SESSION_ID, force = false)
+
+        assertTrue(result is TransactionResult.Error)
+        assertTrue((result as TransactionResult.Error).message.contains("forceCommit"))
+    }
+
+    @Test
+    fun `checkAndProgress STOP stage with force skips upload check`() = runTest {
+        val api = FakeApiService()
+        api.stopResponse = netSuccess(stopOk())
+        api.commitResponse = netSuccess(stopOk())
+        api.pollResponses = mutableListOf(netSuccess(makeResultResponse(ResultStatus.SUCCESS)))
+        val dm = FakeDataManager()
+        dm.sessionEntity = makeSessionEntity(uploadStage = TransactionStage.STOP.name)
+        dm.failedChunksList = listOf(
+            makeChunkEntity("c-force", "1.m4a", filePath = "/nonexistent/1.m4a")
+        )
+        dm.allChunksUploaded = false
+        val (manager, _, _) = createManager(api = api, dataManager = dm)
+
+        val result = manager.checkAndProgress(SESSION_ID, force = true)
+
+        assertTrue(result is TransactionResult.Success)
+        assertTrue(api.stopCalled)
+    }
+
+    @Test
+    fun `checkAndProgress INIT stage with init failure returns error`() = runTest {
+        val api = FakeApiService()
+        api.initResponse = NetworkResponse.NetworkError(IOException("no network"))
+        val dm = FakeDataManager()
+        dm.sessionEntity = makeSessionEntity(uploadStage = TransactionStage.INIT.name)
+        val (manager, _, _) = createManager(api = api, dataManager = dm)
+
+        val result = manager.checkAndProgress(SESSION_ID, sessionConfig = defaultConfig())
+
+        assertTrue(result is TransactionResult.Error)
+    }
+
+    @Test
+    fun `checkAndProgress STOP stage with stop failure returns error`() = runTest {
+        val api = FakeApiService()
+        api.stopResponse = NetworkResponse.NetworkError(IOException("no network"))
+        val dm = FakeDataManager()
+        dm.sessionEntity = makeSessionEntity(uploadStage = TransactionStage.STOP.name)
+        dm.failedChunksList = emptyList()
+        dm.allChunksUploaded = true
+        val (manager, _, _) = createManager(api = api, dataManager = dm)
+
+        val result = manager.checkAndProgress(SESSION_ID)
+
+        assertTrue(result is TransactionResult.Error)
+    }
+
+    @Test
+    fun `checkAndProgress COMMIT stage with commit failure returns error`() = runTest {
+        val api = FakeApiService()
+        api.commitResponse = NetworkResponse.NetworkError(IOException("no network"))
+        val dm = FakeDataManager()
+        dm.sessionEntity = makeSessionEntity(uploadStage = TransactionStage.COMMIT.name)
+        val (manager, _, _) = createManager(api = api, dataManager = dm)
+
+        val result = manager.checkAndProgress(SESSION_ID)
+
+        assertTrue(result is TransactionResult.Error)
     }
 
     // =====================================================================

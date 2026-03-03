@@ -1,6 +1,7 @@
 package com.eka.scribesdk.session
 
 import com.eka.scribesdk.api.EkaScribeCallback
+import com.eka.scribesdk.api.EkaScribeConfig
 import com.eka.scribesdk.api.models.AudioQualityMetrics
 import com.eka.scribesdk.api.models.EventType
 import com.eka.scribesdk.api.models.ScribeError
@@ -38,6 +39,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 
 internal class SessionManager(
+    private val ekaScribeConfig: EkaScribeConfig,
     private val dataManager: DataManager,
     private val pipelineFactory: Pipeline.Factory,
     private val transactionManager: TransactionManager,
@@ -369,7 +371,7 @@ internal class SessionManager(
                 }
 
                 // Launch deferred full audio upload (fire-and-forget, survives session cleanup)
-                if (fullAudioResult != null) {
+                if (fullAudioResult != null && ekaScribeConfig.fullAudioOutput) {
                     launchDeferredFullAudioUpload(fullAudioResult)
                 }
             } catch (e: Exception) {

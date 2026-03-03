@@ -1,6 +1,7 @@
 package com.eka.scribesdk.session
 
 import com.eka.scribesdk.api.EkaScribeCallback
+import com.eka.scribesdk.api.EkaScribeConfig
 import com.eka.scribesdk.api.models.ScribeError
 import com.eka.scribesdk.api.models.SessionState
 import com.eka.scribesdk.common.error.ErrorCode
@@ -49,6 +50,7 @@ internal class SessionManagerTest {
         coEvery { tm.initTransaction(any(), any()) } returns TransactionResult.Error("test error")
 
         return SessionManager(
+            ekaScribeConfig = EkaScribeConfig(networkConfig = mockk(), fullAudioOutput = true),
             dataManager = dm,
             pipelineFactory = pipelineFactory,
             transactionManager = tm,
@@ -260,7 +262,8 @@ internal class SessionManagerTest {
             transactionManager = tm,
             chunkUploader = uploader,
             timeProvider = FakeTimeProvider(),
-            logger = NoOpLogger()
+            logger = NoOpLogger(),
+            ekaScribeConfig = EkaScribeConfig(networkConfig = mockk(), fullAudioOutput = true),
         )
     }
 

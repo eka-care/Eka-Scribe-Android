@@ -198,6 +198,7 @@ object EkaScribe {
         transactionManager = txnManager
 
         sessionManager = SessionManager(
+            ekaScribeConfig = config,
             dataManager = dm,
             pipelineFactory = pipelineFactory,
             transactionManager = txnManager,
