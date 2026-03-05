@@ -35,12 +35,12 @@ internal class TransactionManager(
     private val chunkUploader: ChunkUploader,
     internal val bucketName: String,
     private val maxUploadRetries: Int,
+    private val pollMaxRetries: Int,
+    private val pollDelayMs: Long,
     private val logger: Logger
 ) {
     companion object {
         private const val TAG = "TransactionManager"
-        private const val POLL_MAX_RETRIES = 5
-        private const val POLL_DELAY_MS = 2000L
     }
 
     private val gson = Gson()
@@ -206,14 +206,14 @@ internal class TransactionManager(
         val successStates = setOf(ResultStatus.SUCCESS, ResultStatus.PARTIAL_COMPLETED)
         val failureStates = setOf(ResultStatus.FAILURE)
 
-        repeat(POLL_MAX_RETRIES) { attempt ->
-            logger.debug(TAG, "Polling result attempt ${attempt + 1}/$POLL_MAX_RETRIES: $sessionId")
+        repeat(pollMaxRetries) { attempt ->
+            logger.debug(TAG, "Polling result attempt ${attempt + 1}/$pollMaxRetries: $sessionId")
 
             when (val response = apiService.getTransactionResult(sessionId)) {
                 is NetworkResponse.Success -> {
                     // Check if HTTP 202 (still processing)
                     if (response.code == 202) {
-                        delay(POLL_DELAY_MS)
+                        delay(pollDelayMs)
                         return@repeat
                     }
 
@@ -232,22 +232,22 @@ internal class TransactionManager(
                     }
 
                     // Still in progress
-                    delay(POLL_DELAY_MS)
+                    delay(pollDelayMs)
                 }
 
                 is NetworkResponse.ServerError -> {
                     logger.warn(TAG, "Poll server error attempt ${attempt + 1}: $sessionId")
-                    delay(POLL_DELAY_MS)
+                    delay(pollDelayMs)
                 }
 
                 is NetworkResponse.NetworkError -> {
                     logger.warn(TAG, "Poll network error attempt ${attempt + 1}: $sessionId")
-                    delay(POLL_DELAY_MS)
+                    delay(pollDelayMs)
                 }
 
                 is NetworkResponse.UnknownError -> {
                     logger.warn(TAG, "Poll unknown error attempt ${attempt + 1}: $sessionId")
-                    delay(POLL_DELAY_MS)
+                    delay(pollDelayMs)
                 }
             }
         }

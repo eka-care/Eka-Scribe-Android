@@ -93,6 +93,8 @@ internal class TransactionManagerTest {
             chunkUploader = uploader,
             bucketName = BUCKET_NAME,
             maxUploadRetries = MAX_RETRIES,
+            pollMaxRetries = 5,
+            pollDelayMs = 0L,
             logger = NoOpLogger()
         )
         return Triple(manager, api, dataManager)

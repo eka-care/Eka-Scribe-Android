@@ -97,6 +97,8 @@ internal class ScribeSessionIntegrationTest {
             chunkUploader = fakeUploader,
             bucketName = BUCKET_NAME,
             maxUploadRetries = MAX_RETRIES,
+            pollMaxRetries = 5,
+            pollDelayMs = 0L,
             logger = NoOpLogger()
         )
         val manager = SessionManager(
@@ -266,6 +268,8 @@ internal class ScribeSessionIntegrationTest {
             chunkUploader = fakeUploader,
             bucketName = BUCKET_NAME,
             maxUploadRetries = MAX_RETRIES,
+            pollMaxRetries = 5,
+            pollDelayMs = 0L,
             logger = NoOpLogger()
         )
 

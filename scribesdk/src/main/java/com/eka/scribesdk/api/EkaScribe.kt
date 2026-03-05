@@ -22,6 +22,7 @@ import com.eka.scribesdk.common.error.ErrorCode
 import com.eka.scribesdk.common.error.ScribeException
 import com.eka.scribesdk.common.logging.DefaultLogger
 import com.eka.scribesdk.common.logging.Logger
+import com.eka.scribesdk.common.logging.NoOpLogger
 import com.eka.scribesdk.common.util.DefaultTimeProvider
 import com.eka.scribesdk.common.util.TimeProvider
 import com.eka.scribesdk.data.DataManager
@@ -73,10 +74,6 @@ import java.io.File
 object EkaScribe {
 
     private const val TAG = "EkaScribe"
-    private const val OUTPUT_DIR = "eka_scribe_audio"
-    private const val BUCKET_NAME = "m-prod-voice-record"
-    private const val POLL_MAX_RETRIES = 3
-    private const val POLL_DELAY_MS = 2000L
 
     private var sessionManager: SessionManager? = null
     private var transactionManager: TransactionManager? = null
@@ -84,7 +81,7 @@ object EkaScribe {
     private var dataManager: DataManager? = null
     private var modelDownloader: ModelDownloader? = null
     private var config: EkaScribeConfig? = null
-    private var logger: Logger = DefaultLogger()
+    private var logger: Logger = NoOpLogger()
     private var isInitialized = false
     private var sdkScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -102,6 +99,9 @@ object EkaScribe {
         if (isInitialized) {
             logger.warn(TAG, "SDK already initialized, re-initializing")
             destroy()
+        }
+        if (config.debugMode) {
+            logger = DefaultLogger()
         }
 
         this.config = config
@@ -154,12 +154,12 @@ object EkaScribe {
         val chunkUploader = S3ChunkUploader(
             context = context.applicationContext,
             credentialProvider = credentialProvider,
-            bucketName = BUCKET_NAME,
+            bucketName = BuildConfig.BUCKET_NAME,
             maxRetryCount = config.maxUploadRetries,
             logger = logger
         )
 
-        val outputDir = File(context.filesDir, OUTPUT_DIR)
+        val outputDir = File(context.filesDir, BuildConfig.OUTPUT_DIR)
         if (!outputDir.exists()) outputDir.mkdirs()
 
         val downloader =
@@ -191,8 +191,10 @@ object EkaScribe {
             apiService = developerApiService,
             dataManager = dm,
             chunkUploader = chunkUploader,
-            bucketName = BUCKET_NAME,
+            bucketName = BuildConfig.BUCKET_NAME,
             maxUploadRetries = config.maxUploadRetries,
+            pollMaxRetries = config.pollMaxRetries,
+            pollDelayMs = config.pollDelayMs,
             logger = logger
         )
         transactionManager = txnManager
@@ -367,8 +369,9 @@ object EkaScribe {
     suspend fun pollSessionResult(sessionId: String): Result<SessionResult> =
         withContext(Dispatchers.IO) {
             val api = requireApiService()
+            val conf = config ?: return@withContext Result.failure(Exception("SDK not initialized"))
             try {
-                repeat(POLL_MAX_RETRIES) {
+                repeat(conf.pollMaxRetries) {
                     when (val response = api.getTransactionResult(sessionId)) {
                         is NetworkResponse.Success -> {
                             if (response.code != 202) {
@@ -390,7 +393,7 @@ object EkaScribe {
                             logger.warn(TAG, "Poll unknown error: ${response.error.message}")
                         }
                     }
-                    delay(POLL_DELAY_MS)
+                    delay(conf.pollDelayMs)
                 }
                 Result.failure(Exception("Failed to get output"))
             } catch (e: Exception) {

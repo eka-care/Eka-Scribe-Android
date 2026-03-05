@@ -14,6 +14,8 @@ import com.eka.networking.client.NetworkConfig
  * @param debugMode enable debug mode if true
  * @param networkConfig network configuration
  * @param maxUploadRetries maximum number of retries for failed uploads
+ * @param pollMaxRetries maximum number of times to poll for transcription result
+ * @param pollDelayMs delay in milliseconds between each poll
  **/
 data class EkaScribeConfig(
     val sampleRate: Int = 16000,
@@ -26,5 +28,7 @@ data class EkaScribeConfig(
     val debugMode: Boolean = false,
     val networkConfig: NetworkConfig,
     val fullAudioOutput: Boolean = false,
-    val maxUploadRetries: Int = 2
+    val maxUploadRetries: Int = 2,
+    val pollMaxRetries: Int = 3,
+    val pollDelayMs: Long = 2000L
 )

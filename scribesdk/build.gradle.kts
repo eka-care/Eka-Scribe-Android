@@ -39,6 +39,16 @@ android {
                 "DEVELOPER_URL",
                 "\"${config["DEVELOPER_URL"]}\""
             )
+            buildConfigField(
+                "String",
+                "OUTPUT_DIR",
+                "\"${config["OUTPUT_DIR"]}\""
+            )
+            buildConfigField(
+                "String",
+                "BUCKET_NAME",
+                "\"${config["BUCKET_NAME"]}\""
+            )
         }
         debug {
             enableUnitTestCoverage = true
@@ -52,6 +62,16 @@ android {
                 "String",
                 "DEVELOPER_URL",
                 "\"${config["DEVELOPER_URL"]}\""
+            )
+            buildConfigField(
+                "String",
+                "OUTPUT_DIR",
+                "\"${config["OUTPUT_DIR"]}\""
+            )
+            buildConfigField(
+                "String",
+                "BUCKET_NAME",
+                "\"${config["BUCKET_NAME"]}\""
             )
         }
     }
