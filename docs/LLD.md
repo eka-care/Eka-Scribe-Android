@@ -44,64 +44,69 @@
 ## 2. Package Structure
 
 ```
-com.eka.scribe/
+com.eka.scribesdk/
 |
 +-- api/                              # Public SDK surface
 |   +-- EkaScribe                     # Facade (public entry point)
 |   +-- EkaScribeConfig               # SDK configuration (data)
 |   +-- EkaScribeCallback             # Host app lifecycle callbacks (interface)
 |   +-- models/                       # Public-facing models
-|       +-- SessionInfo               # Session metadata exposed to host
+|       +-- SessionConfig             # Session start options (languages, mode, templates)
 |       +-- AudioQualityMetrics       # Quality scores exposed to host
 |       +-- ScribeError               # Error model exposed to host
 |       +-- SessionState              # Observable session state enum
+|       +-- SessionEventName          # Event name enum for lifecycle events
+|       +-- EventType                 # Event severity enum (INFO, SUCCESS, ERROR)
+|       +-- VoiceActivityData         # VAD result exposed to host
 |
 +-- session/                          # Session lifecycle management
 |   +-- SessionManager                # Single active session orchestrator
-|   +-- SessionState                  # State machine enum
-|   +-- SessionEntity                 # Persistence model
+|   +-- SessionEventEmitter           # Typed event emitter for session lifecycle
+|   +-- TransactionManager            # API lifecycle (init → stop → commit → poll)
+|   +-- TransactionStage              # Enum: INIT, RECORDING, STOP, COMMIT, POLL, DONE
 |
 +-- recorder/                         # Raw audio capture
 |   +-- AudioRecorder                 # Interface
 |   +-- AndroidAudioRecorder          # Android AudioRecord implementation
 |   +-- AudioFrame                    # PCM data + timestamp (data)
-|   +-- RecorderConfig                # Sample rate, channels, encoding (data)
+|   +-- FrameCallback                 # fun interface for frame delivery
+|   +-- AudioFocusCallback            # fun interface for audio focus events
 |
 +-- pipeline/                         # Channel-based audio pipeline
-|   +-- Pipeline                      # Wires stages together
-|   +-- PipelineConfig                # Stage enable/disable flags (data)
-|   +-- PipelineMonitor               # Backpressure / health observer
-|   +-- stage/                        # Individual pipeline stages
-|       +-- PipelineStage             # Interface (generic)
-|       +-- PreBuffer                 # Lock-free ring buffer between audio thread and coroutine
+|   +-- Pipeline                      # Wires stages together, owns coroutines
+|   +-- Pipeline.Factory              # Creates & wires pipeline for a session
+|   +-- PipelineConfig                # Channel capacities, analyser toggle (data)
+|   +-- FullAudioResult               # Result of full audio generation on stop (data)
+|   +-- stage/
+|       +-- PreBuffer                 # Lock-free ring buffer (audio thread → coroutine)
 |       +-- FrameProducer             # Drains PreBuffer, sends to FrameChannel
-|       +-- FrameChannel              # Bounded channel abstraction
-|       +-- ChunkChannel              # Bounded channel abstraction
 |
 +-- analyser/                         # Audio quality analysis (SQUIM)
-|   +-- AudioAnalyser                 # Interface
-|   +-- SquimAudioAnalyser            # SQUIM model implementation
-|   +-- AnalysedFrame                 # Frame + quality metadata (data)
-|   +-- AudioQuality                  # SNR, clipping, loudness, score (data)
-|   +-- ModelProvider                 # Interface for loading ML model
-|   +-- SquimModelProvider            # SQUIM model loader
+|   +-- AudioAnalyser                 # Interface (submitFrame, qualityFlow, release)
+|   +-- SquimAudioAnalyser            # SQUIM ONNX implementation (lazy model loading)
+|   +-- NoOpAudioAnalyser             # Null-object fallback
+|   +-- AudioQuality                  # STOI, PESQ, SI-SDR, overallScore (data)
+|   +-- ModelProvider                 # Interface (load, isLoaded, unload)
+|   +-- SquimModelProvider            # ONNX Runtime model loader + inference
+|   +-- ModelDownloader               # CDN download with ETag caching
+|   +-- AnalyserState                 # Sealed: Idle, Downloading, Ready, Failed
 |
 +-- chunker/                          # Voice-activity-based chunking (VAD)
-|   +-- AudioChunker                  # Interface
+|   +-- AudioChunker                  # Interface (feed, flush, setLatestQuality)
 |   +-- VadAudioChunker               # Silero VAD implementation
 |   +-- AudioChunk                    # Chunk data + metadata (data)
-|   +-- ChunkConfig                   # Min/preferred/max duration thresholds (data)
-|   +-- VadProvider                   # Interface for loading VAD model
-|   +-- SileroVadProvider             # Silero VAD model loader
+|   +-- ChunkConfig                   # Duration thresholds in seconds (data)
+|   +-- VadProvider                   # Interface for VAD inference
+|   +-- SileroVadProvider             # Silero VAD ONNX model loader
 |
 +-- encoder/                          # Audio format conversion
 |   +-- AudioEncoder                  # Interface
-|   +-- M4aAudioEncoder               # WAV -> M4A via MediaCodec
+|   +-- WavAudioEncoder               # Raw WAV encoder
 |   +-- EncodedChunk                  # Encoded file + metadata (data)
 |
 +-- data/                             # Persistence & data management
 |   +-- DataManager                   # Interface
-|   +-- DefaultDataManager            # Orchestrates DB + file I/O
+|   +-- DefaultDataManager            # Orchestrates DB operations
 |   +-- local/
 |   |   +-- db/
 |   |   |   +-- ScribeDatabase        # Room database holder
@@ -109,42 +114,29 @@ com.eka.scribe/
 |   |   |   |   +-- SessionDao        # Session CRUD
 |   |   |   |   +-- AudioChunkDao     # Chunk CRUD
 |   |   |   +-- entity/
-|   |   |       +-- SessionEntity     # DB entity
-|   |   |       +-- AudioChunkEntity  # DB entity
+|   |   |       +-- SessionEntity     # DB entity (with upload_stage, folder_name, bid)
+|   |   |       +-- AudioChunkEntity  # DB entity (with retry_count, quality_score)
 |   |   |       +-- UploadState       # Enum: PENDING, IN_PROGRESS, SUCCESS, FAILED
-|   |   +-- file/
-|   |       +-- FileStorage           # Interface
-|   |       +-- LocalFileStorage      # Write/read/delete chunk files on disk
+|   |   |       +-- TransactionStage  # Enum: INIT, RECORDING, STOP, COMMIT, POLL, DONE
 |   +-- remote/
 |       +-- api/
-|       |   +-- ScribeApiService      # REST API interface (Retrofit-style)
+|       |   +-- ScribeApiService      # REST API interface (Retrofit)
 |       +-- upload/
 |       |   +-- ChunkUploader         # Interface
-|       |   +-- S3ChunkUploader       # AWS S3 upload implementation
-|       +-- model/
-|           +-- (request/response DTOs)
-|
-+-- upload/                           # Upload orchestration
-|   +-- UploadScheduler               # Interface
-|   +-- WorkManagerUploadScheduler    # WorkManager-based scheduling
-|   +-- UploadWorker                  # Individual chunk upload job
-|   +-- UploadRetryPolicy             # Exponential backoff config (data)
-|
-+-- monitor/                          # Observability & backpressure
-|   +-- SystemLoadMonitor             # Memory, CPU, queue depth observer
-|   +-- DegradationPolicy             # Rules for graceful degradation
-|   +-- MetricsCollector              # Interface for pipeline metrics
+|       |   +-- S3ChunkUploader       # AWS S3 upload (network check, in-flight dedup)
+|       |   +-- UploadMetadata        # Upload context (chunkId, sessionId, folderName, bid)
+|       |   +-- UploadResult          # Sealed: Success(url), Failure(error, isRetryable)
+|       +-- S3CredentialProvider      # Interface for obtaining S3 credentials
 |
 +-- common/                           # Cross-cutting concerns
     +-- error/
-    |   +-- ScribeException           # Base exception
+    |   +-- ScribeException           # Base exception with ErrorCode
     |   +-- ErrorCode                 # Enum of error codes
     +-- logging/
-    |   +-- Logger                    # Interface
-    |   +-- DefaultLogger             # Platform logger implementation
-    |   +-- LogInterceptor            # Interface for host app log capture
+    |   +-- Logger                    # Interface (debug, info, warn, error)
+    |   +-- DefaultLogger             # Android Log implementation
     +-- util/
-        +-- IdGenerator               # Deterministic session/chunk ID generation
+        +-- IdGenerator               # UUID session IDs, deterministic chunk IDs
         +-- TimeProvider              # Interface (testable clock)
         +-- DefaultTimeProvider       # System.currentTimeMillis()
 ```
@@ -205,11 +197,18 @@ Each processing stage is a filter connected by bounded channels (pipes). Stages 
 removable, and independently testable.
 
 ```
-AudioRecorder --> PreBuffer --> FrameProducer --> [FrameChannel] --> AudioAnalyser
-                                                                        |
-                                                                        v
-                              DataManager <-- [ChunkChannel] <-- AudioChunker
+AudioRecorder --> PreBuffer --> FrameProducer --> [FrameChannel] --> AudioChunker
+                                                       |                 |
+                                                       v                 v
+                                                SquimAudioAnalyser  [ChunkChannel]
+                                               (fire-and-forget)         |
+                                                                         v
+                                               Encoder + DataManager + Upload
 ```
+
+> **Note:** The analyser receives frames via fire-and-forget `submitFrame()` — it does
+> NOT sit in the critical chunking path. Chunks flow directly from the chunker to
+> persistence/upload without waiting for quality analysis.
 
 ### 3.4 Strategy Pattern
 
@@ -427,15 +426,20 @@ Each upload job is a self-contained command with all context needed for executio
 
 ### 4.4 Audio Analysis (SQUIM)
 
+The SQUIM analyser runs **independently** from the main pipeline data path.
+Frames are submitted via fire-and-forget `submitFrame()`. The ONNX model is loaded
+**lazily** in a background coroutine so it does not block session startup — frames
+submitted before the model is ready are silently dropped.
+
 ```
 +---------------------------+
 |     AudioAnalyser         |
 |     <<interface>>         |
 |---------------------------|
-| + analyse(AudioFrame):    |
-|     AnalysedFrame         |
+| + submitFrame(AudioFrame) |
 | + qualityFlow:            |
 |     Flow<AudioQuality>    |
+| + release()               |
 +---------------------------+
           ^
           | implements
@@ -443,17 +447,20 @@ Each upload job is a self-contained command with all context needed for executio
 +---+-----+----+
 |              |
 |              |
-+------v--------+     +----v-----------+
-|SquimAudio     |     | NoOpAudio      |
-|Analyser       |     | Analyser       |
-|---------------|     |----------------|
-|- model:       |     | (pass-through) |
-|  ModelProvider|     +----------------+
-|- interval: ms|
-|---------------|
-|+ analyse()   |
-|+ qualityFlow |
-+---------------+
++------v-------+      +----v-----------+
+|SquimAudio    |      | NoOpAudio      |
+|Analyser      |      | Analyser       |
+|--------------|      |----------------|
+|- modelProvider|     | (all no-ops)   |
+|- modelReady:  |     +----------------+
+|  AtomicBoolean|
+|- inferenceDisp|
+|  atcher       |
+|---------------|      LAZY LOADING:
+|+ submitFrame()|      init { scope.launch {
+|+ qualityFlow  |        modelProvider.load()
+|+ release()    |        modelReady.set(true)
++---------------+      }}
        |
        | uses
        v
@@ -461,33 +468,43 @@ Each upload job is a self-contained command with all context needed for executio
 |     ModelProvider          |     |     AudioQuality          |
 |     <<interface>>         |     |     (data)                |
 |---------------------------|     |---------------------------|
-| + load(): Model           |     | + snr: Float             |
-| + isLoaded(): Boolean     |     | + clipping: Float        |
-| + unload()                |     | + loudness: Float        |
+| + load()                  |     | + stoi: Float            |
+| + isLoaded(): Boolean     |     | + pesq: Float            |
+| + unload()                |     | + siSDR: Float           |
 +---------------------------+     | + overallScore: Float    |
           ^                       +---------------------------+
           |
 +---------------------------+     +---------------------------+
-|   SquimModelProvider      |     |     AnalysedFrame         |
-|---------------------------|     |     (data)                |
-| - modelPath: String       |     |---------------------------|
-| - interpreter: TFLite     |     | + frame: AudioFrame      |
-+---------------------------+     | + quality: AudioQuality?  |
-                                  +---------------------------+
+|   SquimModelProvider      |     |   ModelDownloader         |
+|---------------------------|     |---------------------------|
+| - modelPath: String       |     | - filesDir: File         |
+| - env: OrtEnvironment     |     | - api: ModelDownloadApi  |
+| - session: OrtSession     |     |---------------------------|
+|---------------------------|     | + downloadModelIfNeeded()|
+| + load()                  |     | + isModelDownloaded()    |
+| + analyse(FloatArray):    |     | + getModelPath(): String?|
+|     AudioQuality?         |     | + stateFlow: StateFlow   |
+| + unload()                |     +---------------------------+
++---------------------------+
 ```
 
 ### 4.5 Audio Chunking (VAD)
+
+The chunker receives raw `AudioFrame`s (not analysed frames) from the pipeline.
+Latest quality from the analyser is forwarded separately via `setLatestQuality()`.
 
 ```
 +-------------------------------+
 |       AudioChunker            |
 |       <<interface>>           |
 |-------------------------------|
-| + feed(frame: AnalysedFrame): |
+| + feed(frame: AudioFrame):   |
 |     AudioChunk?               |
 | + flush(): AudioChunk?        |
+| + setLatestQuality(quality?)  |
 | + activityFlow:               |
 |     Flow<VoiceActivityData>   |
+| + release()                   |
 +-------------------------------+
           ^
           | implements
@@ -498,14 +515,20 @@ Each upload job is a self-contained command with all context needed for executio
 | - vadProvider: VadProvider    |     |---------------------------|
 | - config: ChunkConfig        |     | + chunkId: String         |
 | - frameAccumulator: List     |     | + sessionId: String       |
-| - silenceDuration: Long      |     | + index: Int              |
-| - speechDuration: Long       |     | + frames: List<AudioFrame>|
-|-------------------------------|     | + startTimeMs: Long       |
-| + feed(frame): AudioChunk?   |     | + endTimeMs: Long         |
-| + flush(): AudioChunk?       |     | + quality: AudioQuality?  |
-| + activityFlow               |     | + isSpeech: Boolean       |
-| - shouldChunk(): Boolean     |     | + durationMs: Long        |
-| - createChunk(): AudioChunk  |     +---------------------------+
+| - accumulatedSamples: Long   |     | + index: Int              |
+| - silenceSamples: Long       |     | + frames: List<AudioFrame>|
+| - totalSamplesProcessed: Long|     | + startTimeMs: Long       |
+| - chunkStartSampleOffset: Long|    | + endTimeMs: Long         |
+| - latestQuality: AudioQuality?|    | + quality: AudioQuality?  |
+|-------------------------------|     | + durationMs: Long (comp.)|
+| + feed(frame): AudioChunk?   |     +---------------------------+
+| + flush(): AudioChunk?       |
+| + setLatestQuality(quality?) |
+| + activityFlow               |
+| + release()                  |
+| - shouldChunk(): Boolean     |
+| - createChunk(): AudioChunk  |
+| - calculateAmplitude(pcm)    |
 +-------------------------------+
        |
        | uses
@@ -514,33 +537,37 @@ Each upload job is a self-contained command with all context needed for executio
 |       VadProvider             |     |      ChunkConfig          |
 |       <<interface>>           |     |      (data)               |
 |-------------------------------|     |---------------------------|
-| + load()                     |     | + preferredDuration: 10s  |
-| + detect(pcm): VadResult     |     | + desperationDuration: 20s|
-| + unload()                   |     | + maxDuration: 25s        |
-+-------------------------------+     | + minSilenceToChunk: 500ms|
-          ^                           | + despSilenceToChunk:100ms|
-          |                           +---------------------------+
-+-------------------------------+
-|    SileroVadProvider          |     +---------------------------+
-|-------------------------------|     |    VoiceActivityData      |
-| - modelPath: String          |     |    (data)                 |
-| - interpreter: OrtSession    |     |---------------------------|
-+-------------------------------+     | + isSpeech: Boolean       |
+| + load()                     |     | + preferredDurationSec: 10|
+| + detect(pcm): VadResult     |     | + desperationDurationSec:20|
+| + unload()                   |     | + maxDurationSec: 25      |
++-------------------------------+     | + longSilenceSec: 0.5     |
+          ^                           | + shortSilenceSec: 0.1    |
+          |                           | + overlapDurationSec: 0.5 |
++-------------------------------+     +---------------------------+
+|    SileroVadProvider          |
+|-------------------------------|     +---------------------------+
+| - modelPath: String          |     |    VoiceActivityData      |
+| - session: OrtSession        |     |    (data)                 |
++-------------------------------+     |---------------------------|
+                                      | + isSpeech: Boolean       |
                                       | + amplitude: Float        |
                                       | + timestampMs: Long       |
                                       +---------------------------+
 ```
 
-**Chunking Decision Logic (pseudocode):**
+**Chunking Decision Logic (sample-based):**
 
 ```
-IF speechDuration > preferredDuration AND silenceDuration > minSilenceToChunk:
+IF accumulatedSamples > prefLengthSamples AND silenceSamples > longSilenceThreshold:
     -> CREATE CHUNK (natural break)
-ELSE IF speechDuration > desperationDuration AND silenceDuration > despSilenceToChunk:
+ELSE IF accumulatedSamples > despLengthSamples AND silenceSamples > shortSilenceThreshold:
     -> CREATE CHUNK (desperation cut)
-ELSE IF speechDuration >= maxDuration:
-    -> CREATE CHUNK (force cut, no data loss)
+ELSE IF accumulatedSamples >= maxLengthSamples:
+    -> CREATE CHUNK (force cut)
 ```
+
+> **Overlap:** On chunk creation (non-flush), the last `overlapDurationSec` worth of
+> frames are kept for the next chunk to ensure no audio is lost at boundaries.
 
 ### 4.6 Data Management & Persistence
 
@@ -688,11 +715,17 @@ ELSE IF speechDuration >= maxDuration:
 +-------------------------------+     +---------------------------+
 |    S3ChunkUploader            |     |    UploadResult           |
 |-------------------------------|     |    (sealed)               |
-| - s3Client: S3Client         |     |---------------------------|
-| - bucket: String              |     | + Success(url: String)    |
-| - credentials: S3Credentials |     | + Failure(error, retryable)|
-|-------------------------------|     +---------------------------+
+| - context: Context            |     |---------------------------|
+| - credentialProvider          |     | + Success(url: String)    |
+| - bucketName: String          |     | + Failure(error, retryable)|
+| - inFlight: ConcurrentSet     |     +---------------------------+
+|-------------------------------|
 | + upload(file, metadata)      |
+|   1. check network available  |
+|   2. guard in-flight dedup    |
+|   3. uploadWithRetry()        |
+| - isNetworkAvailable(): Bool  |
+| + clearCache()                |
 +-------------------------------+
 
 +-------------------------------+
@@ -703,7 +736,9 @@ ELSE IF speechDuration >= maxDuration:
 | + sessionId: String           |
 | + chunkIndex: Int             |
 | + fileName: String            |
-| + mimeType: String            |
+| + folderName: String          |
+| + bid: String                 |
+| + mimeType: String = audio/wav|
 +-------------------------------+
 ```
 
@@ -935,43 +970,52 @@ classDiagram
     %% ===== ANALYSER =====
     class AudioAnalyser {
         <<interface>>
-        +analyse(AudioFrame): AnalysedFrame
+        +submitFrame(AudioFrame)
         +qualityFlow: Flow~AudioQuality~
+        +release()
     }
 
     class SquimAudioAnalyser {
-        -modelProvider: ModelProvider
-        +analyse(AudioFrame): AnalysedFrame
+        -modelProvider: SquimModelProvider
+        -modelReady: AtomicBoolean
+        -inferenceDispatcher
+        +submitFrame(AudioFrame)
+        +release()
     }
 
-    class AnalysedFrame {
-        <<data>>
-        +frame: AudioFrame
-        +quality: AudioQuality?
+    class NoOpAudioAnalyser {
+        +submitFrame(AudioFrame)
+        +release()
     }
 
     class AudioQuality {
         <<data>>
-        +snr: Float
-        +clipping: Float
-        +loudness: Float
+        +stoi: Float
+        +pesq: Float
+        +siSDR: Float
         +overallScore: Float
     }
 
     %% ===== CHUNKER =====
     class AudioChunker {
         <<interface>>
-        +feed(AnalysedFrame): AudioChunk?
+        +feed(AudioFrame): AudioChunk?
         +flush(): AudioChunk?
+        +setLatestQuality(AudioQuality?)
         +activityFlow: Flow~VoiceActivityData~
+        +release()
     }
 
     class VadAudioChunker {
         -vadProvider: VadProvider
         -config: ChunkConfig
         -frameAccumulator: List
+        -accumulatedSamples: Long
+        -silenceSamples: Long
         +feed(frame): AudioChunk?
         +flush(): AudioChunk?
+        +setLatestQuality(quality?)
+        +release()
     }
 
     class AudioChunk {
@@ -987,10 +1031,12 @@ classDiagram
 
     class ChunkConfig {
         <<data>>
-        +preferredDuration: Int
-        +desperationDuration: Int
-        +maxDuration: Int
-        +minSilenceToChunk: Int
+        +preferredDurationSec: Int
+        +desperationDurationSec: Int
+        +maxDurationSec: Int
+        +longSilenceSec: Double
+        +shortSilenceSec: Double
+        +overlapDurationSec: Double
     }
 
     %% ===== ENCODER =====
@@ -1049,9 +1095,16 @@ classDiagram
         <<Entity>>
         +sessionId: String
         +createdAt: Long
-        +state: SessionState
+        +updatedAt: Long
+        +state: String
         +chunkCount: Int
+        +mode: String?
+        +ownerId: String?
         +metadata: String?
+        +uploadStage: String
+        +sessionMetadata: String?
+        +folderName: String?
+        +bid: String?
     }
 
     class AudioChunkEntity {
@@ -1060,10 +1113,14 @@ classDiagram
         +sessionId: String
         +chunkIndex: Int
         +filePath: String
+        +fileName: String
         +startTimeMs: Long
         +endTimeMs: Long
-        +uploadState: UploadState
+        +durationMs: Long
+        +uploadState: String
         +retryCount: Int
+        +qualityScore: Float?
+        +createdAt: Long
     }
 
     class UploadState {
@@ -1110,8 +1167,11 @@ classDiagram
     }
 
     class S3ChunkUploader {
-        -s3Client: S3Client
-        -bucket: String
+        -context: Context
+        -credentialProvider: S3CredentialProvider
+        -bucketName: String
+        -inFlight: ConcurrentSet
+        +isNetworkAvailable(): Boolean
     }
 
     class UploadResult {
@@ -1144,9 +1204,9 @@ classDiagram
     FrameProducer --> PreBuffer : drains
 
     AudioAnalyser <|.. SquimAudioAnalyser : implements
-    AudioAnalyser ..> AnalysedFrame : produces
-    AnalysedFrame --> AudioFrame : wraps
-    AnalysedFrame --> AudioQuality : contains
+    AudioAnalyser <|.. NoOpAudioAnalyser : implements
+    SquimAudioAnalyser --> SquimModelProvider : lazy loads
+    SquimAudioAnalyser ..> AudioQuality : emits via qualityFlow
 
     AudioChunker <|.. VadAudioChunker : implements
     AudioChunker ..> AudioChunk : produces
@@ -1186,32 +1246,30 @@ When `EkaScribe.init()` is called, the object graph is constructed in this order
 1. EkaScribeConfig          (provided by host app)
 2. Logger                   (from config or default)
 3. TimeProvider             (DefaultTimeProvider)
-4. IdGenerator              (uses TimeProvider)
-5. ScribeDatabase           (Room, lazy singleton)
-6. SessionDao               (from database)
-7. AudioChunkDao            (from database)
-8. LocalFileStorage         (baseDir from context)
-9. M4aAudioEncoder          (stateless)
-10. DefaultDataManager       (sessionDao, chunkDao, fileStorage, encoder)
-11. S3ChunkUploader          (s3Config from config)
-12. UploadRetryPolicy        (from config)
-13. WorkManagerUploadScheduler (workManager, retryPolicy)
-14. SessionManager           (dataManager, uploadScheduler, config)
+4. ScribeDatabase           (Room, lazy singleton)
+5. SessionDao, AudioChunkDao (from database)
+6. DefaultDataManager       (sessionDao, chunkDao)
+7. S3CredentialProvider      (from config)
+8. S3ChunkUploader           (context, credentialProvider, bucketName)
+9. ScribeApiService          (Retrofit)
+10. TransactionManager       (apiService, dataManager, chunkUploader, ...)
+11. Pipeline.Factory         (context, pipelineConfig, modelDownloader, ...)
+12. SessionManager           (pipelineFactory, transactionManager, dataManager, ...)
 
---- On startSession() ---
+--- On start(sessionConfig) ---   (suspend function)
 
-15. RecorderConfig           (from EkaScribeConfig)
-16. AndroidAudioRecorder     (recorderConfig)
-17. PreBuffer                (capacity from pipelineConfig)
-18. FrameProducer            (preBuffer)
-19. SquimModelProvider       (modelPath)          -- if analyser enabled
-20. SquimAudioAnalyser       (modelProvider)      -- if analyser enabled
-21. SileroVadProvider        (modelPath)
-22. ChunkConfig              (from EkaScribeConfig)
-23. VadAudioChunker          (vadProvider, chunkConfig)
-24. PipelineMonitor          (channel references)
-25. DegradationPolicy        (thresholds)
-26. Pipeline                 (all of the above wired together)
+13. Init API call             (TransactionManager.initTransaction → bid, folderName)
+14. AndroidAudioRecorder      (context, sampleRate, frameSize)
+15. PreBuffer                 (capacity: 2000 frames)
+16. FrameProducer             (preBuffer, frameChannel)
+17. SileroVadProvider.load()  (synchronous — required for chunking)
+18. VadAudioChunker           (vadProvider, chunkConfig, sessionId)
+19. SquimModelProvider        (modelPath) — NOT loaded yet
+20. SquimAudioAnalyser        (modelProvider, scope)
+    └─ init {} launches background model loading on inferenceDispatcher
+21. Pipeline                  (all of the above wired together)
+22. Pipeline.start()          (starts recorder + coroutines)
+23. startFlowCollection()     (non-blocking flow collectors launched in scope)
 ```
 
 ---
@@ -1221,24 +1279,24 @@ When `EkaScribe.init()` is called, the object graph is constructed in this order
 ### 7.1 Database Schema
 
 ```
-+========================+          +=============================+
-|    session_table       |          |    audio_chunk_table        |
-|========================|          |=============================|
-| PK session_id: TEXT    |<----+    | PK chunk_id: TEXT           |
-|    created_at: INTEGER |     |    | FK session_id: TEXT ------->+
-|    updated_at: INTEGER |     |    |    chunk_index: INTEGER     |
-|    state: TEXT          |     |    |    file_path: TEXT          |
-|    chunk_count: INTEGER |     |    |    file_name: TEXT          |
-|    mode: TEXT           |     |    |    start_time_ms: INTEGER   |
-|    owner_id: TEXT       |     |    |    end_time_ms: INTEGER     |
-|    metadata: TEXT (JSON)|     |    |    duration_ms: INTEGER     |
-+========================+     |    |    upload_state: TEXT        |
-                               |    |    retry_count: INTEGER      |
-                               |    |    quality_score: REAL       |
-                               |    |    created_at: INTEGER       |
-                               |    +=============================+
-                               |
-                               |    (CASCADE DELETE on session removal)
++============================+          +=============================+
+| scribe_session_table       |          | scribe_audio_chunk_table    |
+|============================|          |=============================|
+| PK session_id: TEXT        |<----+    | PK chunk_id: TEXT           |
+|    created_at: INTEGER     |     |    | FK session_id: TEXT ------->+
+|    updated_at: INTEGER     |     |    |    chunk_index: INTEGER     |
+|    state: TEXT             |     |    |    file_path: TEXT          |
+|    chunk_count: INTEGER    |     |    |    file_name: TEXT          |
+|    mode: TEXT              |     |    |    start_time_ms: INTEGER   |
+|    owner_id: TEXT          |     |    |    end_time_ms: INTEGER     |
+|    metadata: TEXT (JSON)   |     |    |    duration_ms: INTEGER     |
+|    upload_stage: TEXT      |     |    |    upload_state: TEXT       |
+|    session_metadata: TEXT  |     |    |    retry_count: INTEGER     |
+|    folder_name: TEXT       |     |    |    quality_score: REAL      |
+|    bid: TEXT               |     |    |    created_at: INTEGER      |
++============================+     |    +=============================+
+                                   |
+                                   |    (CASCADE DELETE on session removal)
 ```
 
 ### 7.2 Upload State Transitions
@@ -1261,10 +1319,12 @@ ShortArray (raw PCM)
     v
 AudioFrame { pcm, timestamp, sampleRate, frameIndex }
     |
-    v  (AudioAnalyser)
-AnalysedFrame { frame, quality? }
+    +------> SquimAudioAnalyser.submitFrame()     (fire-and-forget, async)
+    |             |                                qualityFlow --> chunker
+    v             v
+AudioChunker.feed(frame)         quality forwarded via setLatestQuality()
     |
-    v  (AudioChunker)
+    v
 AudioChunk { chunkId, sessionId, index, frames[], startTime, endTime, quality? }
     |
     v  (AudioEncoder)
@@ -1273,7 +1333,7 @@ EncodedChunk { filePath, format, sizeBytes, durationMs }
     v  (DataManager)
 AudioChunkEntity { chunkId, sessionId, filePath, uploadState=PENDING, ... }
     |
-    v  (ChunkUploader)
+    v  (S3ChunkUploader — with network check + in-flight dedup)
 UploadResult.Success { url }  -->  AudioChunkEntity { uploadState=SUCCESS }
 ```
 
@@ -1350,30 +1410,35 @@ UploadResult.Success { url }  -->  AudioChunkEntity { uploadState=SUCCESS }
   Drains PreBuffer in loop
   Sends frames to FrameChannel (suspends on backpressure)
 
-[Analyser Coroutine]    - Dispatchers.Default
+[Chunking Coroutine]    - Dispatchers.Default
   Receives from FrameChannel
-  Runs SQUIM inference
-  Feeds results to AudioChunker
-  Sends chunks to ChunkChannel
+  Calls analyser.submitFrame() (fire-and-forget)
+  Feeds frame to AudioChunker
+  Sends resulting chunks to ChunkChannel
 
-[Persistence Coroutine] - Dispatchers.IO
+[SQUIM Inference Thread] - Single thread (inferenceDispatcher)
+  Model loading (lazy, on construction)
+  Runs ONNX inference every 3s of accumulated audio
+  Publishes AudioQuality to qualityFlow
+  Android THREAD_PRIORITY_BACKGROUND for CPU throttling
+
+[Quality Forward Coroutine] - Dispatchers.Default
+  Collects analyser.qualityFlow
+  Calls chunker.setLatestQuality() so chunks carry metrics
+
+[Persistence Coroutine] - Dispatchers.Default
   Receives from ChunkChannel
-  Encodes to M4A
-  Writes file + DB entity
-  Triggers UploadScheduler
-
-[Upload Workers]        - WorkManager managed threads
-  Load PENDING chunks from DB
-  Upload to S3
-  Update DB state
+  Encodes to WAV
+  Persists AudioChunkEntity to Room DB
+  Immediately uploads via S3ChunkUploader
 
 +=====================================================+
 |            CHANNEL CAPACITIES                        |
 +=====================================================+
 
-PreBuffer (Ring):    ~200 frames  (~6.4s at 16kHz/512)
-FrameChannel:        64 frames   (~2s buffer)
-ChunkChannel:        8 chunks    (~80-200s of audio)
+PreBuffer (Ring):    2000 frames  (~64s at 16kHz/512)
+FrameChannel:        640 frames   (~20s buffer)
+ChunkChannel:        80 chunks    (~800-2000s of audio)
 ```
 
 ---
@@ -1385,14 +1450,16 @@ ChunkChannel:        8 chunks    (~80-200s of audio)
 | **PCM**               | Pulse-Code Modulation; raw digital audio samples                                            |
 | **Frame**             | A fixed-size window of PCM samples (default: 512 samples = 32ms at 16kHz)                   |
 | **Chunk**             | A variable-duration segment of speech bounded by silence or duration limits                 |
-| **SQUIM**             | Speech Quality Intuitive Metric; ML model for audio quality assessment                      |
-| **VAD**               | Voice Activity Detection; distinguishes speech from silence                                 |
+| **SQUIM**             | Speech Quality Intuitive Metric; ONNX model for audio quality assessment (lazy loaded)      |
+| **VAD**               | Voice Activity Detection; Silero ONNX model that distinguishes speech from silence          |
 | **PreBuffer**         | Lock-free ring buffer that decouples the real-time audio thread from the coroutine pipeline |
 | **Backpressure**      | Flow-control mechanism where a slow consumer causes the producer to suspend (not drop data) |
+| **STOI**              | Short-Time Objective Intelligibility (0.0–1.0)                                              |
+| **PESQ**              | Perceptual Evaluation of Speech Quality (-0.5–4.5)                                          |
+| **SI-SDR**            | Scale-Invariant Signal-to-Distortion Ratio (dB)                                             |
 | **Degradation**       | Graceful performance reduction by disabling optional stages (analyser) under load           |
 | **Idempotent Upload** | Chunk IDs are deterministic, making re-uploads safe without duplication                     |
-| **SNR**               | Signal-to-Noise Ratio                                                                       |
-| **M4A**               | MPEG-4 Audio; compressed audio format used for uploads                                      |
+| **WAV**               | Waveform Audio File Format; uncompressed audio format used for uploads                      |
 
 ---
 
