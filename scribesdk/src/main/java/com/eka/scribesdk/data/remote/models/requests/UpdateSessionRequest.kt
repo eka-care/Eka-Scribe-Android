@@ -3,6 +3,7 @@ package com.eka.scribesdk.data.remote.models.requests
 import androidx.annotation.Keep
 import com.google.gson.annotations.SerializedName
 
+@Keep
 internal class UpdateSessionRequest : ArrayList<UpdateSessionRequest.UpdateSessionRequestItem>() {
     @Keep
     data class UpdateSessionRequestItem(
