@@ -41,14 +41,14 @@ internal data class HistoryItem(
 internal data class PatientDetailsInfo(
     @SerializedName("age")
     var age: Int?,
-    @SerializedName("biological_sex")
+    @SerializedName("biologicalSex")
     var biologicalSex: String?,
-    @SerializedName("name")
-    var name: String?,
-    @SerializedName("patient_id")
-    var patientId: String?,
+    @SerializedName("username")
+    var name: String? = null,
+    @SerializedName("oid")
+    var patientId: String? = null,
     @SerializedName("visit_id")
-    var visitId: String?
+    var visitId: String? = null,
 )
 
 internal fun HistoryItem.toScribeHistoryItem(): ScribeHistoryItem {
