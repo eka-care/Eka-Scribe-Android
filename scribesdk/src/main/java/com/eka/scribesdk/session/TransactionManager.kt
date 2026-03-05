@@ -263,6 +263,8 @@ internal class TransactionManager(
      * Returns true if all chunks are now uploaded.
      */
     suspend fun retryFailedUploads(sessionId: String): Boolean {
+        // Clear in-flight cache for retries
+        chunkUploader.clearCache()
         val allChunks = dataManager.getAllChunks(sessionId = sessionId)
         val allChunksToRetry = allChunks.filterNot { it.uploadState == UploadState.SUCCESS.name }
 

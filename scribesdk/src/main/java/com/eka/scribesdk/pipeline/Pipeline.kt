@@ -382,14 +382,14 @@ internal class Pipeline(
                     if (modelPath != null) {
                         try {
                             val modelProvider = SquimModelProvider(modelPath, logger)
-                            modelProvider.load()
+                            // Model loads lazily inside SquimAudioAnalyser (background coroutine)
                             SquimAudioAnalyser(
                                 modelProvider = modelProvider,
                                 scope = scope,
                                 logger = logger
                             )
                         } catch (e: Exception) {
-                            logger.warn(TAG, "Failed to load SQUIM model, using NoOp", e)
+                            logger.warn(TAG, "Failed to create SQUIM analyser, using NoOp", e)
                             NoOpAudioAnalyser()
                         }
                     } else {

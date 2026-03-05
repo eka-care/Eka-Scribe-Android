@@ -201,28 +201,10 @@ internal class SessionManager(
                 }
                 pipeline = newPipeline
 
-                // Forward pipeline flows to stable shared flows
-                newPipeline.voiceActivityFlow?.let { flow ->
-                    scope.launch { flow.collect { _voiceActivityFlow.emit(it) } }
-                }
-                newPipeline.audioQualityFlow?.let { flow ->
-                    scope.launch { flow.collect { _audioQualityFlow.emit(it) } }
-                }
-                scope.launch {
-                    newPipeline.audioFocusFlow.collect { hasFocus ->
-                        if (!hasFocus) {
-                            pause()
-                        }
-                        emitter.emit(
-                            SessionEventName.AUDIO_FOCUS_CHANGED, EventType.INFO,
-                            if (hasFocus) "Audio focus gained" else "Audio focus lost",
-                            mapOf("hasFocus" to hasFocus.toString())
-                        )
-                        callback?.onAudioFocusChanged(hasFocus)
-                    }
-                }
-
                 newPipeline.start()
+
+                // Defer flow collection to after start — non-blocking
+                startFlowCollection(newPipeline, emitter, scope)
 
                 transition(SessionState.RECORDING)
                 callback?.onSessionStarted(sessionId)
@@ -479,6 +461,36 @@ internal class SessionManager(
                 ErrorCode.INVALID_STATE_TRANSITION,
                 "Expected state $expected but was $current"
             )
+        }
+    }
+
+    /**
+     * Launches flow collectors in the given scope, non-blocking.
+     * Called after pipeline.start() so it doesn't delay session startup.
+     */
+    private fun startFlowCollection(
+        activePipeline: Pipeline,
+        emitter: SessionEventEmitter,
+        scope: CoroutineScope
+    ) {
+        activePipeline.voiceActivityFlow?.let { flow ->
+            scope.launch { flow.collect { _voiceActivityFlow.emit(it) } }
+        }
+        activePipeline.audioQualityFlow?.let { flow ->
+            scope.launch { flow.collect { _audioQualityFlow.emit(it) } }
+        }
+        scope.launch {
+            activePipeline.audioFocusFlow.collect { hasFocus ->
+                if (!hasFocus) {
+                    pause()
+                }
+                emitter.emit(
+                    SessionEventName.AUDIO_FOCUS_CHANGED, EventType.INFO,
+                    if (hasFocus) "Audio focus gained" else "Audio focus lost",
+                    mapOf("hasFocus" to hasFocus.toString())
+                )
+                callback?.onAudioFocusChanged(hasFocus)
+            }
         }
     }
 

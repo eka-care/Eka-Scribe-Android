@@ -1,6 +1,8 @@
 package com.eka.scribesdk.data.remote.upload
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import com.amazonaws.ClientConfiguration
 import com.amazonaws.auth.BasicSessionCredentials
 import com.amazonaws.mobileconnectors.s3.transferutility.TransferListener
@@ -33,6 +35,15 @@ internal class S3ChunkUploader(
     private val inFlight: MutableSet<String> = Collections.synchronizedSet(mutableSetOf())
 
     override suspend fun upload(file: File, metadata: UploadMetadata): UploadResult {
+        // Guard: skip if network is unavailable — no point adding to in-flight
+        if (!isNetworkAvailable()) {
+            logger.debug(TAG, "No network available, skipping upload: ${metadata.chunkId}")
+            return UploadResult.Failure(
+                error = "No network available",
+                isRetryable = true
+            )
+        }
+
         // Guard: skip if this chunk is already in-flight
         if (!inFlight.add(metadata.chunkId)) {
             logger.debug(TAG, "Chunk already in-flight, skipping: ${metadata.chunkId}")
@@ -47,6 +58,19 @@ internal class S3ChunkUploader(
         } finally {
             inFlight.remove(metadata.chunkId)
         }
+    }
+
+    private fun isNetworkAvailable(): Boolean {
+        val connectivityManager =
+            context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+                ?: return false
+        val network = connectivityManager.activeNetwork ?: return false
+        val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return false
+        return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    }
+
+    override fun clearCache() {
+        inFlight.clear()
     }
 
     private suspend fun uploadWithRetry(

@@ -4,4 +4,5 @@ import java.io.File
 
 interface ChunkUploader {
     suspend fun upload(file: File, metadata: UploadMetadata): UploadResult
+    fun clearCache() {}
 }

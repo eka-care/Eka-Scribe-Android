@@ -11,12 +11,16 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.launch
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * SQUIM audio quality analyser that runs independently from the main pipeline.
  *
- * Frames are submitted via [submitFrame] (non-blocking, fire-and-forget).
- * Every [analysisDurationMs] (default 3 seconds) of accumulated audio,
+ * The ONNX model is loaded **lazily** in a background coroutine so it does not
+ * block session startup. Frames submitted before the model is ready are silently
+ * dropped (same behaviour as [NoOpAudioAnalyser]).
+ *
+ * Once loaded, every [analysisDurationMs] (default 3 seconds) of accumulated audio,
  * ONNX inference is launched asynchronously on [scope] and results are
  * published to [qualityFlow].
  */
@@ -39,6 +43,9 @@ class SquimAudioAnalyser(
     private var lastAnalysisTimeMs = 0L
     private val lock = Any()
 
+    /** True once the ONNX model has been loaded and is ready for inference. */
+    private val modelReady = AtomicBoolean(false)
+
     // Dedicated background thread with Android-level low priority via cgroup scheduling.
     // Process.THREAD_PRIORITY_BACKGROUND moves the thread to the bg cgroup,
     // which the Android scheduler actively throttles to protect UI responsiveness.
@@ -50,7 +57,25 @@ class SquimAudioAnalyser(
 
     private var threadPrioritySet = false
 
+    init {
+        // Load model lazily in background — does not block pipeline creation
+        scope.launch(inferenceDispatcher) {
+            try {
+                ensureBackgroundPriority()
+                logger.info(TAG, "Loading SQUIM model in background...")
+                modelProvider.load()
+                modelReady.set(true)
+                logger.info(TAG, "SQUIM model loaded and ready")
+            } catch (e: Exception) {
+                logger.warn(TAG, "Failed to load SQUIM model in background, analyser disabled", e)
+            }
+        }
+    }
+
     override fun submitFrame(frame: AudioFrame) {
+        // Drop frames until model is ready — no point accumulating
+        if (!modelReady.get()) return
+
         val framesToAnalyse: List<AudioFrame>?
         synchronized(lock) {
             frameAccumulator.add(frame)
