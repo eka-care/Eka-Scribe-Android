@@ -1,5 +1,7 @@
 package com.eka.scribesdk.integration
 
+import android.content.Context
+
 import com.eka.scribesdk.api.EkaScribeCallback
 import com.eka.scribesdk.api.EkaScribeConfig
 import com.eka.scribesdk.api.models.ScribeError
@@ -9,6 +11,7 @@ import com.eka.scribesdk.api.models.SessionState
 import com.eka.scribesdk.common.error.ErrorCode
 import com.eka.scribesdk.common.logging.Logger
 import com.eka.scribesdk.common.util.TimeProvider
+import com.eka.scribesdk.common.util.canRecordAudio
 import com.eka.scribesdk.data.DataManager
 import com.eka.scribesdk.data.local.db.entity.AudioChunkEntity
 import com.eka.scribesdk.data.local.db.entity.SessionEntity
@@ -29,6 +32,7 @@ import com.haroldadmin.cnradapter.NetworkResponse
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.mockkStatic
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.emptyFlow
@@ -68,6 +72,7 @@ internal class ScribeSessionIntegrationTest {
     private lateinit var mockPipeline: Pipeline
     private lateinit var mockPipelineFactory: Pipeline.Factory
     private lateinit var audioFocusFlow: MutableSharedFlow<Boolean>
+    private val mockContext: Context = mockk(relaxed = true)
 
     @Before
     fun setUp() {
@@ -88,6 +93,9 @@ internal class ScribeSessionIntegrationTest {
         every {
             mockPipelineFactory.create(any(), any(), any(), any(), any())
         } returns mockPipeline
+
+        mockkStatic(::canRecordAudio)
+        every { canRecordAudio(any()) } returns true
     }
 
     private fun createSessionManager(): SessionManager {
@@ -158,7 +166,11 @@ internal class ScribeSessionIntegrationTest {
 
         val manager = createSessionManager()
         var sessionId = ""
-        kotlinx.coroutines.runBlocking { manager.start(onStart = { sessionId = it }) }
+        kotlinx.coroutines.runBlocking {
+            manager.start(
+                context = mockContext,
+                onStart = { sessionId = it })
+        }
 
         waitFor(2000) { manager.currentState == SessionState.RECORDING }
         assertEquals(SessionState.RECORDING, manager.currentState)
@@ -193,7 +205,11 @@ internal class ScribeSessionIntegrationTest {
 
         val manager = createSessionManager()
         var sessionId = ""
-        kotlinx.coroutines.runBlocking { manager.start(onStart = { sessionId = it }) }
+        kotlinx.coroutines.runBlocking {
+            manager.start(
+                context = mockContext,
+                onStart = { sessionId = it })
+        }
 
         waitFor(2000) { manager.currentState == SessionState.ERROR }
         assertEquals(SessionState.ERROR, manager.currentState)
@@ -230,7 +246,7 @@ internal class ScribeSessionIntegrationTest {
         fakeUploader.result = UploadResult.Success("s3://ok")
 
         val manager = createSessionManager()
-        kotlinx.coroutines.runBlocking { manager.start() }
+        kotlinx.coroutines.runBlocking { manager.start(mockContext) }
 
         waitFor(2000) { manager.currentState == SessionState.RECORDING }
         manager.stop()
@@ -306,7 +322,11 @@ internal class ScribeSessionIntegrationTest {
 
         val manager = createSessionManager()
         var sessionId = ""
-        kotlinx.coroutines.runBlocking { manager.start(onStart = { sessionId = it }) }
+        kotlinx.coroutines.runBlocking {
+            manager.start(
+                context = mockContext,
+                onStart = { sessionId = it })
+        }
         waitFor(2000) { manager.currentState == SessionState.RECORDING }
         assertEquals(SessionState.RECORDING, manager.currentState)
 
@@ -347,7 +367,7 @@ internal class ScribeSessionIntegrationTest {
         fakeDm.allChunksUploaded = true
 
         val manager = createSessionManager()
-        kotlinx.coroutines.runBlocking { manager.start() }
+        kotlinx.coroutines.runBlocking { manager.start(mockContext) }
 
         waitFor(2000) { manager.currentState == SessionState.RECORDING }
         manager.stop()
@@ -379,7 +399,7 @@ internal class ScribeSessionIntegrationTest {
         fakeDm.allChunksUploaded = true
 
         val manager = createSessionManager()
-        kotlinx.coroutines.runBlocking { manager.start() }
+        kotlinx.coroutines.runBlocking { manager.start(mockContext) }
 
         waitFor(2000) { manager.currentState == SessionState.RECORDING }
         manager.stop()
@@ -412,7 +432,11 @@ internal class ScribeSessionIntegrationTest {
 
         val manager = createSessionManager()
         var sessionId = ""
-        kotlinx.coroutines.runBlocking { manager.start(onStart = { sessionId = it }) }
+        kotlinx.coroutines.runBlocking {
+            manager.start(
+                context = mockContext,
+                onStart = { sessionId = it })
+        }
 
         waitFor(2000) { manager.currentState == SessionState.RECORDING }
         assertEquals(SessionState.RECORDING, manager.currentState)

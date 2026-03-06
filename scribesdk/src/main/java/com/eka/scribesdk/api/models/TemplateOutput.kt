@@ -18,13 +18,16 @@ data class TemplateOutput(
     @SerializedName("isEditable")
     val isEditable: Boolean = false,
     @SerializedName("type")
-    val type: TemplateType
+    val type: TemplateType,
+    @SerializedName("rawOutput")
+    val rawOutput: String? = null
 )
 
 @Keep
 enum class TemplateType {
     MARKDOWN,
-    JSON
+    JSON,
+    EKA_EMR
 }
 
 @Keep

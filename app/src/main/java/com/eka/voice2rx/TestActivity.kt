@@ -143,10 +143,12 @@ class TestActivity : ComponentActivity() {
                 modelType = "pro"
             )
             lifecycleScope.launch {
-                val sessionInfo = EkaScribe.startSession(sessionConfig)
-                currentSessionId.value = sessionInfo.sessionId
-                currentState.value = sessionInfo.state
-                Log.d(TAG, "Session starting: ${sessionInfo.sessionId}")
+                EkaScribe.startSession(
+                    context = this@TestActivity,
+                    sessionConfig,
+                    onStart = { sessionId ->
+                        currentSessionId.value = sessionId
+                    })
                 showToast("Session starting")
             }
 

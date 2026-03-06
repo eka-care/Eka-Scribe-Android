@@ -11,6 +11,8 @@ plugins {
 val config =
     Properties().apply { load(project.rootProject.file("config.properties").inputStream()) }
 
+val sdk = Properties().apply { load(project.rootProject.file("sdk.properties").inputStream()) }
+
 android {
     namespace = "com.eka.scribesdk"
     compileSdk = 36
@@ -49,6 +51,16 @@ android {
                 "BUCKET_NAME",
                 "\"${config["BUCKET_NAME"]}\""
             )
+            buildConfigField(
+                "String",
+                "SDK_VERSION_NAME",
+                "\"${sdk["SDK_VERSION_NAME"]}\""
+            )
+            buildConfigField(
+                "String",
+                "SDK_BUILD_NUMBER",
+                "\"${sdk["SDK_BUILD_NUMBER"]}\""
+            )
         }
         debug {
             enableUnitTestCoverage = true
@@ -72,6 +84,16 @@ android {
                 "String",
                 "BUCKET_NAME",
                 "\"${config["BUCKET_NAME"]}\""
+            )
+            buildConfigField(
+                "String",
+                "SDK_VERSION_NAME",
+                "\"${sdk["SDK_VERSION_NAME"]}\""
+            )
+            buildConfigField(
+                "String",
+                "SDK_BUILD_NUMBER",
+                "\"${sdk["SDK_BUILD_NUMBER"]}\""
             )
         }
     }

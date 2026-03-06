@@ -1,5 +1,6 @@
 package com.eka.scribesdk.session
 
+import android.content.Context
 import com.eka.scribesdk.api.EkaScribeCallback
 import com.eka.scribesdk.api.EkaScribeConfig
 import com.eka.scribesdk.api.models.ScribeError
@@ -8,6 +9,7 @@ import com.eka.scribesdk.common.error.ErrorCode
 import com.eka.scribesdk.common.error.ScribeException
 import com.eka.scribesdk.common.logging.Logger
 import com.eka.scribesdk.common.util.TimeProvider
+import com.eka.scribesdk.common.util.canRecordAudio
 import com.eka.scribesdk.data.DataManager
 import com.eka.scribesdk.data.local.db.entity.AudioChunkEntity
 import com.eka.scribesdk.data.local.db.entity.SessionEntity
@@ -19,12 +21,14 @@ import com.eka.scribesdk.pipeline.Pipeline
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.mockkStatic
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
+import org.junit.Before
 import org.junit.Test
 import java.io.File
 
@@ -36,6 +40,14 @@ import java.io.File
  * This test focuses on state transition guards and error handling.
  */
 internal class SessionManagerTest {
+
+    private val mockContext: Context = mockk(relaxed = true)
+
+    @Before
+    fun setUp() {
+        mockkStatic(::canRecordAudio)
+        every { canRecordAudio(any()) } returns true
+    }
 
     private fun createManager(): SessionManager {
         val dm = FakeDataManager()
@@ -83,7 +95,7 @@ internal class SessionManagerTest {
     fun `start calls onStart with session ID and transitions to STARTING`() = runTest {
         val manager = createManagerWithSuccessInit()
         var sessionId = ""
-        manager.start(onStart = { sessionId = it })
+        manager.start(context = mockContext, onStart = { sessionId = it })
         Thread.sleep(200)
 
         assertTrue("Session ID should not be empty", sessionId.isNotEmpty())
@@ -94,7 +106,7 @@ internal class SessionManagerTest {
     fun `start generates unique session IDs`() = runTest {
         val manager = createManagerWithSuccessInit()
         var id1 = ""
-        manager.start(onStart = { id1 = it })
+        manager.start(context = mockContext, onStart = { id1 = it })
         Thread.sleep(200)
 
         // Stop to let manager reach COMPLETED/ERROR so we can restart
@@ -102,7 +114,7 @@ internal class SessionManagerTest {
         Thread.sleep(500)
 
         var id2 = ""
-        manager.start(onStart = { id2 = it })
+        manager.start(context = mockContext, onStart = { id2 = it })
         Thread.sleep(200)
 
         assertTrue("id1 should not be empty", id1.isNotEmpty())
@@ -113,13 +125,13 @@ internal class SessionManagerTest {
     @Test
     fun `start from RECORDING state throws`() = runTest {
         val manager = createManager()
-        manager.start()
+        manager.start(mockContext)
         Thread.sleep(200)
 
         // If async moved to RECORDING, a second start should throw
         if (manager.currentState == SessionState.RECORDING) {
             try {
-                manager.start()
+                manager.start(mockContext)
                 fail("Should throw ScribeException")
             } catch (e: ScribeException) {
                 assertEquals(ErrorCode.INVALID_STATE_TRANSITION, e.code)
@@ -130,7 +142,7 @@ internal class SessionManagerTest {
     @Test
     fun `start from ERROR state resets and starts new session`() = runTest {
         val manager = createManager()
-        manager.start()
+        manager.start(mockContext)
         Thread.sleep(300) // Wait for async to fail → ERROR
 
         assertEquals("Should be in ERROR state", SessionState.ERROR, manager.currentState)
@@ -140,7 +152,7 @@ internal class SessionManagerTest {
         // The mock returns error, but start() from ERROR state should still
         // reset and attempt. We just verify it doesn't throw.
         var errorReceived = false
-        manager.start(onError = { errorReceived = true })
+        manager.start(context = mockContext, onError = { errorReceived = true })
         Thread.sleep(300)
 
         // The important thing: start() from ERROR didn't throw (it reset and tried)
@@ -150,13 +162,13 @@ internal class SessionManagerTest {
     @Test
     fun `start from PAUSED state throws`() = runTest {
         val manager = createManager()
-        manager.start()
+        manager.start(mockContext)
         Thread.sleep(200)
 
         if (manager.currentState == SessionState.RECORDING) {
             manager.pause()
             try {
-                manager.start()
+                manager.start(mockContext)
                 fail("Should throw from PAUSED")
             } catch (e: ScribeException) {
                 assertEquals(ErrorCode.INVALID_STATE_TRANSITION, e.code)
@@ -182,7 +194,7 @@ internal class SessionManagerTest {
     @Test
     fun `pause from STARTING throws`() = runTest {
         val manager = createManager()
-        manager.start()
+        manager.start(mockContext)
         if (manager.currentState == SessionState.STARTING) {
             try {
                 manager.pause()
@@ -211,7 +223,7 @@ internal class SessionManagerTest {
     @Test
     fun `resume from RECORDING throws`() = runTest {
         val manager = createManager()
-        manager.start()
+        manager.start(mockContext)
         Thread.sleep(200)
 
         if (manager.currentState == SessionState.RECORDING) {
@@ -242,7 +254,7 @@ internal class SessionManagerTest {
     @Test
     fun `stop from STARTING throws`() = runTest {
         val manager = createManager()
-        manager.start()
+        manager.start(mockContext)
         if (manager.currentState == SessionState.STARTING) {
             try {
                 manager.stop()
@@ -290,7 +302,7 @@ internal class SessionManagerTest {
         coEvery { pipeline.stop() } throws RuntimeException("Pipeline crash")
 
         val manager = createManagerWithSuccessInit(pipeline = pipeline)
-        manager.start()
+        manager.start(mockContext)
         Thread.sleep(200)
 
         manager.stop()
@@ -309,7 +321,7 @@ internal class SessionManagerTest {
         coEvery { tm.retryFailedUploads(any()) } returns false // Simulate incomplete uploads
 
         val manager = createManagerWithSuccessInit(tm = tm)
-        manager.start()
+        manager.start(mockContext)
         Thread.sleep(200)
 
         manager.stop()
@@ -331,7 +343,7 @@ internal class SessionManagerTest {
         coEvery { tm.stopTransaction(any()) } returns TransactionResult.Error("API fails")
 
         val manager = createManagerWithSuccessInit(tm = tm)
-        manager.start()
+        manager.start(mockContext)
         Thread.sleep(200)
 
         manager.stop()
@@ -352,7 +364,7 @@ internal class SessionManagerTest {
         coEvery { tm.commitTransaction(any()) } returns TransactionResult.Error("API fails")
 
         val manager = createManagerWithSuccessInit(tm = tm)
-        manager.start()
+        manager.start(mockContext)
         Thread.sleep(200)
 
         manager.stop()
@@ -374,7 +386,7 @@ internal class SessionManagerTest {
         coEvery { tm.pollResult(any()) } returns TransactionPollResult.Timeout
 
         val manager = createManagerWithSuccessInit(tm = tm)
-        manager.start()
+        manager.start(mockContext)
         Thread.sleep(200)
 
         manager.stop()
@@ -418,7 +430,7 @@ internal class SessionManagerTest {
 
         val manager =
             createManagerWithSuccessInit(tm = tm, pipeline = pipeline, uploader = uploader)
-        manager.start()
+            manager.start(mockContext)
         Thread.sleep(200)
 
         manager.stop()
@@ -441,7 +453,7 @@ internal class SessionManagerTest {
     @Test
     fun `destroy after start resets to IDLE`() = runTest {
         val manager = createManager()
-        manager.start()
+        manager.start(mockContext)
         Thread.sleep(50)
         manager.destroy()
         assertEquals(SessionState.IDLE, manager.currentState)

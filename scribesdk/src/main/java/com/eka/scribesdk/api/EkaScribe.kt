@@ -240,11 +240,13 @@ object EkaScribe {
      * @throws ScribeException if SDK is not initialized or session is already active
      */
     suspend fun startSession(
+        context: Context,
         sessionConfig: SessionConfig = SessionConfig(),
         onStart: (String) -> Unit = {},
         onError: (ScribeError) -> Unit = {}
     ) {
         requireInitialized().start(
+            context = context,
             sessionConfig = sessionConfig,
             onStart = onStart,
             onError = onError

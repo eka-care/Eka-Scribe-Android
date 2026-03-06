@@ -50,11 +50,29 @@ internal data class ScribeResultResponse(
         )
 
         @Keep
+        data class Integration(
+            @SerializedName("errors")
+            val errors: List<ResultError?>?,
+            @SerializedName("name")
+            val name: String?,
+            @SerializedName("status")
+            val status: ResultStatus?,
+            @SerializedName("template_id")
+            val templateId: String?,
+            @SerializedName("type")
+            val type: OutputType?,
+            @SerializedName("value")
+            val value: String?,
+            @SerializedName("warnings")
+            val warnings: List<ResultWarning?>?
+        )
+
+        @Keep
         data class TemplateResults(
             @SerializedName("custom")
             val custom: List<Output?>?,
             @SerializedName("integration")
-            val integration: List<Any?>?,
+            val integration: List<Integration?>?,
             @SerializedName("transcript")
             val transcript: List<Transcript?>?
         )
@@ -124,7 +142,10 @@ internal enum class OutputType(val value: String) {
     TEXT("text"),
 
     @SerializedName("custom")
-    CUSTOM("custom")
+    CUSTOM("custom"),
+
+    @SerializedName("eka_emr")
+    EKA_EMR("eka_emr")
 }
 
 private val SUCCESS_STATES = setOf(ResultStatus.SUCCESS, ResultStatus.PARTIAL_COMPLETED)
@@ -136,6 +157,10 @@ internal fun ScribeResultResponse.toSessionResult(sessionId: String): SessionRes
         output?.toTemplateOutput(sessionId)
     }?.let { outputs.addAll(it) }
 
+    data?.templateResults?.integration?.mapNotNull { output ->
+        output?.toTemplateOutput(sessionId)
+    }?.let { outputs.addAll(it) }
+
     data?.templateResults?.transcript?.mapNotNull { transcript ->
         transcript?.toTranscriptOutput(sessionId)
     }?.let { outputs.addAll(it) }
@@ -143,6 +168,33 @@ internal fun ScribeResultResponse.toSessionResult(sessionId: String): SessionRes
     return SessionResult(
         templates = outputs,
         audioQuality = data?.audioMatrix?.quality
+    )
+}
+
+private fun ScribeResultResponse.Data.Integration.toTemplateOutput(sessionId: String): TemplateOutput? {
+    val data = value ?: return null
+    val id = templateId ?: return null
+    if (status !in SUCCESS_STATES) return null
+
+    val sections = mutableListOf<SectionData>()
+    var templateType = TemplateType.MARKDOWN
+
+    if (type == OutputType.JSON) {
+        templateType = TemplateType.JSON
+        sections.addAll(decodeJsonSections(data))
+    } else {
+        sections.add(SectionData(title = name, value = decodeBase64(data)))
+    }
+
+    return TemplateOutput(
+        name = name,
+        title = name,
+        sections = sections,
+        sessionId = sessionId,
+        templateId = id,
+        isEditable = type == OutputType.JSON,
+        type = templateType,
+        rawOutput = data
     )
 }
 
@@ -168,7 +220,8 @@ private fun ScribeResultResponse.Data.Output.toTemplateOutput(sessionId: String)
         sessionId = sessionId,
         templateId = id,
         isEditable = type == OutputType.JSON,
-        type = templateType
+        type = templateType,
+        rawOutput = data
     )
 }
 
@@ -193,7 +246,9 @@ private fun ScribeResultResponse.Data.Transcript.toTranscriptOutput(sessionId: S
         sections = sections,
         sessionId = sessionId,
         templateId = "transcript",
-        type = templateType
+        type = templateType,
+        isEditable = false,
+        rawOutput = data
     )
 }
 
@@ -202,7 +257,7 @@ private fun decodeBase64(base64: String?): String {
     return try {
         String(Base64.decode(base64, Base64.DEFAULT))
     } catch (e: Exception) {
-        ""
+        base64
     }
 }
 

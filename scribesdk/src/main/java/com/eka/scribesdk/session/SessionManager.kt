@@ -1,5 +1,6 @@
 package com.eka.scribesdk.session
 
+import android.content.Context
 import com.eka.scribesdk.api.EkaScribeCallback
 import com.eka.scribesdk.api.EkaScribeConfig
 import com.eka.scribesdk.api.models.AudioQualityMetrics
@@ -14,6 +15,7 @@ import com.eka.scribesdk.common.error.ScribeException
 import com.eka.scribesdk.common.logging.Logger
 import com.eka.scribesdk.common.util.IdGenerator
 import com.eka.scribesdk.common.util.TimeProvider
+import com.eka.scribesdk.common.util.canRecordAudio
 import com.eka.scribesdk.data.DataManager
 import com.eka.scribesdk.data.local.db.entity.SessionEntity
 import com.eka.scribesdk.data.local.db.entity.TransactionStage
@@ -85,10 +87,16 @@ internal class SessionManager(
     }
 
     suspend fun start(
+        context: Context,
         sessionConfig: SessionConfig = SessionConfig(),
         onStart: (String) -> Unit = {},
         onError: (ScribeError) -> Unit = {}
     ) {
+        if (!canRecordAudio(context = context)) {
+            onError(ScribeError(ErrorCode.MIC_PERMISSION_DENIED, "No audio record permission!"))
+            cleanup()
+            return
+        }
         val currentState = _stateFlow.value
         if (currentState != SessionState.IDLE) {
             if (currentState == SessionState.COMPLETED || currentState == SessionState.ERROR) {
