@@ -95,22 +95,22 @@ android {
     }
 }
 
-afterEvaluate {
-    publishing {
-        publications {
-            create<MavenPublication>("release") {
-                from(components["release"])
-
-                groupId = "com.eka.voice2rx"
-                artifactId = "voice2rx"
-                version = "0.0.1"
-            }
-        }
-    }
-    tasks.named("publishReleasePublicationToMavenLocal") {
-        dependsOn(tasks.named("bundleReleaseAar"))
-    }
-}
+//afterEvaluate {
+//    publishing {
+//        publications {
+//            create<MavenPublication>("release") {
+//                from(components["release"])
+//
+//                groupId = "com.eka.voice2rx"
+//                artifactId = "voice2rx"
+//                version = "0.0.1"
+//            }
+//        }
+//    }
+//    tasks.named("publishReleasePublicationToMavenLocal") {
+//        dependsOn(tasks.named("bundleReleaseAar"))
+//    }
+//}
 
 dependencies {
     testImplementation(libs.junit)

@@ -1,0 +1,167 @@
+package com.eka.scribesdk.chunker
+
+import com.eka.scribesdk.analyser.AudioQuality
+import com.eka.scribesdk.api.models.VoiceActivityData
+import com.eka.scribesdk.common.logging.Logger
+import com.eka.scribesdk.common.util.IdGenerator
+import com.eka.scribesdk.recorder.AudioFrame
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.filterNotNull
+
+class VadAudioChunker(
+    private val vadProvider: VadProvider,
+    private val config: ChunkConfig,
+    private val sessionId: String,
+    private val sampleRate: Int,
+    private val logger: Logger
+) : AudioChunker {
+
+    companion object {
+        private const val TAG = "VadAudioChunker"
+    }
+
+    private val _activityFlow = MutableStateFlow<VoiceActivityData?>(null)
+    override val activityFlow: Flow<VoiceActivityData> = _activityFlow.asStateFlow().filterNotNull()
+
+    // Pre-compute sample thresholds — no ms division at runtime
+    private val prefLengthSamples = config.preferredDurationSec * sampleRate
+    private val despLengthSamples = config.desperationDurationSec * sampleRate
+    private val maxLengthSamples = config.maxDurationSec * sampleRate
+    private val longSilenceThreshold = (config.longSilenceSec * sampleRate).toInt()
+    private val shortSilenceThreshold = (config.shortSilenceSec * sampleRate).toInt()
+    private val overlapSamples = (config.overlapDurationSec * sampleRate).toInt()
+
+    private val frameAccumulator = mutableListOf<AudioFrame>()
+    private var chunkIndex = 0
+    private var accumulatedSamples = 0L
+    private var silenceSamples = 0L
+
+    // Sample-based offset tracking for accurate timing
+    private var totalSamplesProcessed = 0L
+    private var chunkStartSampleOffset = 0L
+
+    @Volatile
+    private var latestQuality: AudioQuality? = null
+
+    override fun feed(frame: AudioFrame): AudioChunk? {
+        val vadResult = vadProvider.detect(frame.pcm)
+
+        _activityFlow.value = VoiceActivityData(
+            isSpeech = vadResult.isSpeech,
+            amplitude = calculateAmplitude(frame.pcm),
+            timestampMs = frame.timestampMs
+        )
+
+        frameAccumulator.add(frame)
+        accumulatedSamples += frame.pcm.size
+        totalSamplesProcessed += frame.pcm.size
+
+        if (vadResult.isSpeech) {
+            silenceSamples = 0
+        } else {
+            silenceSamples += frame.pcm.size
+        }
+
+        return if (shouldChunk()) {
+            createChunk()
+        } else {
+            null
+        }
+    }
+
+    override fun flush(): AudioChunk? {
+        if (frameAccumulator.isEmpty()) return null
+        if (accumulatedSamples < sampleRate) {
+            logger.debug(TAG, "Flush skipped: remaining ${accumulatedSamples} samples < 1s")
+            frameAccumulator.clear()
+            accumulatedSamples = 0
+            silenceSamples = 0
+            return null
+        }
+        return createChunk(isFlush = true)
+    }
+
+    override fun setLatestQuality(quality: AudioQuality?) {
+        latestQuality = quality
+    }
+
+    override fun release() {
+        frameAccumulator.clear()
+        latestQuality = null
+        vadProvider.unload()
+        logger.info(TAG, "VadAudioChunker released")
+    }
+
+    /**
+     * Chunking decision logic (sample-based, matching Voice2Rx AudioHelper):
+     * - accumulated > preferred AND silence > longThreshold -> natural break
+     * - accumulated > desperation AND silence > shortThreshold -> desperation cut
+     * - accumulated >= max -> force cut
+     */
+    private fun shouldChunk(): Boolean {
+        if (accumulatedSamples > prefLengthSamples && silenceSamples > longSilenceThreshold) {
+            return true
+        }
+        if (accumulatedSamples > despLengthSamples && silenceSamples > shortSilenceThreshold) {
+            return true
+        }
+        if (accumulatedSamples >= maxLengthSamples) {
+            return true
+        }
+        return false
+    }
+
+    private fun createChunk(isFlush: Boolean = false): AudioChunk {
+        val startTimeMs = chunkStartSampleOffset * 1000 / sampleRate
+        val endTimeMs = totalSamplesProcessed * 1000 / sampleRate
+
+        val chunk = AudioChunk(
+            chunkId = IdGenerator.chunkId(sessionId, chunkIndex),
+            sessionId = sessionId,
+            index = chunkIndex,
+            frames = frameAccumulator.toList(),
+            startTimeMs = startTimeMs,
+            endTimeMs = endTimeMs,
+            quality = latestQuality
+        )
+
+        logger.debug(
+            TAG,
+            "Chunk #$chunkIndex created: ${chunk.durationMs}ms, ${chunk.frames.size} frames, " +
+                    "st=${startTimeMs}ms, et=${endTimeMs}ms"
+        )
+
+        chunkIndex++
+
+        if (isFlush) {
+            // Last chunk — no overlap needed, just clear
+            frameAccumulator.clear()
+            accumulatedSamples = 0
+        } else {
+            // Keep the last overlapSamples worth of frames for the next chunk
+            var keptSamples = 0L
+            val overlapFrames = mutableListOf<AudioFrame>()
+            for (frame in frameAccumulator.reversed()) {
+                if (keptSamples >= overlapSamples) break
+                overlapFrames.add(0, frame)
+                keptSamples += frame.pcm.size
+            }
+            frameAccumulator.clear()
+            frameAccumulator.addAll(overlapFrames)
+            accumulatedSamples = keptSamples
+            chunkStartSampleOffset = totalSamplesProcessed - keptSamples
+        }
+        silenceSamples = 0
+
+        return chunk
+    }
+
+    private fun calculateAmplitude(pcm: ShortArray): Float {
+        if (pcm.isEmpty()) return 0f
+        val maxAmplitude = 32767f
+        val maxValue = pcm.maxOfOrNull { kotlin.math.abs(it.toInt()) } ?: 0
+        return (maxValue / maxAmplitude).coerceIn(0f, 1f)
+    }
+}

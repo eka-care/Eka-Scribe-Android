@@ -33,11 +33,11 @@ android {
         }
     }
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_1_8
-        targetCompatibility = JavaVersion.VERSION_1_8
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions {
-        jvmTarget = "1.8"
+        jvmTarget = "17"
     }
     buildFeatures {
         compose = true
@@ -69,10 +69,5 @@ dependencies {
 //        exclude(group = "com.google.protobuf", module = "protobuf-java")
     }
     implementation(libs.retrofit.gson)
-    implementation(libs.eka.scribe.sdk)
-
-//    implementation("com.github.eka-care:eka-v2rx-android:1.0.4")
-    implementation("com.github.jeziellago:compose-markdown:0.5.4") {
-        exclude(group = "androidx.appcompat", module = "appcompat")
-    }
+    implementation(project(":scribesdk"))
 }
