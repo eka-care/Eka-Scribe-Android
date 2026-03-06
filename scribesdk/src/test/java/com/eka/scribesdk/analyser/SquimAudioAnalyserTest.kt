@@ -67,7 +67,7 @@ class SquimAudioAnalyserTest {
     // =====================================================================
 
     @Test
-    fun `model loads in background without blocking constructor`() = runTest {
+    fun `model loads in background without blocking constructor`() {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val provider = createMockProvider(loadDelayMs = 100)
 
@@ -77,9 +77,8 @@ class SquimAudioAnalyserTest {
             logger = logger
         )
 
-        // Wait for background loading to complete
-        delay(300)
-        verify { provider.load() }
+        // Deterministically wait for background load — polls until verified or timeout
+        verify(timeout = 5000) { provider.load() }
 
         analyser.release()
     }
