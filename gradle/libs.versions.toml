@@ -26,9 +26,12 @@ retrofit-version = "2.11.0"
 gson = "2.11.0"
 workRuntimeKtx = "2.8.1"
 kotlinx-coroutines = "1.10.2"
+mockk = "1.13.12"
 ok2curl = "0.8.0"
 brotiliVersion = "0.1.2"
 ekascribe_sdk = "3.0.8"
+appcompatVersion = "1.7.1"
+materialVersion = "1.13.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -66,8 +69,12 @@ haroldadmin-networkresponseadapter = { module = "com.github.haroldadmin:NetworkR
 androidx-work-runtime-ktx = { module = "androidx.work:work-runtime-ktx", version.ref = "workRuntimeKtx" }
 
 kotlinx-coroutines = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "kotlinx-coroutines" }
+kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "kotlinx-coroutines" }
+mockk = { module = "io.mockk:mockk", version.ref = "mockk" }
 ok2curl = { module = "com.github.mrmike:ok2curl", version.ref = "ok2curl" }
 brotili = { module = "org.brotli:dec", version.ref = "brotiliVersion" }
+androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompatVersion" }
+material = { group = "com.google.android.material", name = "material", version.ref = "materialVersion" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
