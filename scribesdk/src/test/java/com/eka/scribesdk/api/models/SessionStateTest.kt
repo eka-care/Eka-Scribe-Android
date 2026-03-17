@@ -31,11 +31,11 @@ class SessionStateTest {
     }
 
     @Test
-    fun `PAUSED can transition to RECORDING or STOPPING`() {
+    fun `PAUSED can transition to RECORDING, STOPPING, or ERROR`() {
         assertTrue(SessionState.PAUSED.canTransitionTo(SessionState.RECORDING))
         assertTrue(SessionState.PAUSED.canTransitionTo(SessionState.STOPPING))
+        assertTrue(SessionState.PAUSED.canTransitionTo(SessionState.ERROR))
         assertFalse(SessionState.PAUSED.canTransitionTo(SessionState.IDLE))
-        assertFalse(SessionState.PAUSED.canTransitionTo(SessionState.ERROR))
     }
 
     @Test

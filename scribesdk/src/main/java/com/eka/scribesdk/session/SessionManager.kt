@@ -39,7 +39,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
@@ -242,7 +241,17 @@ internal class SessionManager(
     }
 
     fun pause() {
-        assertState(SessionState.RECORDING)
+        val current = _stateFlow.value
+        if (current == SessionState.PAUSED) {
+            logger.info(TAG, "pause() called while already PAUSED — no-op")
+            return
+        }
+        if (current != SessionState.RECORDING) {
+            throw ScribeException(
+                ErrorCode.INVALID_STATE_TRANSITION,
+                "Cannot pause from state: $current"
+            )
+        }
         pipeline?.pause()
         transition(SessionState.PAUSED)
         activeSessionId?.let { callback?.onSessionPaused(it) }
@@ -251,7 +260,17 @@ internal class SessionManager(
     }
 
     fun resume() {
-        assertState(SessionState.PAUSED)
+        val current = _stateFlow.value
+        if (current == SessionState.RECORDING) {
+            logger.info(TAG, "resume() called while already RECORDING — no-op")
+            return
+        }
+        if (current != SessionState.PAUSED) {
+            throw ScribeException(
+                ErrorCode.INVALID_STATE_TRANSITION,
+                "Cannot resume from state: $current"
+            )
+        }
         pipeline?.resume()
         transition(SessionState.RECORDING)
         activeSessionId?.let { callback?.onSessionResumed(it) }
@@ -261,6 +280,10 @@ internal class SessionManager(
 
     fun stop() {
         val currentState = _stateFlow.value
+        if (currentState == SessionState.STOPPING || currentState == SessionState.PROCESSING) {
+            logger.info(TAG, "stop() called while already $currentState — no-op")
+            return
+        }
         if (currentState != SessionState.RECORDING && currentState != SessionState.PAUSED) {
             throw ScribeException(
                 ErrorCode.INVALID_STATE_TRANSITION,
@@ -430,15 +453,43 @@ internal class SessionManager(
         }
     }
 
-    fun destroy() {
-        runBlocking(Dispatchers.IO) {
-            withTimeoutOrNull(10_000L) {
-                pipeline?.stop()
+    fun cancel() {
+        val current = _stateFlow.value
+        if (current == SessionState.IDLE || current == SessionState.COMPLETED || current == SessionState.ERROR) {
+            logger.info(TAG, "cancel() called in state $current — no-op")
+            return
+        }
+        val sessionId = activeSessionId
+        val activePipeline = pipeline
+        sessionScope.cancel()
+        cleanup()
+        forceTransition(SessionState.IDLE)
+        sessionId?.let { callback?.onSessionCancelled(it) }
+        logger.info(TAG, "Session cancelled from state: $current")
+        // Fire-and-forget pipeline stop on a dedicated scope
+        deferredUploadScope.launch {
+            try {
+                withTimeoutOrNull(5_000L) { activePipeline?.stop() }
+            } catch (e: Exception) {
+                logger.warn(TAG, "Pipeline stop failed during cancel", e)
             }
         }
+    }
+
+    fun destroy() {
+        val activePipeline = pipeline
+        sessionScope.cancel()
         cleanup()
-        transition(SessionState.IDLE)
+        forceTransition(SessionState.IDLE)
         logger.info(TAG, "SessionManager destroyed")
+        // Fire-and-forget pipeline stop on a dedicated scope
+        deferredUploadScope.launch {
+            try {
+                withTimeoutOrNull(10_000L) { activePipeline?.stop() }
+            } catch (e: Exception) {
+                logger.warn(TAG, "Pipeline stop failed during destroy", e)
+            }
+        }
     }
 
     private fun handleTransactionError(sessionId: String, errorCode: ErrorCode, message: String) {
@@ -462,14 +513,11 @@ internal class SessionManager(
         _stateFlow.value = newState
     }
 
-    private fun assertState(expected: SessionState) {
+    private fun forceTransition(newState: SessionState) {
         val current = _stateFlow.value
-        if (current != expected) {
-            throw ScribeException(
-                ErrorCode.INVALID_STATE_TRANSITION,
-                "Expected state $expected but was $current"
-            )
-        }
+        if (current == newState) return
+        logger.info(TAG, "Force state: $current -> $newState")
+        _stateFlow.value = newState
     }
 
     /**
@@ -489,7 +537,7 @@ internal class SessionManager(
         }
         scope.launch {
             activePipeline.audioFocusFlow.collect { hasFocus ->
-                if (!hasFocus) {
+                if (!hasFocus && _stateFlow.value == SessionState.RECORDING) {
                     pause()
                 }
                 emitter.emit(

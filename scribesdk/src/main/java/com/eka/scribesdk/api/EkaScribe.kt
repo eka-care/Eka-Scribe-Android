@@ -265,6 +265,10 @@ object EkaScribe {
         requireInitialized().stop()
     }
 
+    fun cancelSession() {
+        requireInitialized().cancel()
+    }
+
     fun isRecording(): Boolean {
         return sessionManager?.currentState == SessionState.RECORDING
     }
