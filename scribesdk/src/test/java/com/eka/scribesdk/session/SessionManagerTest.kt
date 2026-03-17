@@ -221,18 +221,15 @@ internal class SessionManagerTest {
     }
 
     @Test
-    fun `resume from RECORDING throws`() = runTest {
-        val manager = createManager()
+    fun `resume from RECORDING is idempotent no-op`() = runTest {
+        val manager = createManagerWithSuccessInit()
         manager.start(mockContext)
         Thread.sleep(200)
 
         if (manager.currentState == SessionState.RECORDING) {
-            try {
-                manager.resume()
-                fail("Should throw from RECORDING")
-            } catch (e: ScribeException) {
-                assertEquals(ErrorCode.INVALID_STATE_TRANSITION, e.code)
-            }
+            // Should NOT throw — idempotent behavior
+            manager.resume()
+            assertEquals(SessionState.RECORDING, manager.currentState)
         }
     }
 
@@ -440,6 +437,77 @@ internal class SessionManagerTest {
     }
 
     // =====================================================================
+    // IDEMPOTENT OPERATIONS
+    // =====================================================================
+
+    @Test
+    fun `pause from PAUSED is idempotent no-op`() = runTest {
+        val manager = createManagerWithSuccessInit()
+        manager.start(mockContext)
+        Thread.sleep(200)
+
+        if (manager.currentState == SessionState.RECORDING) {
+            manager.pause()
+            assertEquals(SessionState.PAUSED, manager.currentState)
+            // Second pause should not throw
+            manager.pause()
+            assertEquals(SessionState.PAUSED, manager.currentState)
+        }
+    }
+
+    @Test
+    fun `stop from STOPPING is idempotent no-op`() = runTest {
+        val manager = createManagerWithSuccessInit()
+        manager.start(mockContext)
+        Thread.sleep(200)
+
+        if (manager.currentState == SessionState.RECORDING) {
+            manager.stop()
+            if (manager.currentState == SessionState.STOPPING) {
+                // Second stop should not throw
+                manager.stop()
+            }
+        }
+    }
+
+    // =====================================================================
+    // CANCEL
+    // =====================================================================
+
+    @Test
+    fun `cancel from IDLE is no-op`() {
+        val manager = createManager()
+        manager.cancel()
+        assertEquals(SessionState.IDLE, manager.currentState)
+    }
+
+    @Test
+    fun `cancel from RECORDING resets to IDLE`() = runTest {
+        val manager = createManagerWithSuccessInit()
+        manager.start(mockContext)
+        Thread.sleep(200)
+
+        if (manager.currentState == SessionState.RECORDING) {
+            manager.cancel()
+            assertEquals(SessionState.IDLE, manager.currentState)
+        }
+    }
+
+    @Test
+    fun `cancel from PAUSED resets to IDLE`() = runTest {
+        val manager = createManagerWithSuccessInit()
+        manager.start(mockContext)
+        Thread.sleep(200)
+
+        if (manager.currentState == SessionState.RECORDING) {
+            manager.pause()
+            assertEquals(SessionState.PAUSED, manager.currentState)
+            manager.cancel()
+            assertEquals(SessionState.IDLE, manager.currentState)
+        }
+    }
+
+    // =====================================================================
     // DESTROY
     // =====================================================================
 
@@ -455,6 +523,31 @@ internal class SessionManagerTest {
         val manager = createManager()
         manager.start(mockContext)
         Thread.sleep(50)
+        manager.destroy()
+        assertEquals(SessionState.IDLE, manager.currentState)
+    }
+
+    @Test
+    fun `destroy from PAUSED resets to IDLE`() = runTest {
+        val manager = createManagerWithSuccessInit()
+        manager.start(mockContext)
+        Thread.sleep(200)
+
+        if (manager.currentState == SessionState.RECORDING) {
+            manager.pause()
+            assertEquals(SessionState.PAUSED, manager.currentState)
+            manager.destroy()
+            assertEquals(SessionState.IDLE, manager.currentState)
+        }
+    }
+
+    @Test
+    fun `destroy from ERROR resets to IDLE`() = runTest {
+        val manager = createManager()
+        manager.start(mockContext)
+        Thread.sleep(300)
+
+        assertEquals(SessionState.ERROR, manager.currentState)
         manager.destroy()
         assertEquals(SessionState.IDLE, manager.currentState)
     }

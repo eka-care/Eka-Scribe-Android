@@ -15,7 +15,7 @@ enum class SessionState {
             IDLE -> target == STARTING
             STARTING -> target == RECORDING || target == ERROR
             RECORDING -> target == PAUSED || target == STOPPING || target == ERROR
-            PAUSED -> target == RECORDING || target == STOPPING
+            PAUSED -> target == RECORDING || target == STOPPING || target == ERROR
             STOPPING -> target == PROCESSING || target == COMPLETED || target == ERROR
             PROCESSING -> target == COMPLETED || target == ERROR
             COMPLETED -> target == IDLE

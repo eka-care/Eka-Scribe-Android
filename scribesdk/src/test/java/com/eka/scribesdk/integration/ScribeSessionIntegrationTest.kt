@@ -477,6 +477,47 @@ internal class ScribeSessionIntegrationTest {
     }
 
     // =====================================================================
+    // SCENARIO 9: DOUBLE AUDIO FOCUS LOSS DOES NOT CRASH
+    // =====================================================================
+
+    @Test
+    fun `scenario 9 - double audio focus loss does not crash`() {
+        fakeApi.initResponse = netSuccess(initOk("bid-double-focus"))
+        fakeApi.stopResponse = netSuccess(stopOk())
+        fakeApi.commitResponse = netSuccess(stopOk())
+        fakeApi.pollResponses = mutableListOf(
+            netSuccess(makeResultResponse(ResultStatus.SUCCESS))
+        )
+        fakeDm.allChunksUploaded = true
+
+        val manager = createSessionManager()
+        kotlinx.coroutines.runBlocking {
+            manager.start(context = mockContext, onStart = {})
+        }
+        waitFor(2000) { manager.currentState == SessionState.RECORDING }
+
+        // First audio focus loss -> auto-pause
+        audioFocusFlow.tryEmit(false)
+        waitFor(1000) { manager.currentState == SessionState.PAUSED }
+        assertEquals(SessionState.PAUSED, manager.currentState)
+
+        // Second audio focus loss while already PAUSED -> should be no-op, NOT crash
+        audioFocusFlow.tryEmit(false)
+        Thread.sleep(200)
+        assertEquals(SessionState.PAUSED, manager.currentState)
+
+        // Resume and complete normally
+        manager.resume()
+        assertEquals(SessionState.RECORDING, manager.currentState)
+
+        manager.stop()
+        waitFor(5000) {
+            manager.currentState == SessionState.COMPLETED || manager.currentState == SessionState.ERROR
+        }
+        assertEquals(SessionState.COMPLETED, manager.currentState)
+    }
+
+    // =====================================================================
     // UTILITIES
     // =====================================================================
 
