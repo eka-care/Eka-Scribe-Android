@@ -69,5 +69,5 @@ dependencies {
 //        exclude(group = "com.google.protobuf", module = "protobuf-java")
     }
     implementation(libs.retrofit.gson)
-    implementation(project(":scribesdk"))
+    implementation("com.github.eka-care:Eka-Scribe-Android:4.0.4")
 }

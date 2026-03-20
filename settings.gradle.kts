@@ -29,3 +29,4 @@ rootProject.name = "Voice2Rx"
 include(":app")
 include(":voice2rx_sdk")
 include(":scribesdk")
+include(":sample-java")
