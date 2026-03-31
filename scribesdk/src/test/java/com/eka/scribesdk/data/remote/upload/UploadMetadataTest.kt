@@ -15,7 +15,7 @@ class UploadMetadataTest {
             folderName = "260302",
             bid = "bid-1"
         )
-        assertEquals("audio/wav", metadata.mimeType)
+        assertEquals("audio/mpeg", metadata.mimeType)
     }
 
     @Test
@@ -24,12 +24,12 @@ class UploadMetadataTest {
             chunkId = "c1",
             sessionId = "s1",
             chunkIndex = 0,
-            fileName = "chunk.m4a",
+            fileName = "chunk.mp3",
             folderName = "260302",
             bid = "bid-1",
-            mimeType = "audio/m4a"
+            mimeType = "audio/mpeg"
         )
-        assertEquals("audio/m4a", metadata.mimeType)
+        assertEquals("audio/mpeg", metadata.mimeType)
     }
 
     @Test
@@ -38,14 +38,14 @@ class UploadMetadataTest {
             chunkId = "chunk-42",
             sessionId = "session-99",
             chunkIndex = 5,
-            fileName = "5.m4a",
+            fileName = "5.mp3",
             folderName = "260302",
             bid = "bid-xyz"
         )
         assertEquals("chunk-42", metadata.chunkId)
         assertEquals("session-99", metadata.sessionId)
         assertEquals(5, metadata.chunkIndex)
-        assertEquals("5.m4a", metadata.fileName)
+        assertEquals("5.mp3", metadata.fileName)
         assertEquals("260302", metadata.folderName)
         assertEquals("bid-xyz", metadata.bid)
     }

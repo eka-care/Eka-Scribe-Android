@@ -162,23 +162,23 @@ internal class Pipeline(
         if (allFrames.isEmpty()) return null
         return try {
             val sampleRate = allFrames.first().sampleRate
-            // Encode as .m4a first (encoder internally does outputPath.replace(".m4a", ".wav"))
-            val m4aPath = File(outputDir, "${sessionId}_full_audio.m4a").absolutePath
-            encoder.encode(allFrames, sampleRate, m4aPath)
+            // Encode as .mp3 first (encoder internally does outputPath.replace(".mp3", ".wav"))
+            val mp3Path = File(outputDir, "${sessionId}_full_audio.mp3").absolutePath
+            encoder.encode(allFrames, sampleRate, mp3Path)
 
-            // Rename to .m4a_ per naming convention
-            val m4aFile = File(m4aPath)
-            val m4a_File = File(outputDir, "${sessionId}_full_audio.m4a_")
-            m4aFile.renameTo(m4a_File)
+            // Rename to .mp3_ per naming convention
+            val mp3File = File(mp3Path)
+            val mp3_File = File(outputDir, "${sessionId}_full_audio.mp3_")
+            mp3File.renameTo(mp3_File)
 
             allFrames.clear()
-            logger.info(TAG, "Full audio generated: ${m4a_File.absolutePath}")
+            logger.info(TAG, "Full audio generated: ${mp3_File.absolutePath}")
             onEvent?.invoke(
                 SessionEventName.FULL_AUDIO_GENERATED, EventType.SUCCESS,
                 "Full audio file generated",
-                mapOf("filePath" to m4a_File.absolutePath)
+                mapOf("filePath" to mp3_File.absolutePath)
             )
-            FullAudioResult(m4a_File.absolutePath, sessionId, folderName, bid)
+            FullAudioResult(mp3_File.absolutePath, sessionId, folderName, bid)
         } catch (e: Exception) {
             logger.error(TAG, "Full audio generation failed", e)
             onEvent?.invoke(
@@ -233,10 +233,10 @@ internal class Pipeline(
         persistenceJob = scope.launch(Dispatchers.IO) {
             for (chunk in chunkChannel) {
                 try {
-                    // 1-based file naming: 1.m4a, 2.m4a, ...
-                    val fileName = "${chunk.index + 1}.m4a"
+                    // 1-based file naming: 1.mp3, 2.mp3, ...
+                    val fileName = "${chunk.index + 1}.mp3"
                     val outputPath =
-                        File(outputDir, "${sessionId}_${chunk.index + 1}.m4a").absolutePath
+                        File(outputDir, "${sessionId}_${chunk.index + 1}.mp3").absolutePath
 
                     val encoded = encoder.encode(
                         frames = chunk.frames,

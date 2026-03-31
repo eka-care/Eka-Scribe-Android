@@ -236,6 +236,9 @@ dependencies {
     // ONNX Runtime (SQUIM)
     implementation(libs.onnxruntime.android)
 
+    // LAME MP3 encoder
+    implementation(libs.tandroidlame)
+
     // Testing
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)

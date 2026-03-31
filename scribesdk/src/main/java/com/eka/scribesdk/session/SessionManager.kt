@@ -572,7 +572,7 @@ internal class SessionManager(
                     chunkId = "${result.sessionId}_full_audio",
                     sessionId = result.sessionId,
                     chunkIndex = -1,
-                    fileName = "full_audio.m4a_",
+                    fileName = "full_audio.mp3_",
                     folderName = result.folderName,
                     bid = result.bid
                 )

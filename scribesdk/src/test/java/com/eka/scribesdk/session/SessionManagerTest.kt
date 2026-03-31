@@ -400,7 +400,7 @@ internal class SessionManagerTest {
         every { pipeline.audioQualityFlow } returns emptyFlow()
         every { pipeline.audioFocusFlow } returns emptyFlow()
 
-        val tempFile = File.createTempFile("test_audio", ".m4a")
+            val tempFile = File.createTempFile("test_audio", ".mp3")
         tempFile.deleteOnExit()
 
         coEvery { pipeline.stop() } returns FullAudioResult(

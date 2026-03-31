@@ -39,7 +39,7 @@ import com.eka.scribesdk.data.remote.models.responses.toTemplateItem
 import com.eka.scribesdk.data.remote.models.responses.toUserConfigs
 import com.eka.scribesdk.data.remote.services.ScribeApiService
 import com.eka.scribesdk.data.remote.upload.S3ChunkUploader
-import com.eka.scribesdk.encoder.M4aAudioEncoder
+import com.eka.scribesdk.encoder.Mp3AudioEncoder
 import com.eka.scribesdk.pipeline.Pipeline
 import com.eka.scribesdk.session.SessionManager
 import com.eka.scribesdk.session.TransactionManager
@@ -144,7 +144,7 @@ object EkaScribe {
         )
         dataManager = dm
 
-        val encoder = M4aAudioEncoder(logger)
+        val encoder = Mp3AudioEncoder(logger)
 
         val credentialProvider = S3CredentialProvider(
             apiService = cogApiService,

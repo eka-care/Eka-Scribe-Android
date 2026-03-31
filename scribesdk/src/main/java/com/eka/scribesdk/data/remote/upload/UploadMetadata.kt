@@ -7,5 +7,5 @@ data class UploadMetadata(
     val fileName: String,
     val folderName: String,
     val bid: String,
-    val mimeType: String = "audio/wav"
+    val mimeType: String = "audio/mpeg"
 )

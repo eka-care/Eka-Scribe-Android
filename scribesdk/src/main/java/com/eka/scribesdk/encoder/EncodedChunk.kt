@@ -9,5 +9,5 @@ data class EncodedChunk(
 
 enum class AudioFormat {
     WAV,
-    M4A
+    MP3
 }

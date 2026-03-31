@@ -12,8 +12,8 @@ internal class AudioChunkEntityExtrasTest {
             chunkId = "c1",
             sessionId = "s1",
             chunkIndex = 0,
-            filePath = "/tmp/c1.m4a",
-            fileName = "c1.m4a",
+            filePath = "/tmp/c1.mp3",
+            fileName = "c1.mp3",
             startTimeMs = 0,
             endTimeMs = 10000,
             durationMs = 10000,
@@ -26,7 +26,7 @@ internal class AudioChunkEntityExtrasTest {
     fun `default retryCount is 0`() {
         val chunk = AudioChunkEntity(
             chunkId = "c1", sessionId = "s1", chunkIndex = 0,
-            filePath = "/tmp/c1.m4a", fileName = "c1.m4a",
+            filePath = "/tmp/c1.mp3", fileName = "c1.mp3",
             startTimeMs = 0, endTimeMs = 5000, durationMs = 5000,
             createdAt = 1000L
         )
@@ -37,7 +37,7 @@ internal class AudioChunkEntityExtrasTest {
     fun `default qualityScore is null`() {
         val chunk = AudioChunkEntity(
             chunkId = "c1", sessionId = "s1", chunkIndex = 0,
-            filePath = "/tmp/c1.m4a", fileName = "c1.m4a",
+            filePath = "/tmp/c1.mp3", fileName = "c1.mp3",
             startTimeMs = 0, endTimeMs = 5000, durationMs = 5000,
             createdAt = 1000L
         )
@@ -48,7 +48,7 @@ internal class AudioChunkEntityExtrasTest {
     fun `explicit values override defaults`() {
         val chunk = AudioChunkEntity(
             chunkId = "c1", sessionId = "s1", chunkIndex = 2,
-            filePath = "/tmp/c1.m4a", fileName = "c1.m4a",
+            filePath = "/tmp/c1.mp3", fileName = "c1.mp3",
             startTimeMs = 5000, endTimeMs = 15000, durationMs = 10000,
             uploadState = UploadState.SUCCESS.name,
             retryCount = 3,
@@ -68,7 +68,7 @@ internal class AudioChunkEntityExtrasTest {
     fun `copy preserves all fields`() {
         val original = AudioChunkEntity(
             chunkId = "c1", sessionId = "s1", chunkIndex = 0,
-            filePath = "/tmp/c1.m4a", fileName = "c1.m4a",
+            filePath = "/tmp/c1.mp3", fileName = "c1.mp3",
             startTimeMs = 0, endTimeMs = 5000, durationMs = 5000,
             createdAt = 1000L
         )

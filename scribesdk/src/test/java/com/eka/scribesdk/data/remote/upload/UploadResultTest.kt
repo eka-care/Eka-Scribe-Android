@@ -9,9 +9,9 @@ class UploadResultTest {
 
     @Test
     fun `Success contains url`() {
-        val result = UploadResult.Success("s3://bucket/file.m4a")
+        val result = UploadResult.Success("s3://bucket/file.mp3")
         assertTrue(result is UploadResult)
-        assertEquals("s3://bucket/file.m4a", result.url)
+        assertEquals("s3://bucket/file.mp3", result.url)
     }
 
     @Test
