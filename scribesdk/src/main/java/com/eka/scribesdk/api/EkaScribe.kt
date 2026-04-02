@@ -31,6 +31,7 @@ import com.eka.scribesdk.common.util.TimeProvider
 import com.eka.scribesdk.common.util.deleteFile
 import com.eka.scribesdk.data.DataManager
 import com.eka.scribesdk.data.DefaultDataManager
+import com.eka.scribesdk.data.ScribeRepository
 import com.eka.scribesdk.data.local.db.ScribeDatabase
 import com.eka.scribesdk.data.local.db.entity.AudioChunkEntity
 import com.eka.scribesdk.data.local.db.entity.SessionEntity
@@ -58,12 +59,10 @@ import com.eka.scribesdk.session.SessionManager
 import com.eka.scribesdk.session.TransactionManager
 import com.eka.scribesdk.session.TransactionPollResult
 import com.eka.scribesdk.session.TransactionResult
-import com.haroldadmin.cnradapter.NetworkResponse
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -94,6 +93,7 @@ object EkaScribe {
 
     private var sessionManager: SessionManager? = null
     private var transactionManager: TransactionManager? = null
+    private var scribeRepository: ScribeRepository? = null
     private var apiService: ScribeApiService? = null
     private var dataManager: DataManager? = null
     private var modelDownloader: ModelDownloader? = null
@@ -237,6 +237,10 @@ object EkaScribe {
             logger = logger
         )
         transactionManager = txnManager
+        scribeRepository = ScribeRepository(
+            apiService = developerApiService,
+            logger = logger
+        )
 
         sessionManager = SessionManager(
             ekaScribeConfig = config,
@@ -380,32 +384,7 @@ object EkaScribe {
      */
     suspend fun getSessionOutput(sessionId: String): Result<SessionResult> =
         withContext(Dispatchers.IO) {
-            val api = requireApiService()
-            try {
-                when (val response = api.getTransactionResult(sessionId)) {
-                    is NetworkResponse.Success -> {
-                        if (response.code == 202) {
-                            Result.failure(Exception("Session still processing"))
-                        } else {
-                            Result.success(response.body.toSessionResult(sessionId))
-                        }
-                    }
-
-                    is NetworkResponse.ServerError -> {
-                        Result.failure(Exception(response.body?.toString() ?: "Server error"))
-                    }
-
-                    is NetworkResponse.NetworkError -> {
-                        Result.failure(response.error)
-                    }
-
-                    is NetworkResponse.UnknownError -> {
-                        Result.failure(response.error)
-                    }
-                }
-            } catch (e: Exception) {
-                Result.failure(e)
-            }
+            requireRepository().getSessionOutput(sessionId)
         }
 
     /**
@@ -413,36 +392,29 @@ object EkaScribe {
      */
     suspend fun pollSessionResult(sessionId: String): Result<SessionResult> =
         withContext(Dispatchers.IO) {
-            val api = requireApiService()
-            try {
-                repeat(EkaScribeConfig.POLL_MAX_RETRIES) {
-                    when (val response = api.getTransactionResult(sessionId)) {
-                        is NetworkResponse.Success -> {
-                            if (response.code != 202) {
-                                return@withContext Result.success(
-                                    response.body.toSessionResult(sessionId)
-                                )
-                            }
-                        }
+            val conf = config ?: return@withContext Result.failure(Exception("SDK not initialized"))
+            requireRepository().pollSessionResult(sessionId, conf.pollMaxRetries, conf.pollDelayMs)
+        }
 
-                        is NetworkResponse.ServerError -> {
-                            logger.warn(TAG, "Poll server error: ${response.body}")
-                        }
+    /**
+     * Get the transcript output only (single API call, no polling).
+     */
+    suspend fun getTranscriptOutput(sessionId: String): Result<SessionResult> =
+        withContext(Dispatchers.IO) {
+            requireRepository().getTranscriptOutput(sessionId)
+        }
 
-                        is NetworkResponse.NetworkError -> {
-                            logger.warn(TAG, "Poll network error: ${response.error.message}")
-                        }
-
-                        is NetworkResponse.UnknownError -> {
-                            logger.warn(TAG, "Poll unknown error: ${response.error.message}")
-                        }
-                    }
-                    delay(EkaScribeConfig.POLL_DELAY_MS)
-                }
-                Result.failure(Exception("Failed to get output"))
-            } catch (e: Exception) {
-                Result.failure(e)
-            }
+    /**
+     * Poll for the transcript result with retries.
+     */
+    suspend fun pollTranscriptResult(sessionId: String): Result<SessionResult> =
+        withContext(Dispatchers.IO) {
+            val conf = config ?: return@withContext Result.failure(Exception("SDK not initialized"))
+            requireRepository().pollTranscriptResult(
+                sessionId,
+                conf.pollMaxRetries,
+                conf.pollDelayMs
+            )
         }
 
     /**
@@ -452,29 +424,7 @@ object EkaScribe {
         sessionId: String,
         templateId: String
     ): Result<Boolean> = withContext(Dispatchers.IO) {
-        val api = requireApiService()
-        try {
-            when (val response = api.convertTransactionResult(sessionId, templateId)) {
-                is NetworkResponse.Success -> {
-                    if (response.body.status == "success") {
-                        Result.success(true)
-                    } else {
-                        Result.failure(Exception("Something went wrong"))
-                    }
-                }
-
-                is NetworkResponse.ServerError -> {
-                    Result.failure(
-                        Exception(response.body?.error?.displayMessage ?: "Server error")
-                    )
-                }
-
-                is NetworkResponse.NetworkError -> Result.failure(response.error)
-                is NetworkResponse.UnknownError -> Result.failure(response.error)
-            }
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+        requireRepository().convertTransactionResult(sessionId, templateId)
     }
 
     /**
@@ -486,36 +436,7 @@ object EkaScribe {
         sessionId: String,
         updatedData: List<SessionData>
     ): Result<Boolean> = withContext(Dispatchers.IO) {
-        val api = requireApiService()
-        try {
-            val request = UpdateSessionRequest()
-            request.addAll(updatedData.map {
-                UpdateSessionRequest.UpdateSessionRequestItem(
-                    data = it.data,
-                    templateId = it.templateId
-                )
-            })
-            when (val response = api.updateSessionOutput(sessionId, request)) {
-                is NetworkResponse.Success -> {
-                    if (response.body.status == "success") {
-                        Result.success(true)
-                    } else {
-                        Result.failure(Exception("Something went wrong"))
-                    }
-                }
-
-                is NetworkResponse.ServerError -> {
-                    Result.failure(
-                        Exception(response.body?.error?.displayMessage ?: "Server error")
-                    )
-                }
-
-                is NetworkResponse.NetworkError -> Result.failure(response.error)
-                is NetworkResponse.UnknownError -> Result.failure(response.error)
-            }
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+        requireRepository().updateSessionResult(sessionId, updatedData)
     }
 
     // ---- Template APIs ----
@@ -524,25 +445,7 @@ object EkaScribe {
      * Get available templates.
      */
     suspend fun getTemplates(): Result<List<TemplateItem>> = withContext(Dispatchers.IO) {
-        val api = requireApiService()
-        try {
-            when (val response = api.getTemplates()) {
-                is NetworkResponse.Success -> {
-                    Result.success(
-                        response.body.items?.mapNotNull { it?.toTemplateItem() } ?: emptyList()
-                    )
-                }
-
-                is NetworkResponse.ServerError -> {
-                    Result.failure(Exception("Error fetching templates"))
-                }
-
-                is NetworkResponse.NetworkError -> Result.failure(response.error)
-                is NetworkResponse.UnknownError -> Result.failure(response.error)
-            }
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+        requireRepository().getTemplates()
     }
 
     /**
@@ -550,23 +453,7 @@ object EkaScribe {
      */
     suspend fun updateTemplates(favouriteTemplates: List<String>): Result<Unit> =
         withContext(Dispatchers.IO) {
-            val api = requireApiService()
-            try {
-                val request = UpdateTemplatesRequest(
-                    data = UpdateTemplatesRequest.Data(myTemplates = favouriteTemplates)
-                )
-                when (val response = api.updateTemplates(request)) {
-                    is NetworkResponse.Success -> Result.success(Unit)
-                    is NetworkResponse.ServerError -> {
-                        Result.failure(Exception("Error updating templates"))
-                    }
-
-                    is NetworkResponse.NetworkError -> Result.failure(response.error)
-                    is NetworkResponse.UnknownError -> Result.failure(response.error)
-                }
-            } catch (e: Exception) {
-                Result.failure(e)
-            }
+            requireRepository().updateTemplates(favouriteTemplates)
         }
 
     // ---- User config APIs ----
@@ -575,28 +462,7 @@ object EkaScribe {
      * Get user configuration (consultation modes, languages, templates, preferences).
      */
     suspend fun getUserConfigs(): Result<UserConfigs> = withContext(Dispatchers.IO) {
-        val api = requireApiService()
-        try {
-            when (val response = api.getUserConfig()) {
-                is NetworkResponse.Success -> {
-                    val data = response.body.data?.toUserConfigs()
-                    if (data != null) {
-                        Result.success(data)
-                    } else {
-                        Result.failure(Exception("Error fetching config"))
-                    }
-                }
-
-                is NetworkResponse.ServerError -> {
-                    Result.failure(Exception("Error fetching config"))
-                }
-
-                is NetworkResponse.NetworkError -> Result.failure(response.error)
-                is NetworkResponse.UnknownError -> Result.failure(response.error)
-            }
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+        requireRepository().getUserConfigs()
     }
 
     /**
@@ -605,36 +471,7 @@ object EkaScribe {
     suspend fun updateUserConfigs(
         selectedUserPreferences: SelectedUserPreferences
     ): Result<Boolean> = withContext(Dispatchers.IO) {
-        val api = requireApiService()
-        try {
-            val request = UpdateUserConfigRequest(
-                data = UpdateUserConfigRequest.Data(
-                    consultationMode = selectedUserPreferences.consultationMode?.id,
-                    inputLanguages = selectedUserPreferences.languages.map {
-                        UpdateUserConfigRequest.Data.InputLanguage(id = it.id, name = it.name)
-                    },
-                    modelType = selectedUserPreferences.modelType?.id,
-                    outputFormatTemplate = selectedUserPreferences.outputTemplates.map {
-                        UpdateUserConfigRequest.Data.OutputFormatTemplate(
-                            id = it.id,
-                            name = it.name,
-                            templateType = "custom"
-                        )
-                    }
-                )
-            )
-            when (val response = api.updateUserConfig(request)) {
-                is NetworkResponse.Success -> Result.success(true)
-                is NetworkResponse.ServerError -> {
-                    Result.failure(Exception("Error updating config"))
-                }
-
-                is NetworkResponse.NetworkError -> Result.failure(response.error)
-                is NetworkResponse.UnknownError -> Result.failure(response.error)
-            }
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+        requireRepository().updateUserConfigs(selectedUserPreferences)
     }
 
     // ---- History API ----
@@ -645,25 +482,7 @@ object EkaScribe {
      */
     suspend fun getHistory(count: Int? = null): List<ScribeHistoryItem> =
         withContext(Dispatchers.IO) {
-            val api = requireApiService()
-            try {
-                val queryMap = if (count != null) {
-                    mapOf("count" to count.toString())
-                } else {
-                    emptyMap()
-                }
-                when (val response = api.getHistory(queryMap)) {
-                    is NetworkResponse.Success -> {
-                        response.body.data?.map { it.toScribeHistoryItem() } ?: emptyList()
-                    }
-
-                    is NetworkResponse.ServerError -> emptyList()
-                    is NetworkResponse.NetworkError -> emptyList()
-                    is NetworkResponse.UnknownError -> emptyList()
-                }
-            } catch (e: Exception) {
-                emptyList()
-            }
+            requireRepository().getHistory(count)
         }
 
     // ---- Pre-recorded audio file processing ----
@@ -895,6 +714,7 @@ object EkaScribe {
         sessionManager?.destroy()
         sessionManager = null
         transactionManager = null
+        scribeRepository = null
         apiService = null
         dataManager = null
         modelDownloader = null
@@ -921,8 +741,8 @@ object EkaScribe {
         return sessionManager!!
     }
 
-    private fun requireApiService(): ScribeApiService {
-        return apiService ?: throw ScribeException(
+    private fun requireRepository(): ScribeRepository {
+        return scribeRepository ?: throw ScribeException(
             ErrorCode.INVALID_CONFIG,
             "EkaScribe SDK not initialized. Call EkaScribe.init() first."
         )

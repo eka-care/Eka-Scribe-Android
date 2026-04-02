@@ -1176,7 +1176,8 @@ internal class TransactionManagerTest {
         }
 
         override suspend fun getTransactionResult(
-            sessionId: String
+            sessionId: String,
+            templateId: String?
         ): NetworkResponse<ScribeResultResponse, ScribeResultResponse> {
             val idx = pollCallCount.coerceAtMost(pollResponses.size - 1)
             pollCallCount++

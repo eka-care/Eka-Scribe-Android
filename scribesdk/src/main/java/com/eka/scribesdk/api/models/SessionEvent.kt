@@ -56,6 +56,8 @@ enum class SessionEventName {
     // Poll
     POLL_RESULT_FAILED,
     POLL_RESULT_TIMEOUT,
+    TRANSCRIPT_READY,
+    OUTPUT_READY,
 
     // Full audio
     FULL_AUDIO_GENERATED,

@@ -22,7 +22,9 @@ import com.eka.scribesdk.data.local.db.entity.TransactionStage
 import com.eka.scribesdk.data.remote.models.requests.InitTransactionRequest
 import com.eka.scribesdk.data.remote.models.requests.OutputFormatTemplate
 import com.eka.scribesdk.data.remote.models.requests.PatientDetails
+import com.eka.scribesdk.data.remote.models.responses.toOutputTemplatesResult
 import com.eka.scribesdk.data.remote.models.responses.toSessionResult
+import com.eka.scribesdk.data.remote.models.responses.toTranscriptResult
 import com.eka.scribesdk.data.remote.upload.ChunkUploader
 import com.eka.scribesdk.data.remote.upload.UploadMetadata
 import com.eka.scribesdk.data.remote.upload.UploadResult
@@ -392,14 +394,23 @@ internal class SessionManager(
                     "Commit transaction succeeded"
                 )
 
-                // 6. Poll for results
-                val pollResult = transactionManager.pollResult(sessionId)
-                when (pollResult) {
+                // 6. Poll for transcript (Phase 1)
+                val transcriptPollResult =
+                    transactionManager.pollResult(sessionId, templateId = "transcript")
+                when (transcriptPollResult) {
                     is TransactionPollResult.Success -> {
+                        val transcriptResult =
+                            transcriptPollResult.result.toTranscriptResult(sessionId)
+                        callback?.onTranscriptReady(sessionId, transcriptResult)
+                        emitter?.emit(
+                            SessionEventName.TRANSCRIPT_READY, EventType.SUCCESS,
+                            "Transcript ready"
+                        )
+                        logger.info(TAG, "Transcript ready: $sessionId")
+
+                        // Mark session COMPLETED after transcript so client can start a new session
                         dataManager.updateSessionState(sessionId, SessionState.COMPLETED.name)
                         transition(SessionState.COMPLETED)
-                        val sessionResult = pollResult.result.toSessionResult(sessionId)
-                        callback?.onSessionCompleted(sessionId, sessionResult)
                         emitter?.emit(
                             SessionEventName.SESSION_COMPLETED, EventType.SUCCESS,
                             "Session completed successfully"
@@ -408,27 +419,79 @@ internal class SessionManager(
                     }
 
                     is TransactionPollResult.Failed -> {
-                        emitter?.emit(
-                            SessionEventName.POLL_RESULT_FAILED, EventType.ERROR,
-                            "Poll result failed: ${pollResult.error}",
-                            mapOf("error" to pollResult.error)
-                        )
-                        handleTransactionError(
-                            sessionId,
-                            ErrorCode.TRANSCRIPTION_FAILED,
-                            pollResult.error
+                        logger.warn(
+                            TAG,
+                            "Transcript poll failed: ${transcriptPollResult.error}, proceeding to full output poll"
                         )
                     }
 
                     is TransactionPollResult.Timeout -> {
-                        // Timeout is not necessarily an error — results may arrive later
-                        dataManager.updateSessionState(sessionId, SessionState.COMPLETED.name)
-                        transition(SessionState.COMPLETED)
+                        logger.warn(
+                            TAG,
+                            "Transcript poll timeout, proceeding to full output poll: $sessionId"
+                        )
+                    }
+                }
+
+                // 7. Poll for full output (Phase 2 — may be cancelled if new session starts)
+                val fullPollResult = transactionManager.pollResult(sessionId)
+                when (fullPollResult) {
+                    is TransactionPollResult.Success -> {
+                        val outputResult = fullPollResult.result.toOutputTemplatesResult(sessionId)
+                        callback?.onOutputReady(sessionId, outputResult)
+                        emitter?.emit(
+                            SessionEventName.OUTPUT_READY, EventType.SUCCESS,
+                            "Output templates ready"
+                        )
+                        logger.info(TAG, "Output templates ready: $sessionId")
+
+                        // If not already COMPLETED (transcript failed/timed out), mark now
+                        if (currentState != SessionState.COMPLETED) {
+                            dataManager.updateSessionState(sessionId, SessionState.COMPLETED.name)
+                            transition(SessionState.COMPLETED)
+                        }
+                        val sessionResult = fullPollResult.result.toSessionResult(sessionId)
+                        callback?.onSessionCompleted(sessionId, sessionResult)
+                        emitter?.emit(
+                            SessionEventName.SESSION_COMPLETED, EventType.SUCCESS,
+                            "Session completed successfully"
+                        )
+                        logger.info(TAG, "Session completed with full output: $sessionId")
+                    }
+
+                    is TransactionPollResult.Failed -> {
+                        emitter?.emit(
+                            SessionEventName.POLL_RESULT_FAILED, EventType.ERROR,
+                            "Poll result failed: ${fullPollResult.error}",
+                            mapOf("error" to fullPollResult.error)
+                        )
+                        // If transcript succeeded, session is already COMPLETED — only fire failure callback
+                        // If transcript also failed, handle as full error
+                        if (currentState != SessionState.COMPLETED) {
+                            handleTransactionError(
+                                sessionId,
+                                ErrorCode.TRANSCRIPTION_FAILED,
+                                fullPollResult.error
+                            )
+                        } else {
+                            callback?.onSessionFailed(
+                                sessionId,
+                                ScribeError(ErrorCode.TRANSCRIPTION_FAILED, fullPollResult.error)
+                            )
+                        }
+                    }
+
+                    is TransactionPollResult.Timeout -> {
+                        // If transcript succeeded, session is already COMPLETED — just log
+                        if (currentState != SessionState.COMPLETED) {
+                            dataManager.updateSessionState(sessionId, SessionState.COMPLETED.name)
+                            transition(SessionState.COMPLETED)
+                        }
                         emitter?.emit(
                             SessionEventName.POLL_RESULT_TIMEOUT, EventType.ERROR,
-                            "Poll timed out, session may complete later"
+                            "Poll timed out, output may complete later"
                         )
-                        logger.warn(TAG, "Poll timeout, session may complete later: $sessionId")
+                        logger.warn(TAG, "Full output poll timeout: $sessionId")
                     }
                 }
 

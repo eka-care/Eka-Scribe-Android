@@ -23,6 +23,7 @@ import retrofit2.http.PATCH
 import retrofit2.http.POST
 import retrofit2.http.PUT
 import retrofit2.http.Path
+import retrofit2.http.Query
 import retrofit2.http.QueryMap
 import retrofit2.http.Url
 
@@ -52,7 +53,8 @@ internal interface ScribeApiService {
 
     @GET("voice/api/v3/status/{session_id}")
     suspend fun getTransactionResult(
-        @Path("session_id") sessionId: String
+        @Path("session_id") sessionId: String,
+        @Query("template_id") templateId: String? = null
     ): NetworkResponse<ScribeResultResponse, ScribeResultResponse>
 
     @POST("voice/api/v1/transaction/{session_id}/convert-to-template/{template_id}")

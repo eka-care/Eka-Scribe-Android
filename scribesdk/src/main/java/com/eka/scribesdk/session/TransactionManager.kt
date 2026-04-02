@@ -202,14 +202,17 @@ internal class TransactionManager(
      * HTTP 202 = still processing, keep polling.
      * HTTP 200 with SUCCESS status = done.
      */
-    suspend fun pollResult(sessionId: String): TransactionPollResult {
+    suspend fun pollResult(sessionId: String, templateId: String? = null): TransactionPollResult {
         val successStates = setOf(ResultStatus.SUCCESS, ResultStatus.PARTIAL_COMPLETED)
         val failureStates = setOf(ResultStatus.FAILURE)
 
         repeat(pollMaxRetries) { attempt ->
-            logger.debug(TAG, "Polling result attempt ${attempt + 1}/$pollMaxRetries: $sessionId")
+            logger.debug(
+                TAG,
+                "Polling result attempt ${attempt + 1}/$pollMaxRetries: $sessionId (templateId=$templateId)"
+            )
 
-            when (val response = apiService.getTransactionResult(sessionId)) {
+            when (val response = apiService.getTransactionResult(sessionId, templateId)) {
                 is NetworkResponse.Success -> {
                     // Check if HTTP 202 (still processing)
                     if (response.code == 202) {
