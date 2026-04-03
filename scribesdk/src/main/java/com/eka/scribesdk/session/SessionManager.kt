@@ -433,7 +433,7 @@ internal class SessionManager(
                 }
 
                 // Launch deferred full audio upload (fire-and-forget, survives session cleanup)
-                if (fullAudioResult != null && ekaScribeConfig.fullAudioOutput) {
+                if (fullAudioResult != null && EkaScribeConfig.FULL_AUDIO_OUTPUT) {
                     launchDeferredFullAudioUpload(fullAudioResult)
                 }
             } catch (e: Exception) {

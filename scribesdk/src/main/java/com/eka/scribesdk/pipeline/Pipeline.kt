@@ -367,8 +367,8 @@ internal class Pipeline(
             )
 
             val recorderConfig = RecorderConfig(
-                sampleRate = config.sampleRate,
-                frameSize = config.frameSize
+                sampleRate = EkaScribeConfig.SAMPLE_RATE,
+                frameSize = EkaScribeConfig.FRAME_SIZE
             )
 
             val recorder: AudioRecorder = AndroidAudioRecorder(context, recorderConfig, logger)
@@ -403,21 +403,26 @@ internal class Pipeline(
                 }
 
             val vadProvider =
-                SileroVadProvider(context, config.sampleRate, config.frameSize, logger)
+                SileroVadProvider(
+                    context,
+                    EkaScribeConfig.SAMPLE_RATE,
+                    EkaScribeConfig.FRAME_SIZE,
+                    logger
+                )
             vadProvider.load()
 
             val chunkConfig = ChunkConfig(
-                preferredDurationSec = config.preferredChunkDurationSec,
-                desperationDurationSec = config.desperationChunkDurationSec,
-                maxDurationSec = config.maxChunkDurationSec,
-                overlapDurationSec = config.overlapDurationSec
+                preferredDurationSec = EkaScribeConfig.PREFERRED_CHUNK_DURATION_SEC,
+                desperationDurationSec = EkaScribeConfig.DESPERATION_CHUNK_DURATION_SEC,
+                maxDurationSec = EkaScribeConfig.MAX_CHUNK_DURATION_SEC,
+                overlapDurationSec = EkaScribeConfig.OVERLAP_DURATION_SEC
             )
 
             val chunker: AudioChunker = VadAudioChunker(
                 vadProvider = vadProvider,
                 config = chunkConfig,
                 sessionId = sessionId,
-                sampleRate = config.sampleRate,
+                sampleRate = EkaScribeConfig.SAMPLE_RATE,
                 logger = logger
             )
 

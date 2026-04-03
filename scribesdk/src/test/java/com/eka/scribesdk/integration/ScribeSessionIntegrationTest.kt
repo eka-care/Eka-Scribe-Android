@@ -110,7 +110,7 @@ internal class ScribeSessionIntegrationTest {
             logger = NoOpLogger()
         )
         val manager = SessionManager(
-            ekaScribeConfig = EkaScribeConfig(networkConfig = mockk(), fullAudioOutput = true),
+            ekaScribeConfig = EkaScribeConfig(clientId = "test-client", networkConfig = mockk()),
             dataManager = fakeDm,
             pipelineFactory = mockPipelineFactory,
             transactionManager = tm,

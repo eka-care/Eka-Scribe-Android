@@ -67,7 +67,7 @@ internal class SessionManagerTest {
         } returns TransactionResult.Error("test error")
 
         return SessionManager(
-            ekaScribeConfig = EkaScribeConfig(networkConfig = mockk(), fullAudioOutput = true),
+            ekaScribeConfig = EkaScribeConfig(clientId = "test-client", networkConfig = mockk()),
             dataManager = dm,
             pipelineFactory = pipelineFactory,
             transactionManager = tm,
@@ -286,7 +286,7 @@ internal class SessionManagerTest {
             chunkUploader = uploader,
             timeProvider = FakeTimeProvider(),
             logger = NoOpLogger(),
-            ekaScribeConfig = EkaScribeConfig(networkConfig = mockk(), fullAudioOutput = true),
+            ekaScribeConfig = EkaScribeConfig(clientId = "test-client", networkConfig = mockk()),
         )
     }
 
@@ -393,7 +393,7 @@ internal class SessionManagerTest {
     }
 
     @Test
-    fun `deferred full audio upload triggers when pipeline stop returns FullAudioResult`() =
+    fun `deferred full audio upload does not trigger when fullAudioOutput is disabled`() =
         runTest {
         val pipeline = mockk<Pipeline>(relaxed = true)
         every { pipeline.voiceActivityFlow } returns emptyFlow()
@@ -431,9 +431,10 @@ internal class SessionManagerTest {
         Thread.sleep(200)
 
         manager.stop()
-        Thread.sleep(500) // Wait for deferred upload coroutine
+            Thread.sleep(500)
 
-        io.mockk.coVerify(exactly = 1) { uploader.upload(any(), any()) }
+            // fullAudioOutput is hardcoded to false, so upload should not be called
+            io.mockk.coVerify(exactly = 0) { uploader.upload(any(), any()) }
     }
 
     // =====================================================================

@@ -98,21 +98,13 @@ public class TestActivity extends AppCompatActivity implements MyScribeCallback.
                 new MyTokenStorage()
         );
 
-        // Build EkaScribeConfig (all 13 params required from Java — no @JvmOverloads)
+        // Build EkaScribeConfig (all params required from Java — no @JvmOverloads)
         EkaScribeConfig config = new EkaScribeConfig(
-                16000,          // sampleRate
-                512,            // frameSize
-                10,             // preferredChunkDurationSec
-                20,             // desperationChunkDurationSec
-                25,             // maxChunkDurationSec
-                true,           // enableAnalyser
-                0.5,            // overlapDurationSec
-                true,           // debugMode
-                networkConfig,  // networkConfig
-                false,          // fullAudioOutput
-                2,              // maxUploadRetries
-                3,              // pollMaxRetries
-                2000L           // pollDelayMs
+                "client-id",      // clientId
+                "android",         // flavour (default)
+                true,              // enableAnalyser
+                true,              // debugMode
+                networkConfig      // networkConfig
         );
 
         // EkaScribe is a Kotlin object — access via INSTANCE from Java
