@@ -61,40 +61,41 @@ class Mp3AudioEncoder(private val logger: Logger) : AudioEncoder {
             .setQuality(QUALITY)
             .build()
 
-        // MP3 output buffer: worst case is 1.25 * samples + 7200
-        val mp3BufSize = (1.25 * CHUNK_SIZE + 7200).toInt()
-        val mp3Buf = ByteArray(mp3BufSize)
+        try {
+            // MP3 output buffer: worst case is 1.25 * samples + 7200
+            val mp3BufSize = (1.25 * CHUNK_SIZE + 7200).toInt()
+            val mp3Buf = ByteArray(mp3BufSize)
 
-        FileOutputStream(outputFile).use { fos ->
-            // Encode all PCM data in chunks to avoid oversized buffers
-            var offset = 0
-            while (offset < pcm.size) {
-                val remaining = pcm.size - offset
-                val count = minOf(CHUNK_SIZE, remaining)
-                val chunk = pcm.copyOfRange(offset, offset + count)
+            FileOutputStream(outputFile).use { fos ->
+                // Encode all PCM data in chunks to avoid oversized buffers
+                var offset = 0
+                while (offset < pcm.size) {
+                    val remaining = pcm.size - offset
+                    val count = minOf(CHUNK_SIZE, remaining)
+                    val chunk = pcm.copyOfRange(offset, offset + count)
 
-                val bytesEncoded = lame.encode(
-                    chunk,        // left channel (mono)
-                    chunk,        // right channel (same for mono)
-                    count,
-                    mp3Buf
-                )
+                    val bytesEncoded = lame.encode(
+                        chunk,        // left channel (mono)
+                        chunk,        // right channel (same for mono)
+                        count,
+                        mp3Buf
+                    )
 
-                if (bytesEncoded > 0) {
-                    fos.write(mp3Buf, 0, bytesEncoded)
+                    if (bytesEncoded > 0) {
+                        fos.write(mp3Buf, 0, bytesEncoded)
+                    }
+                    offset += count
                 }
-                offset += count
-            }
 
-            // Flush remaining MP3 frames
-            val flushBytes = lame.flush(mp3Buf)
-            if (flushBytes > 0) {
-                fos.write(mp3Buf, 0, flushBytes)
+                // Flush remaining MP3 frames
+                val flushBytes = lame.flush(mp3Buf)
+                if (flushBytes > 0) {
+                    fos.write(mp3Buf, 0, flushBytes)
+                }
             }
+        } finally {
+            lame.close()
         }
-
-        // Close/release LAME encoder
-        lame.close()
 
         return outputFile
     }

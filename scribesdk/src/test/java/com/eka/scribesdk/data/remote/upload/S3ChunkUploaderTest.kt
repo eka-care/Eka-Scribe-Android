@@ -33,7 +33,8 @@ class S3ChunkUploaderTest {
         chunkIndex = 0,
         fileName = "1.mp3",
         folderName = "260305",
-        bid = "test-bid"
+        bid = "test-bid",
+        mimeType = "audio/mpeg"
     )
 
     // =====================================================================

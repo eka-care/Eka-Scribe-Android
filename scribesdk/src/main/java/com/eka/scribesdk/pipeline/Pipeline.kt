@@ -234,7 +234,6 @@ internal class Pipeline(
             for (chunk in chunkChannel) {
                 try {
                     // 1-based file naming: 1.mp3, 2.mp3, ...
-                    val fileName = "${chunk.index + 1}.mp3"
                     val outputPath =
                         File(outputDir, "${sessionId}_${chunk.index + 1}.mp3").absolutePath
 
@@ -243,6 +242,8 @@ internal class Pipeline(
                         sampleRate = chunk.frames.firstOrNull()?.sampleRate ?: 16000,
                         outputPath = outputPath
                     )
+
+                    val fileName = "${chunk.index + 1}.${encoded.format.extension}"
 
                     val entity = AudioChunkEntity(
                         chunkId = chunk.chunkId,
@@ -270,7 +271,8 @@ internal class Pipeline(
                         chunkIndex = chunk.index,
                         fileName = fileName,
                         folderName = folderName,
-                        bid = bid
+                        bid = bid,
+                        mimeType = encoded.format.mimeType
                     )
 
                     when (val result = chunkUploader.upload(file, metadata)) {

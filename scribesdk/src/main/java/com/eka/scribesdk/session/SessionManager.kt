@@ -574,7 +574,8 @@ internal class SessionManager(
                     chunkIndex = -1,
                     fileName = "full_audio.mp3_",
                     folderName = result.folderName,
-                    bid = result.bid
+                    bid = result.bid,
+                    mimeType = "audio/mpeg"
                 )
 
                 when (val uploadResult = chunkUploader.upload(file, metadata)) {
