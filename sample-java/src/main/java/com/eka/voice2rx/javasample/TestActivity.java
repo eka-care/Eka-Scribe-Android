@@ -100,7 +100,7 @@ public class TestActivity extends AppCompatActivity implements MyScribeCallback.
 
         // Build EkaScribeConfig (all params required from Java — no @JvmOverloads)
         EkaScribeConfig config = new EkaScribeConfig(
-                "androiddoc",      // clientId
+                "client-id",      // clientId
                 "android",         // flavour (default)
                 true,              // enableAnalyser
                 true,              // debugMode

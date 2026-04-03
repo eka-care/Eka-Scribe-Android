@@ -51,9 +51,8 @@ import kotlinx.coroutines.launch
 class TestActivity : ComponentActivity() {
     companion object {
         const val TAG = "TestActivity"
-        var TEST_ACCESS_TOKEN =
-            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJkb2Mtd2ViIiwiYi1pZCI6IjcxNzU2MjAyNDU0ODM3NzciLCJjYyI6eyJlc2MiOjAsInBleCI6MTgwMTUyNjQwMCwicHNuIjoiRCIsInBzdCI6InRydWUiLCJzdHkiOiJwIn0sImRvYiI6IjIwMjUtMDgtMjUiLCJleHAiOjE3NzIxNzkwNzIsImZuIjoiSW10aXlheiIsImdlbiI6Ik0iLCJpYXQiOjE3NzIxNzcyNzIsImlkcCI6Im1vYiIsImlzcyI6ImVtci5la2EuY2FyZSIsImp0aSI6ImNjYTE5ZWFhLTBmYTEtNGE1Yi1iMDJhLWY5M2U1ZDYxMTNhZSIsImxuIjoibSwiLCJvaWQiOiIxNzU2MjAyNDU1MDI4NDIiLCJwcmkiOnRydWUsInBzIjoiRCIsInIiOiJJTiIsInMiOiJEciIsInV1aWQiOiI2NDIyYmRjMi0yMTgyLTRhMTMtYjYyMC0wNDdmNTBjZDQyZTgiLCJ3LWlkIjoiNzE3NTYyMDI0NTQ4Mzc3NyIsInctbiI6IkltdGl5YXoifQ.-vaPsA8I1XOX-OPhVfxPtHIDCBvyYlsrtj0HkaTbdo0"
-        const val TEST_REFRESH_TOKEN = "0343d03f558045108c3ec13aad7e2f72"
+        var TEST_ACCESS_TOKEN = ""
+        const val TEST_REFRESH_TOKEN = ""
     }
 
     private val currentSessionId = mutableStateOf("")
@@ -80,7 +79,7 @@ class TestActivity : ComponentActivity() {
         // Initialize the new EkaScribe SDK
         EkaScribe.init(
             config = EkaScribeConfig(
-                clientId = "androiddoc",
+                clientId = "client-id",
                 networkConfig = NetworkConfig(
                     tokenStorage = MyTokenStorage(),
                     appId = "scribe-android",
