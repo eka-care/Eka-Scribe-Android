@@ -247,27 +247,25 @@ import com.eka.scribesdk.api.EkaScribeConfig;
 
 // All constructor params required from Java (no default parameter support)
 NetworkConfig networkConfig = new NetworkConfig(
-        "your-app-id",                      // appId
-        "https://api.eka.care/",            // baseUrl
-        "1.0.0",                            // appVersionName
-        1,                                   // appVersionCode
-        true,                                // isDebugApp
-        30L,                                 // apiCallTimeOutInSec
-        new HashMap<>(),                     // headers
-        new MyTokenStorage()                 // tokenStorage
+    "your-app-id",                      // appId
+    "https://api.eka.care/",            // baseUrl
+    "1.0.0",                            // appVersionName
+    1,                                   // appVersionCode
+    true,                                // isDebugApp
+    30L,                                 // apiCallTimeOutInSec
+    new HashMap<>(),                     // headers
+    new MyTokenStorage()                 // tokenStorage
 );
 
-        EkaScribeConfig config = new EkaScribeConfig(
-                "your-client-id",  // clientId (mandatory)
-                "android",         // flavour (optional, default "android")
-                true,              // enableAnalyser
-                true,              // debugMode
-                networkConfig      // networkConfig (mandatory)
-        );
+EkaScribeConfig config = new EkaScribeConfig(
+    "your-client-id",  // clientId (mandatory)
+    "android",         // flavour (optional, default "android")
+    true,              // enableAnalyser
+    true,              // debugMode
+    networkConfig      // networkConfig (mandatory)
+);
 
-EkaScribe.INSTANCE.
-
-        init(config, this,new MyScribeCallback());
+EkaScribe.INSTANCE.init(config, this, new MyScribeCallback());
 ```
 
 > **Java note:** `EkaScribe` is a Kotlin `object` — access it via `EkaScribe.INSTANCE` from Java.
@@ -311,33 +309,27 @@ import com.eka.scribesdk.api.models.SessionConfig;
 import com.eka.scribesdk.api.models.OutputTemplate;
 
 SessionConfig sessionConfig = new SessionConfig(
-        Arrays.asList("en-IN"),           // languages
-        "dictation",                       // mode
-        "pro",                             // modelType
-        Arrays.asList(new OutputTemplate(  // outputTemplates
-                "your-template-id", "custom", "SOAP Notes"
-        )),
-        null,                              // patientDetails
-        null,                              // section
-        null                               // speciality
+    Arrays.asList("en-IN"),           // languages
+    "dictation",                       // mode
+    "pro",                             // modelType
+    Arrays.asList(new OutputTemplate(  // outputTemplates
+        "your-template-id", "custom", "SOAP Notes"
+    )),
+    null,                              // patientDetails
+    null,                              // section
+    null                               // speciality
 );
 
 // startSession is a suspend function — use CoroutineHelper bridge (see Java Interop Guide)
 CoroutineScope lifecycleScope = LifecycleOwnerKt.getLifecycleScope(this);
 
-CoroutineHelper.
-
-startSession(
-        lifecycleScope,
+CoroutineHelper.startSession(
+    lifecycleScope,
     this,
-        sessionConfig,
-        sessionId ->{Log.
-
-d("Scribe","Started: "+sessionId); return Unit.INSTANCE; },
-error ->{Log.
-
-e("Scribe","Error: "+error.getMessage());return Unit.INSTANCE; }
-        );
+    sessionConfig,
+    sessionId -> { Log.d("Scribe", "Started: " + sessionId); return Unit.INSTANCE; },
+    error -> { Log.e("Scribe", "Error: " + error.getMessage()); return Unit.INSTANCE; }
+);
 ```
 
 ---
