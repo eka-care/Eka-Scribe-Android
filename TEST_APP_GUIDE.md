@@ -118,8 +118,8 @@ NetworkConfig(
 ### SDK Configuration
 
 ```kotlin
-Voice2RxInitConfig(
-    voice2RxLifecycle = MyLifecycleCallbacks(),
+EkaScribeConfig(
+    clientId = "your-client-id",
     networkConfig = networkConfig,
     debugMode = true  // Enable for detailed SDK logs
 )

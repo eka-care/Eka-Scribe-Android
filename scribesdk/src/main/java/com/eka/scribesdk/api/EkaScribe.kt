@@ -2,6 +2,7 @@ package com.eka.scribesdk.api
 
 import android.content.Context
 import com.eka.networking.client.EkaNetwork
+import com.eka.networking.client.NetworkConfig
 import com.eka.scribesdk.BuildConfig
 import com.eka.scribesdk.analyser.AnalyserState
 import com.eka.scribesdk.analyser.ModelDownloader
@@ -107,9 +108,25 @@ object EkaScribe {
         this.config = config
         val timeProvider: TimeProvider = DefaultTimeProvider()
 
+        // Inject clientId and flavour into NetworkConfig headers
+        val enrichedHeaders = config.networkConfig.headers + mapOf(
+            "client-id" to config.clientId,
+            "flavour" to config.flavour
+        )
+        val enrichedNetworkConfig = NetworkConfig(
+            appId = config.networkConfig.appId,
+            baseUrl = config.networkConfig.baseUrl,
+            appVersionName = config.networkConfig.appVersionName,
+            appVersionCode = config.networkConfig.appVersionCode,
+            isDebugApp = config.networkConfig.isDebugApp,
+            apiCallTimeOutInSec = config.networkConfig.apiCallTimeOutInSec,
+            headers = enrichedHeaders,
+            tokenStorage = config.networkConfig.tokenStorage
+        )
+
         // Initialize EkaNetwork for authenticated API calls
         try {
-            EkaNetwork.init(networkConfig = config.networkConfig)
+            EkaNetwork.init(networkConfig = enrichedNetworkConfig)
         } catch (e: Exception) {
             logger.warn(TAG, "EkaNetwork init failed: ${e.message}", e)
         }
@@ -117,7 +134,7 @@ object EkaScribe {
         // Create API service for S3 credentials (COG_URL)
         val cogApiService: ScribeApiService = EkaNetwork
             .creatorFor(
-                appId = config.networkConfig.appId,
+                appId = enrichedNetworkConfig.appId,
                 service = "ekascribe_cog_service",
             ).create(
                 serviceUrl = BuildConfig.COG_URL,
@@ -127,7 +144,7 @@ object EkaScribe {
         // Create API service for transaction APIs (DEVELOPER_URL)
         val developerApiService: ScribeApiService = EkaNetwork
             .creatorFor(
-                appId = config.networkConfig.appId,
+                appId = enrichedNetworkConfig.appId,
                 service = "ekascribe_session_service",
             ).create(
                 serviceUrl = BuildConfig.DEVELOPER_URL,
@@ -155,7 +172,7 @@ object EkaScribe {
             context = context.applicationContext,
             credentialProvider = credentialProvider,
             bucketName = BuildConfig.BUCKET_NAME,
-            maxRetryCount = config.maxUploadRetries,
+            maxRetryCount = EkaScribeConfig.MAX_UPLOAD_RETRIES,
             logger = logger
         )
 
@@ -192,9 +209,9 @@ object EkaScribe {
             dataManager = dm,
             chunkUploader = chunkUploader,
             bucketName = BuildConfig.BUCKET_NAME,
-            maxUploadRetries = config.maxUploadRetries,
-            pollMaxRetries = config.pollMaxRetries,
-            pollDelayMs = config.pollDelayMs,
+            maxUploadRetries = EkaScribeConfig.MAX_UPLOAD_RETRIES,
+            pollMaxRetries = EkaScribeConfig.POLL_MAX_RETRIES,
+            pollDelayMs = EkaScribeConfig.POLL_DELAY_MS,
             logger = logger
         )
         transactionManager = txnManager
@@ -375,9 +392,8 @@ object EkaScribe {
     suspend fun pollSessionResult(sessionId: String): Result<SessionResult> =
         withContext(Dispatchers.IO) {
             val api = requireApiService()
-            val conf = config ?: return@withContext Result.failure(Exception("SDK not initialized"))
             try {
-                repeat(conf.pollMaxRetries) {
+                repeat(EkaScribeConfig.POLL_MAX_RETRIES) {
                     when (val response = api.getTransactionResult(sessionId)) {
                         is NetworkResponse.Success -> {
                             if (response.code != 202) {
@@ -399,7 +415,7 @@ object EkaScribe {
                             logger.warn(TAG, "Poll unknown error: ${response.error.message}")
                         }
                     }
-                    delay(conf.pollDelayMs)
+                    delay(EkaScribeConfig.POLL_DELAY_MS)
                 }
                 Result.failure(Exception("Failed to get output"))
             } catch (e: Exception) {

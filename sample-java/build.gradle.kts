@@ -49,5 +49,5 @@ dependencies {
     implementation(libs.kotlinx.coroutines)
 
     // Eka Scribe SDK
-    implementation("com.github.eka-care:Eka-Scribe-Android:4.0.4")
+    implementation(project(":scribesdk"))
 }

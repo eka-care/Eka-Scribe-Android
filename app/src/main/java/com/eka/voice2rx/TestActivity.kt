@@ -80,6 +80,7 @@ class TestActivity : ComponentActivity() {
         // Initialize the new EkaScribe SDK
         EkaScribe.init(
             config = EkaScribeConfig(
+                clientId = "androiddoc",
                 networkConfig = NetworkConfig(
                     tokenStorage = MyTokenStorage(),
                     appId = "scribe-android",

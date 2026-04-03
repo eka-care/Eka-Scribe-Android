@@ -3,32 +3,29 @@ package com.eka.scribesdk.api
 import com.eka.networking.client.NetworkConfig
 
 /**
- * @param sampleRate Audio sample rate in Hz
- * @param frameSize Audio frame size in samples
- * @param fullAudioOutput sends full audio file to server if true
- * @param preferredChunkDurationSec preferred chunk duration in seconds
- * @param desperationChunkDurationSec chunk duration in seconds if no speech is detected
- * @param maxChunkDurationSec maximum chunk duration in seconds
- * @param enableAnalyser enable analyser if true
- * @param overlapDurationSec overlap duration in seconds
- * @param debugMode enable debug mode if true
- * @param networkConfig network configuration
- * @param maxUploadRetries maximum number of retries for failed uploads
- * @param pollMaxRetries maximum number of times to poll for transcription result
- * @param pollDelayMs delay in milliseconds between each poll
+ * @param clientId Mandatory client identifier for API authentication
+ * @param flavour SDK flavour identifier sent as a header (default: "scribe-android")
+ * @param enableAnalyser enable SQUIM audio quality analyser if true
+ * @param debugMode enable detailed logging if true
+ * @param networkConfig network and authentication configuration
  **/
 data class EkaScribeConfig(
-    val sampleRate: Int = 16000,
-    val frameSize: Int = 512,
-    val preferredChunkDurationSec: Int = 10,
-    val desperationChunkDurationSec: Int = 20,
-    val maxChunkDurationSec: Int = 25,
+    val clientId: String,
+    val flavour: String = "android",
     val enableAnalyser: Boolean = true,
-    val overlapDurationSec: Double = 0.5,
     val debugMode: Boolean = false,
     val networkConfig: NetworkConfig,
-    val fullAudioOutput: Boolean = false,
-    val maxUploadRetries: Int = 2,
-    val pollMaxRetries: Int = 3,
-    val pollDelayMs: Long = 2000L
-)
+) {
+    companion object {
+        internal const val SAMPLE_RATE = 16000
+        internal const val FRAME_SIZE = 512
+        internal const val PREFERRED_CHUNK_DURATION_SEC = 10
+        internal const val DESPERATION_CHUNK_DURATION_SEC = 20
+        internal const val MAX_CHUNK_DURATION_SEC = 25
+        internal const val OVERLAP_DURATION_SEC = 0.5
+        internal const val FULL_AUDIO_OUTPUT = false
+        internal const val MAX_UPLOAD_RETRIES = 2
+        internal const val POLL_MAX_RETRIES = 3
+        internal const val POLL_DELAY_MS = 2000L
+    }
+}

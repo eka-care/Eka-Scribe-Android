@@ -1,20 +1,47 @@
-# EkaScribe SDK Documentation
+# EkaScribe Android SDK
 
-EkaScribe SDK (Voice2Rx) is an Android SDK for voice-based medical transcription and documentation.
-It provides real-time voice recording, transcription, and intelligent medical documentation
-generation with support for multiple languages and output formats.
+Voice-powered medical transcription and documentation for Android apps.
 
-**Version:** 3.0.6
+EkaScribe records audio, transcribes it in real-time, and generates structured clinical documents (
+SOAP notes, discharge summaries, etc.) with support for multiple languages and output templates.
 
-**Minimum Android SDK:** 23 (Android 6.0)
+**Min SDK:** 24 (Android 7.0) | **Compile SDK:** 36 | **Java:** 17
+
+### Features
+
+- Real-time voice recording with chunked upload
+- Multi-language transcription (up to 2 languages per session)
+- Multiple output templates (SOAP, custom formats)
+- Real-time voice activity detection and audio quality analysis
+- Session retry and idempotent error recovery
+- Full Kotlin and Java support
 
 ---
 
-## 1. Installation
+## Table of Contents
 
-### Add Maven Repository
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+    - [1. Implement TokenStorage](#1-implement-tokenstorage)
+    - [2. Implement EkaScribeCallback](#2-implement-ekascribecallback)
+    - [3. Initialize the SDK](#3-initialize-the-sdk)
+    - [4. Start a Session](#4-start-a-session)
+- [Recording Controls](#recording-controls)
+- [Observing Session State](#observing-session-state)
+- [Getting Results](#getting-results)
+- [Session Configuration](#session-configuration)
+- [Error Handling](#error-handling)
+- [Java Interop Guide](#java-interop-guide)
+- [Sample Apps](#sample-apps)
+- [Cleanup](#cleanup)
 
-Add the JitPack repository to your project's `settings.gradle.kts` (or `build.gradle`):
+---
+
+## Installation
+
+### 1. Add Maven Repository
+
+In your project's `settings.gradle.kts`:
 
 ```kotlin
 dependencyResolutionManagement {
@@ -22,27 +49,24 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
-        // Add below line to fetch SDK from Jitpack
-        maven { url = uri("<https://jitpack.io>") }
+        maven { url = uri("https://jitpack.io") }
     }
 }
-
 ```
 
-### Add Dependencies
+### 2. Add Dependency
 
-Add the EkaScribe SDK and required networking dependency to your app's `build.gradle.kts`:
+In your app's `build.gradle.kts`:
 
 ```kotlin
 dependencies {
     implementation("com.github.eka-care:Eka-Scribe-Android:${LATEST_VERSION}")
 }
-
 ```
 
-### Required Permissions
+### 3. Add Permissions
 
-Add the following permissions to your `AndroidManifest.xml`:
+In your `AndroidManifest.xml`:
 
 ```xml
 <uses-permission android:name="android.permission.RECORD_AUDIO" />
@@ -50,320 +74,603 @@ Add the following permissions to your `AndroidManifest.xml`:
 <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 ```
 
-**Note:** You must request `RECORD_AUDIO` permission at runtime for Android 6.0 and above.
+> **Note:** `RECORD_AUDIO` is a dangerous permission — you must request it at runtime before
+> starting a session.
 
 ---
 
-## 2. Initialization
+## Quick Start
 
-Initialize the SDK in your `Application` class or main `Activity`.
+### 1. Implement TokenStorage
 
-### Step 1: Implement Lifecycle Callbacks
+Provide your authentication tokens to the SDK.
 
-Create a class that implements `Voice2RxLifecycleCallbacks` to handle session events.
-
-```kotlin
-import com.eka.voice2rx_sdk.sdkinit.Voice2RxLifecycleCallbacks
-import com.eka.voice2rx_sdk.common.models.EkaScribeError
-
-class MyVoice2RxCallbacks : Voice2RxLifecycleCallbacks {
-    override fun onStartSession(sessionId: String) {
-        // Recording started
-    }
-
-    override fun onStopSession(sessionId: String, recordedFiles: Int) {
-        // Get result when ready after stopping the session
-        CoroutineScope(Dispatchers.IO).launch {
-            Voice2Rx.pollEkaScribeResult(sessionId = sessionId).onSuccess {
-                Log.d(TAG, it.templates.toString())
-            }.onFailure {
-                Log.d(TAG, "error : ${it.message.toString()}")
-            }
-        }
-    }
-
-    override fun onPauseSession(sessionId: String) {
-        // Recording paused
-    }
-
-    override fun onResumeSession(sessionId: String) {
-        // Recording resumed
-    }
-
-    override fun onError(error: EkaScribeError) {
-        // Handle error
-    }
-}
-
-```
-
-### Step 2: Implement TokenStorage
-
-The networking module requires a `TokenStorage` implementation to handle authentication tokens.
+**Kotlin**
 
 ```kotlin
 import com.eka.networking.token.TokenStorage
 
 class MyTokenStorage : TokenStorage {
-    override fun getAccessToken(): String {
-        return "access_token"
+    override fun getAccessToken(): String = "your_access_token"
+    override fun getRefreshToken(): String = "your_refresh_token"
+    override fun saveTokens(accessToken: String, refreshToken: String) { /* persist tokens */
     }
-
-    override fun getRefreshToken(): String {
-        return "refresh_token"
-    }
-
-    override fun saveTokens(accessToken: String, refreshToken: String) {
-        // save tokens
-    }
-
-    override fun onSessionExpired() {
-        // SessionExpired refresh token expired
+    override fun onSessionExpired() { /* handle session expiry — e.g., redirect to login */
     }
 }
 ```
 
-### Step 3: Configure and Initialize
+**Java**
 
-Initialize `Voice2Rx` with `Voice2RxInitConfig` and `NetworkConfig`.
+```java
+import com.eka.networking.token.TokenStorage;
+
+public class MyTokenStorage implements TokenStorage {
+    @Override
+    public String getAccessToken() {
+        return "your_access_token";
+    }
+
+    @Override
+    public String getRefreshToken() {
+        return "your_refresh_token";
+    }
+
+    @Override
+    public void saveTokens(String accessToken, String refreshToken) { /* persist */ }
+
+    @Override
+    public void onSessionExpired() { /* handle expiry */ }
+}
+```
+
+---
+
+### 2. Implement EkaScribeCallback
+
+Receive session lifecycle events.
+
+**Kotlin**
 
 ```kotlin
-import com.eka.voice2rx_sdk.sdkinit.Voice2Rx
-import com.eka.voice2rx_sdk.sdkinit.Voice2RxInitConfig
-import com.eka.networking.client.NetworkConfig
-import com.eka.networking.client.AuthConfig
+import com.eka.scribesdk.api.EkaScribeCallback
+import com.eka.scribesdk.api.models.ScribeError
+import com.eka.scribesdk.api.models.SessionResult
 
-// 1. Configure Network
+class MyScribeCallback : EkaScribeCallback {
+    override fun onSessionStarted(sessionId: String) { /* recording started */
+    }
+    override fun onSessionPaused(sessionId: String) {}
+    override fun onSessionResumed(sessionId: String) {}
+    override fun onSessionStopped(sessionId: String, chunkCount: Int) { /* upload complete */
+    }
+    override fun onError(error: ScribeError) { /* handle error */
+    }
+
+    // Optional overrides
+    override fun onSessionCompleted(sessionId: String, result: SessionResult) {
+        // Transcription result is ready
+        result.templates.forEach { template ->
+            println("${template.title}: ${template.sections}")
+        }
+    }
+
+    override fun onSessionFailed(sessionId: String, error: ScribeError) { /* processing failed */
+    }
+    override fun onSessionCancelled(sessionId: String) {}
+}
+```
+
+**Java**
+
+```java
+import com.eka.scribesdk.api.EkaScribeCallback;
+import com.eka.scribesdk.api.models.ScribeError;
+import com.eka.scribesdk.api.models.SessionResult;
+
+public class MyScribeCallback implements EkaScribeCallback {
+    @Override
+    public void onSessionStarted(String sessionId) { /* recording started */ }
+
+    @Override
+    public void onSessionPaused(String sessionId) {
+    }
+
+    @Override
+    public void onSessionResumed(String sessionId) {
+    }
+
+    @Override
+    public void onSessionStopped(String sessionId, int chunkCount) {
+    }
+
+    @Override
+    public void onError(ScribeError error) { /* handle error */ }
+
+    @Override
+    public void onSessionCompleted(String sessionId, SessionResult result) {
+        // Transcription result is ready
+        for (TemplateOutput template : result.getTemplates()) {
+            Log.d("Scribe", template.getTitle() + ": " + template.getSections());
+        }
+    }
+
+    @Override
+    public void onSessionFailed(String sessionId, ScribeError error) {
+    }
+
+    @Override
+    public void onSessionCancelled(String sessionId) {
+    }
+}
+```
+
+---
+
+### 3. Initialize the SDK
+
+Initialize once (e.g., in `Application.onCreate()` or your main `Activity`).
+
+**Kotlin**
+
+```kotlin
+import com.eka.networking.client.NetworkConfig
+import com.eka.scribesdk.api.EkaScribe
+import com.eka.scribesdk.api.EkaScribeConfig
+
 val networkConfig = NetworkConfig(
     appId = "your-app-id",
-    baseUrl = "<https://api.eka.care/>",
+    baseUrl = "https://api.eka.care/",
     appVersionName = BuildConfig.VERSION_NAME,
     appVersionCode = BuildConfig.VERSION_CODE,
-    isDebugApp = false // false in production environment,
+    isDebugApp = BuildConfig.DEBUG,
     apiCallTimeOutInSec = 30L,
-    headers = mapOf(), // Optional headers
+    headers = emptyMap(),
     tokenStorage = MyTokenStorage()
 )
 
-// 2. Configure SDK
-val config = Voice2RxInitConfig(
-    voice2RxLifecycle = MyVoice2RxCallbacks(),
+val config = EkaScribeConfig(
+    clientId = "your-client-id",       // mandatory
     networkConfig = networkConfig,
+    debugMode = BuildConfig.DEBUG      // optional, default false
 )
 
-// 3. Initialize
-Voice2Rx.init(config, context)
+EkaScribe.init(config, applicationContext, MyScribeCallback())
+```
 
+**Java**
+
+```java
+import com.eka.networking.client.NetworkConfig;
+import com.eka.scribesdk.api.EkaScribe;
+import com.eka.scribesdk.api.EkaScribeConfig;
+
+// All constructor params required from Java (no default parameter support)
+NetworkConfig networkConfig = new NetworkConfig(
+        "your-app-id",                      // appId
+        "https://api.eka.care/",            // baseUrl
+        "1.0.0",                            // appVersionName
+        1,                                   // appVersionCode
+        true,                                // isDebugApp
+        30L,                                 // apiCallTimeOutInSec
+        new HashMap<>(),                     // headers
+        new MyTokenStorage()                 // tokenStorage
+);
+
+        EkaScribeConfig config = new EkaScribeConfig(
+                "your-client-id",  // clientId (mandatory)
+                "android",         // flavour (optional, default "android")
+                true,              // enableAnalyser
+                true,              // debugMode
+                networkConfig      // networkConfig (mandatory)
+        );
+
+EkaScribe.INSTANCE.
+
+        init(config, this,new MyScribeCallback());
+```
+
+> **Java note:** `EkaScribe` is a Kotlin `object` — access it via `EkaScribe.INSTANCE` from Java.
+> The SDK automatically injects `clientId` and `flavour` as `client-id` and `flavour` headers into all
+> API requests.
+
+---
+
+### 4. Start a Session
+
+**Kotlin**
+
+```kotlin
+import com.eka.scribesdk.api.models.SessionConfig
+import com.eka.scribesdk.api.models.OutputTemplate
+
+val sessionConfig = SessionConfig(
+    languages = listOf("en-IN"),
+    mode = "dictation",              // "dictation" or "consultation"
+    modelType = "pro",               // "pro" or "lite"
+    outputTemplates = listOf(
+        OutputTemplate(templateId = "your-template-id", templateName = "SOAP Notes")
+    )
+)
+
+// startSession is a suspend function — call from a coroutine
+lifecycleScope.launch {
+    EkaScribe.startSession(
+        context = this@MainActivity,
+        sessionConfig = sessionConfig,
+        onStart = { sessionId -> Log.d("Scribe", "Started: $sessionId") },
+        onError = { error -> Log.e("Scribe", "Error: ${error.message}") }
+    )
+}
+```
+
+**Java**
+
+```java
+import com.eka.scribesdk.api.models.SessionConfig;
+import com.eka.scribesdk.api.models.OutputTemplate;
+
+SessionConfig sessionConfig = new SessionConfig(
+        Arrays.asList("en-IN"),           // languages
+        "dictation",                       // mode
+        "pro",                             // modelType
+        Arrays.asList(new OutputTemplate(  // outputTemplates
+                "your-template-id", "custom", "SOAP Notes"
+        )),
+        null,                              // patientDetails
+        null,                              // section
+        null                               // speciality
+);
+
+// startSession is a suspend function — use CoroutineHelper bridge (see Java Interop Guide)
+CoroutineScope lifecycleScope = LifecycleOwnerKt.getLifecycleScope(this);
+
+CoroutineHelper.
+
+startSession(
+        lifecycleScope,
+    this,
+        sessionConfig,
+        sessionId ->{Log.
+
+d("Scribe","Started: "+sessionId); return Unit.INSTANCE; },
+error ->{Log.
+
+e("Scribe","Error: "+error.getMessage());return Unit.INSTANCE; }
+        );
 ```
 
 ---
 
-## 3. Core API Reference
+## Recording Controls
 
-All main functions are available via the `Voice2Rx` singleton object.
+Once a session is started, control the recording with these methods.
 
-### Recording Control
-
-### `startVoice2Rx`
-
-Starts a new voice recording session.
+**Kotlin**
 
 ```kotlin
-fun startVoice2Rx(
-    mode: String = Voice2RxType.CONSULTATION.value, // "consultation" or "dictation"
-    patientDetails: PatientDetails? = null,
-    outputFormats: List<Template>, // Max 2 formats
-    languages: List<String>,       // Max 2 languages
-    modelType: String,             // e.g., "pro"
-    onError: (EkaScribeError) -> Unit,
-    onStart: (String) -> Unit
-)
+EkaScribe.pauseSession()
+EkaScribe.resumeSession()
+EkaScribe.stopSession()      // stops recording and triggers transcription
+EkaScribe.cancelSession()    // cancels without processing
 
+val isActive = EkaScribe.isRecording()
 ```
 
-**Example:**
+**Java**
 
-```kotlin
-// Define output templates using Template(templateId, templateName)
-val outputFormats = listOf(
-    Template(templateId = "19288d2f-81a9-46a6-b804-9651242a9b3e", templateName = "SOAP Note")
-)
+```java
+EkaScribe.INSTANCE.pauseSession();
+EkaScribe.INSTANCE.
 
-val languages = listOf("en-IN")
+resumeSession();
+EkaScribe.INSTANCE.
 
-Voice2Rx.startVoice2Rx(
-    mode = Voice2RxType.DICTATION.value,
-    outputFormats = outputFormats,
-    languages = languages,
-    modelType = "pro" // or lite for faster results,
-    onError = { error -> Log.e("SDK", "Error: ${error.errorDetails.message}") },
-    onStart = { sessionId -> Log.d("SDK", "Started: $sessionId") }
-)
+stopSession();
+EkaScribe.INSTANCE.
 
-```
+cancelSession();
 
-### `pauseVoice2Rx`
-
-Pauses the current recording.
-
-```kotlin
-Voice2Rx.pauseVoice2Rx()
-
-```
-
-### `resumeVoice2Rx`
-
-Resumes a paused recording.
-
-```kotlin
-Voice2Rx.resumeVoice2Rx()
-
-```
-
-### `stopVoice2Rx`
-
-Stops the recording and triggers processing.
-
-```kotlin
-Voice2Rx.stopVoice2Rx()
-
-```
-
-### `isCurrentlyRecording`
-
-Checks if a recording is in progress.
-
-```kotlin
-val isRecording = Voice2Rx.isCurrentlyRecording()
-
-```
-
-### Data & Results
-
-### `getSessionOutput`
-
-Retrieves the transcription/generated output for a session.
-
-```kotlin
-suspend fun getSessionOutput(sessionId: String): Result<SessionResult>
-
-```
-
-### `pollEkaScribeResult`
-
-Polls for results, useful for waiting until processing completes.
-
-```kotlin
-suspend fun pollEkaScribeResult(sessionId: String): Result<SessionResult>
-
-```
-
-### `getHistoryVoice2Rx`
-
-Fetches session history.
-
-```kotlin
-suspend fun getHistoryVoice2Rx(count: Int? = null): Voice2RxHistoryResponse?
-
-```
-
-### `getFullRecordingFile`
-
-Gets the audio file for a session.
-
-```kotlin
-fun getFullRecordingFile(sessionId: String): Result<File>
-
-```
-
-### Session Info & Monitoring
-
-### `getSessionUploadInfoAsFlow`
-
-Observe the upload stage of a session (Uploading, Processing, Completed).
-
-```kotlin
-suspend fun getSessionUploadInfoAsFlow(sessionId: String): Flow<VoiceTransactionStage>?
-
-```
-
-### `getVoiceActivityFlow`
-
-Flow for real-time voice activity (speech detection, amplitude).
-
-```kotlin
-fun getVoiceActivityFlow(): Flow<VoiceActivityData>?
-
-```
-
-### `getAudioQualityFlow`
-
-Flow for real-time audio quality metrics (STOI, PESQ, SI-SDR).
-
-```kotlin
-fun getAudioQualityFlow(): Flow<AudioQualityMetrics?>?
-
-```
-
-### Configuration & Templates
-
-### `getTemplates`
-
-Get available output templates.
-
-```kotlin
-suspend fun getTemplates(): Result<List<TemplateItem>>?
-
-```
-
-### `getUserConfigs`
-
-Get user configuration including supported languages and modes.
-
-```kotlin
-suspend fun getUserConfigs(): Result<UserConfigs>
-
-```
-
-### `updateUserConfigs`
-
-Update user preferences (selected language, mode, etc.).
-
-```kotlin
-suspend fun updateUserConfigs(selectedUserPreferences: SelectedUserPreferences): Result<Boolean>
-
+boolean isActive = EkaScribe.INSTANCE.isRecording();
 ```
 
 ---
 
-## 4. Error Handling
+## Observing Session State
 
-Errors are returned via `EkaScribeError`.
+### Session State Flow
 
-**Common Error Codes:**
+Monitor session state transitions:
+`IDLE -> STARTING -> RECORDING -> PAUSED -> STOPPING -> PROCESSING -> COMPLETED`.
 
-- `SUPPORTED_OUTPUT_FORMATS_COUNT_EXCEEDED`: Max 2 output formats allowed.
-- `SUPPORTED_LANGUAGES_COUNT_EXCEEDED`: Max 2 languages allowed.
-- `LANGUAGE_LIST_CAN_NOT_BE_EMPTY`
-- `OUTPUT_FORMAT_LIST_CAN_NOT_BE_EMPTY`
-
-**Data Class:**
+**Kotlin**
 
 ```kotlin
-data class EkaScribeError(
-    val sessionId: String,
-    val errorDetails: EkaScribeErrorDetails, // Contains 'message', 'displayMessage', 'code'
-    val voiceError: VoiceError
-)
-
+lifecycleScope.launch {
+    EkaScribe.getSessionState().collect { state ->
+        // Update UI based on state: IDLE, STARTING, RECORDING, PAUSED,
+        // STOPPING, PROCESSING, COMPLETED, ERROR
+    }
+}
 ```
 
-## 5. Cleanup
+**Java** (via CoroutineHelper)
 
-Call `releaseResources()` when the SDK is no longer needed (e.g., in `onDestroy` of your host
-Activity/Application).
+```java
+CoroutineHelper.collectSessionState(lifecycleScope, state ->{
+
+runOnUiThread(() ->{
+        // Update UI based on state
+        });
+        return Unit.INSTANCE;
+});
+```
+
+### Voice Activity Detection
+
+Get real-time speech detection and amplitude data during recording.
+
+**Kotlin**
 
 ```kotlin
-Voice2Rx.releaseResources()
+lifecycleScope.launch {
+    EkaScribe.getVoiceActivity().collect { data ->
+        val status = if (data.isSpeech) "Speaking" else "Silent"
+        Log.d("Scribe", "$status — amplitude: ${data.amplitude}")
+    }
+}
+```
 
+**Java** (via CoroutineHelper)
+
+```java
+CoroutineHelper.collectVoiceActivity(lifecycleScope, data ->{
+String status = data.isSpeech() ? "Speaking" : "Silent";
+    Log.
+
+d("Scribe",status +" — amplitude: "+data.getAmplitude());
+        return Unit.INSTANCE;
+});
+```
+
+---
+
+## Getting Results
+
+### Via Callback (recommended)
+
+The simplest way — override `onSessionCompleted` in your `EkaScribeCallback`:
+
+```kotlin
+override fun onSessionCompleted(sessionId: String, result: SessionResult) {
+    for (template in result.templates) {
+        println("Template: ${template.title}")
+        for (section in template.sections) {
+            println("  ${section.title}: ${section.value}")
+        }
+    }
+}
+```
+
+### Via Polling (manual)
+
+If you need to fetch results on demand:
+
+**Kotlin**
+
+```kotlin
+lifecycleScope.launch {
+    EkaScribe.pollSessionResult(sessionId).onSuccess { result ->
+        // Process SessionResult
+    }.onFailure { error ->
+        Log.e("Scribe", "Failed: ${error.message}")
+    }
+}
+```
+
+**Java**
+
+```java
+// Use a Kotlin bridge similar to CoroutineHelper for suspend function calls
+```
+
+### SessionResult Structure
+
+```
+SessionResult
+├── templates: List<TemplateOutput>
+│   ├── title: String?
+│   ├── name: String?
+│   ├── type: TemplateType (MARKDOWN, JSON, EKA_EMR)
+│   ├── rawOutput: String?
+│   ├── sections: List<SectionData>
+│   │   ├── title: String?
+│   │   └── value: String?
+│   └── isEditable: Boolean
+└── audioQuality: Double?
+```
+
+---
+
+## Session Configuration
+
+### SessionConfig
+
+| Parameter         | Type                    | Default       | Description                             |
+|-------------------|-------------------------|---------------|-----------------------------------------|
+| `languages`       | `List<String>`          | `["en-IN"]`   | Input languages (max 2)                 |
+| `mode`            | `String`                | `"dictation"` | `"dictation"` or `"consultation"`       |
+| `modelType`       | `String`                | `"pro"`       | `"pro"` (accurate) or `"lite"` (faster) |
+| `outputTemplates` | `List<OutputTemplate>?` | `null`        | Output format templates                 |
+| `patientDetails`  | `PatientDetail?`        | `null`        | Optional patient context                |
+| `section`         | `String?`               | `null`        | Medical section filter                  |
+| `speciality`      | `String?`               | `null`        | Medical speciality filter               |
+
+### OutputTemplate
+
+| Parameter      | Type      | Default    | Description         |
+|----------------|-----------|------------|---------------------|
+| `templateId`   | `String`  | —          | Template identifier |
+| `templateType` | `String`  | `"custom"` | Template type       |
+| `templateName` | `String?` | —          | Display name        |
+
+### PatientDetail
+
+| Parameter       | Type      | Description         |
+|-----------------|-----------|---------------------|
+| `age`           | `Int?`    | Patient age         |
+| `biologicalSex` | `String?` | `"M"` or `"F"`      |
+| `name`          | `String?` | Patient name        |
+| `patientId`     | `String?` | External patient ID |
+| `visitId`       | `String?` | Visit/encounter ID  |
+
+### EkaScribeConfig
+
+| Parameter        | Type            | Default     | Description                                            |
+|------------------|-----------------|-------------|--------------------------------------------------------|
+| `clientId`       | `String`        | —           | **Required.** Client identifier for API authentication |
+| `flavour`        | `String`        | `"android"` | SDK flavour identifier (sent as header)                |
+| `enableAnalyser` | `Boolean`       | `true`      | Enable SQUIM audio quality analysis                    |
+| `debugMode`      | `Boolean`       | `false`     | Enable detailed logging                                |
+| `networkConfig`  | `NetworkConfig` | —           | **Required.** Network and auth configuration           |
+
+> Audio recording parameters (sample rate, chunk durations, retries, etc.) are managed internally by
+> the SDK with optimized defaults.
+
+---
+
+## Error Handling
+
+Errors are delivered via `EkaScribeCallback.onError()` and `onSessionFailed()` as `ScribeError`:
+
+```kotlin
+data class ScribeError(
+    val code: ErrorCode,
+    val message: String,
+    val isRecoverable: Boolean = false
+)
+```
+
+### Error Codes
+
+| Code                        | Description                              |
+|-----------------------------|------------------------------------------|
+| `MIC_PERMISSION_DENIED`     | Microphone permission not granted        |
+| `SESSION_ALREADY_ACTIVE`    | A session is already running             |
+| `INVALID_CONFIG`            | SDK not initialized or bad configuration |
+| `ENCODER_FAILED`            | Audio encoding failure                   |
+| `UPLOAD_FAILED`             | Chunk upload to server failed            |
+| `MODEL_LOAD_FAILED`         | Audio analysis model failed to load      |
+| `NETWORK_UNAVAILABLE`       | No network connectivity                  |
+| `DB_ERROR`                  | Local database error                     |
+| `INVALID_STATE_TRANSITION`  | Invalid session state change attempted   |
+| `INIT_TRANSACTION_FAILED`   | Server session init failed               |
+| `STOP_TRANSACTION_FAILED`   | Server session stop failed               |
+| `COMMIT_TRANSACTION_FAILED` | Server commit failed                     |
+| `POLL_TIMEOUT`              | Result polling timed out                 |
+| `TRANSCRIPTION_FAILED`      | Server-side transcription failed         |
+| `RETRY_EXHAUSTED`           | All retry attempts exhausted             |
+| `UNKNOWN`                   | Unexpected error                         |
+
+### Retrying Failed Sessions
+
+```kotlin
+val result = EkaScribe.retrySession(sessionId, forceCommit = false)
+```
+
+---
+
+## Java Interop Guide
+
+EkaScribe is written in Kotlin. Java apps need to handle three differences:
+
+### 1. Singleton Access
+
+`EkaScribe` is a Kotlin `object`. From Java, access it via `EkaScribe.INSTANCE`:
+
+```java
+EkaScribe.INSTANCE.init(config, context, callback);
+EkaScribe.INSTANCE.
+
+pauseSession();
+EkaScribe.INSTANCE.
+
+stopSession();
+```
+
+### 2. No Default Parameters
+
+Kotlin data classes with default parameter values require **all parameters** when called from Java.
+`EkaScribeConfig` has 5 parameters (2 mandatory + 3 with defaults). See
+the [Initialize the SDK](#3-initialize-the-sdk) section for the full constructor call.
+
+### 3. Suspend Functions & Flows (CoroutineHelper)
+
+Kotlin `suspend` functions (`startSession`, `pollSessionResult`, etc.) and `Flow` collection cannot
+be called directly from Java. You need a small Kotlin bridge file.
+
+Add this single Kotlin file to your Java project:
+
+```kotlin
+// bridge/CoroutineHelper.kt
+object CoroutineHelper {
+
+    @JvmStatic
+    fun startSession(
+        scope: CoroutineScope, context: Context,
+        sessionConfig: SessionConfig,
+        onStart: (String) -> Unit, onError: (ScribeError) -> Unit
+    ): Job = scope.launch(Dispatchers.Main) {
+        EkaScribe.startSession(context, sessionConfig, onStart, onError)
+    }
+
+    @JvmStatic
+    fun collectSessionState(scope: CoroutineScope, callback: (SessionState) -> Unit): Job =
+        scope.launch(Dispatchers.Main) {
+            EkaScribe.getSessionState().collect { callback(it) }
+        }
+
+    @JvmStatic
+    fun collectVoiceActivity(scope: CoroutineScope, callback: (VoiceActivityData) -> Unit): Job =
+        scope.launch(Dispatchers.Main) {
+            EkaScribe.getVoiceActivity().collect { callback(it) }
+        }
+}
+```
+
+> For a Java project, add `apply plugin: 'kotlin-android'` to your `build.gradle` to compile this
+> single Kotlin file. See the [sample-java](sample-java/) module for a full working example.
+
+---
+
+## Sample Apps
+
+| Module                         | Language             | Description                                                     |
+|--------------------------------|----------------------|-----------------------------------------------------------------|
+| [`sample-java/`](sample-java/) | Java + Kotlin bridge | Full integration example with UI, permissions, state management |
+
+---
+
+## Cleanup
+
+Call `destroy()` when the SDK is no longer needed (typically in `onDestroy`):
+
+**Kotlin**
+
+```kotlin
+override fun onDestroy() {
+    super.onDestroy()
+    EkaScribe.destroy()
+}
+```
+
+**Java**
+
+```java
+
+@Override
+protected void onDestroy() {
+    super.onDestroy();
+    EkaScribe.INSTANCE.destroy();
+}
 ```
