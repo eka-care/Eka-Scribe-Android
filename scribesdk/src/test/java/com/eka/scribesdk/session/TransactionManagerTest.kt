@@ -214,8 +214,8 @@ internal class TransactionManagerTest {
         api.stopResponse = netSuccess(stopOk())
         val dm = FakeDataManager()
         dm.uploadedChunksList = listOf(
-            makeChunkEntity("chunk-0", "1.m4a", startTimeMs = 0, endTimeMs = 14272),
-            makeChunkEntity("chunk-1", "2.m4a", startTimeMs = 13772, endTimeMs = 25924)
+            makeChunkEntity("chunk-0", "1.mp3", startTimeMs = 0, endTimeMs = 14272),
+            makeChunkEntity("chunk-1", "2.mp3", startTimeMs = 13772, endTimeMs = 25924)
         )
         val (manager, _, _) = createManager(api = api, dataManager = dm)
 
@@ -224,8 +224,8 @@ internal class TransactionManagerTest {
         assertTrue(result is TransactionResult.Success)
         val request = api.lastStopRequest!!
         assertEquals(2, request.audioFiles.size)
-        assertEquals("1.m4a", request.audioFiles[0])
-        assertEquals("2.m4a", request.audioFiles[1])
+        assertEquals("1.mp3", request.audioFiles[0])
+        assertEquals("2.mp3", request.audioFiles[1])
         assertEquals(2, request.chunkInfo.size)
         assertEquals(TransactionStage.COMMIT.name, dm.uploadStages[SESSION_ID])
     }
@@ -263,7 +263,7 @@ internal class TransactionManagerTest {
         val api = FakeApiService()
         api.commitResponse = netSuccess(stopOk())
         val dm = FakeDataManager()
-        dm.uploadedChunksList = listOf(makeChunkEntity("c1", "1.m4a"))
+        dm.uploadedChunksList = listOf(makeChunkEntity("c1", "1.mp3"))
         val (manager, _, _) = createManager(api = api, dataManager = dm)
 
         val result = manager.commitTransaction(SESSION_ID)
@@ -473,10 +473,10 @@ internal class TransactionManagerTest {
 
     @Test
     fun `retryFailedUploads retries and marks uploaded on success`() = runTest {
-        val chunkFile = tempFolder.newFile("chunk.m4a")
+        val chunkFile = tempFolder.newFile("chunk.mp3")
         val dm = FakeDataManager()
         dm.failedChunksList = listOf(
-            makeChunkEntity("c1", "1.m4a", filePath = chunkFile.absolutePath)
+            makeChunkEntity("c1", "1.mp3", filePath = chunkFile.absolutePath)
         )
         dm.sessionEntity = makeSessionEntity(folderName = "260302", bid = "bid-1")
         dm.allChunksUploaded = true
@@ -492,10 +492,10 @@ internal class TransactionManagerTest {
 
     @Test
     fun `retryFailedUploads marks failed on upload failure`() = runTest {
-        val chunkFile = tempFolder.newFile("fail_chunk.m4a")
+        val chunkFile = tempFolder.newFile("fail_chunk.mp3")
         val dm = FakeDataManager()
         dm.failedChunksList = listOf(
-            makeChunkEntity("c2", "2.m4a", filePath = chunkFile.absolutePath)
+            makeChunkEntity("c2", "2.mp3", filePath = chunkFile.absolutePath)
         )
         dm.sessionEntity = makeSessionEntity()
         dm.allChunksUploaded = false
@@ -512,7 +512,7 @@ internal class TransactionManagerTest {
     fun `retryFailedUploads skips missing files`() = runTest {
         val dm = FakeDataManager()
         dm.failedChunksList = listOf(
-            makeChunkEntity("c3", "3.m4a", filePath = "/nonexistent/path/3.m4a")
+            makeChunkEntity("c3", "3.mp3", filePath = "/nonexistent/path/3.mp3")
         )
         dm.sessionEntity = makeSessionEntity()
         dm.allChunksUploaded = false
@@ -527,11 +527,11 @@ internal class TransactionManagerTest {
 
     @Test
     fun `retryFailedUploads retries chunks that were previously exhausted`() = runTest {
-        val chunkFile = tempFolder.newFile("exhausted_chunk.m4a")
+        val chunkFile = tempFolder.newFile("exhausted_chunk.mp3")
         val dm = FakeDataManager()
         dm.failedChunksList = emptyList()
         dm.retryExhaustedChunksList = listOf(
-            makeChunkEntity("c-exhaust", "1.m4a", filePath = chunkFile.absolutePath)
+            makeChunkEntity("c-exhaust", "1.mp3", filePath = chunkFile.absolutePath)
         )
         dm.sessionEntity = makeSessionEntity(folderName = "260302", bid = "bid-1")
         dm.allChunksUploaded = true
@@ -549,14 +549,14 @@ internal class TransactionManagerTest {
     @Test
     fun `retryFailedUploads returns true when previously exhausted chunks are recovered`() =
         runTest {
-        val chunkFile1 = tempFolder.newFile("failed.m4a")
-        val chunkFile2 = tempFolder.newFile("exhausted.m4a")
+            val chunkFile1 = tempFolder.newFile("failed.mp3")
+            val chunkFile2 = tempFolder.newFile("exhausted.mp3")
         val dm = FakeDataManager()
         dm.failedChunksList = listOf(
-            makeChunkEntity("c-fail", "1.m4a", filePath = chunkFile1.absolutePath)
+            makeChunkEntity("c-fail", "1.mp3", filePath = chunkFile1.absolutePath)
         )
         dm.retryExhaustedChunksList = listOf(
-            makeChunkEntity("c-exhaust2", "2.m4a", filePath = chunkFile2.absolutePath)
+            makeChunkEntity("c-exhaust2", "2.mp3", filePath = chunkFile2.absolutePath)
         )
         dm.sessionEntity = makeSessionEntity(folderName = "260302", bid = "bid-1")
         dm.allChunksUploaded = true
@@ -934,10 +934,10 @@ internal class TransactionManagerTest {
 
     @Test
     fun `retryFailedUploads with null session uses empty folderName and bid`() = runTest {
-        val chunkFile = tempFolder.newFile("null_session_chunk.m4a")
+        val chunkFile = tempFolder.newFile("null_session_chunk.mp3")
         val dm = FakeDataManager()
         dm.failedChunksList = listOf(
-            makeChunkEntity("c-null", "1.m4a", filePath = chunkFile.absolutePath)
+            makeChunkEntity("c-null", "1.mp3", filePath = chunkFile.absolutePath)
         )
         dm.sessionEntity = null
         dm.allChunksUploaded = true
@@ -952,10 +952,10 @@ internal class TransactionManagerTest {
 
     @Test
     fun `retryFailedUploads with session having null folderName uses empty string`() = runTest {
-        val chunkFile = tempFolder.newFile("null_folder_chunk.m4a")
+        val chunkFile = tempFolder.newFile("null_folder_chunk.mp3")
         val dm = FakeDataManager()
         dm.failedChunksList = listOf(
-            makeChunkEntity("c-nf", "1.m4a", filePath = chunkFile.absolutePath)
+            makeChunkEntity("c-nf", "1.mp3", filePath = chunkFile.absolutePath)
         )
         dm.sessionEntity = makeSessionEntity(folderName = null, bid = null)
         dm.allChunksUploaded = true
@@ -1000,7 +1000,7 @@ internal class TransactionManagerTest {
         val dm = FakeDataManager()
         dm.sessionEntity = makeSessionEntity(uploadStage = TransactionStage.STOP.name)
         dm.failedChunksList = listOf(
-            makeChunkEntity("c-stuck", "1.m4a", filePath = "/nonexistent/1.m4a")
+            makeChunkEntity("c-stuck", "1.mp3", filePath = "/nonexistent/1.mp3")
         )
         dm.allChunksUploaded = false
         val (manager, _, _) = createManager(dataManager = dm)
@@ -1020,7 +1020,7 @@ internal class TransactionManagerTest {
         val dm = FakeDataManager()
         dm.sessionEntity = makeSessionEntity(uploadStage = TransactionStage.STOP.name)
         dm.failedChunksList = listOf(
-            makeChunkEntity("c-force", "1.m4a", filePath = "/nonexistent/1.m4a")
+            makeChunkEntity("c-force", "1.mp3", filePath = "/nonexistent/1.mp3")
         )
         dm.allChunksUploaded = false
         val (manager, _, _) = createManager(api = api, dataManager = dm)
@@ -1281,7 +1281,7 @@ internal class TransactionManagerTest {
     }
 
     internal class FakeChunkUploader(
-        private val result: UploadResult = UploadResult.Success("s3://test/ok.m4a")
+        private val result: UploadResult = UploadResult.Success("s3://test/ok.mp3")
     ) : ChunkUploader {
         var uploadCount = 0
 

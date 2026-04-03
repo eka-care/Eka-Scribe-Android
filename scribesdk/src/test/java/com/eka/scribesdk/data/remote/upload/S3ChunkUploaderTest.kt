@@ -31,9 +31,10 @@ class S3ChunkUploaderTest {
         chunkId = chunkId,
         sessionId = "session-1",
         chunkIndex = 0,
-        fileName = "1.m4a",
+        fileName = "1.mp3",
         folderName = "260305",
-        bid = "test-bid"
+        bid = "test-bid",
+        mimeType = "audio/mpeg"
     )
 
     // =====================================================================
@@ -56,7 +57,7 @@ class S3ChunkUploaderTest {
             logger = logger
         )
 
-        val file = tempFolder.newFile("test.m4a")
+        val file = tempFolder.newFile("test.mp3")
         val result = uploader.upload(file, createMetadata())
 
         assertTrue("Should return Failure", result is UploadResult.Failure)
@@ -85,7 +86,7 @@ class S3ChunkUploaderTest {
             logger = logger
         )
 
-        val file = tempFolder.newFile("test.m4a")
+        val file = tempFolder.newFile("test.mp3")
         val result = uploader.upload(file, createMetadata())
 
         assertTrue("Should return Failure", result is UploadResult.Failure)
@@ -108,7 +109,7 @@ class S3ChunkUploaderTest {
             logger = logger
         )
 
-        val file = tempFolder.newFile("test.m4a")
+        val file = tempFolder.newFile("test.mp3")
         val result = uploader.upload(file, createMetadata())
 
         assertTrue("Should return Failure", result is UploadResult.Failure)
@@ -135,7 +136,7 @@ class S3ChunkUploaderTest {
             logger = logger
         )
 
-        val file = tempFolder.newFile("test.m4a")
+        val file = tempFolder.newFile("test.mp3")
         val result = uploader.upload(file, createMetadata())
 
         assertTrue("Should return Failure", result is UploadResult.Failure)
@@ -182,7 +183,7 @@ class S3ChunkUploaderTest {
             logger = logger
         )
 
-        val file = tempFolder.newFile("test.m4a")
+        val file = tempFolder.newFile("test.mp3")
         val metadata = createMetadata("chunk-net-test")
 
         // First call — no network, should fail but NOT add to in-flight

@@ -20,21 +20,21 @@ class EncodedChunkTest {
     }
 
     @Test
-    fun `EncodedChunk with M4A format`() {
+    fun `EncodedChunk with MP3 format`() {
         val chunk = EncodedChunk(
-            filePath = "/tmp/output.m4a",
-            format = AudioFormat.M4A,
+            filePath = "/tmp/output.mp3",
+            format = AudioFormat.MP3,
             sizeBytes = 16000L,
             durationMs = 5000L
         )
-        assertEquals(AudioFormat.M4A, chunk.format)
+        assertEquals(AudioFormat.MP3, chunk.format)
     }
 
     @Test
     fun `AudioFormat has exactly 2 values`() {
         assertEquals(2, AudioFormat.entries.size)
         assertEquals("WAV", AudioFormat.WAV.name)
-        assertEquals("M4A", AudioFormat.M4A.name)
+        assertEquals("MP3", AudioFormat.MP3.name)
     }
 
     @Test
@@ -47,8 +47,8 @@ class EncodedChunkTest {
     @Test
     fun `copy works correctly`() {
         val original = EncodedChunk("/tmp/a.wav", AudioFormat.WAV, 100, 1000)
-        val copy = original.copy(format = AudioFormat.M4A)
-        assertEquals(AudioFormat.M4A, copy.format)
+        val copy = original.copy(format = AudioFormat.MP3)
+        assertEquals(AudioFormat.MP3, copy.format)
         assertEquals("/tmp/a.wav", copy.filePath)
     }
 }

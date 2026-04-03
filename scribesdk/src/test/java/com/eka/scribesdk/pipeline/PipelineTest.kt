@@ -241,8 +241,8 @@ internal class PipelineTest {
         val uploader = FakeChunkUploader()
         uploader.resultSequence = mutableListOf(
             UploadResult.Failure("Network error", isRetryable = true),
-            UploadResult.Success("s3://uploaded/2.m4a"),
-            UploadResult.Success("s3://uploaded/3.m4a")
+            UploadResult.Success("s3://uploaded/2.mp3"),
+            UploadResult.Success("s3://uploaded/3.mp3")
         )
 
         val chunker = FakeChunker(chunkEveryN = 10)
@@ -603,7 +603,7 @@ internal class PipelineTest {
     }
 
     internal class FakeChunkUploader(
-        private val result: UploadResult = UploadResult.Success("s3://test/uploaded.m4a")
+        private val result: UploadResult = UploadResult.Success("s3://test/uploaded.mp3")
     ) : ChunkUploader {
         val uploadedMetadata = mutableListOf<UploadMetadata>()
         var resultSequence: MutableList<UploadResult>? = null

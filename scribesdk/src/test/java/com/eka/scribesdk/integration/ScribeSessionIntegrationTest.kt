@@ -231,13 +231,13 @@ internal class ScribeSessionIntegrationTest {
         )
 
         // Provide a failed chunk that the retry loop will re-upload.
-        val tempFile = File.createTempFile("test_chunk", ".m4a")
+        val tempFile = File.createTempFile("test_chunk", ".mp3")
         tempFile.deleteOnExit()
         fakeDm.failedChunksList = listOf(
             AudioChunkEntity(
                 chunkId = "c-fail", sessionId = "any",
                 chunkIndex = 0, filePath = tempFile.absolutePath,
-                fileName = "1.m4a", startTimeMs = 0, endTimeMs = 10000,
+                fileName = "1.mp3", startTimeMs = 0, endTimeMs = 10000,
                 durationMs = 10000, createdAt = 1000L
             )
         )
@@ -669,7 +669,7 @@ internal class ScribeSessionIntegrationTest {
     }
 
     internal class FakeChunkUploader(
-        var result: UploadResult = UploadResult.Success("s3://test/ok.m4a")
+        var result: UploadResult = UploadResult.Success("s3://test/ok.mp3")
     ) : ChunkUploader {
         var uploadCount = 0
         override suspend fun upload(file: File, metadata: UploadMetadata): UploadResult {

@@ -6,30 +6,31 @@ import org.junit.Test
 class UploadMetadataTest {
 
     @Test
-    fun `default mimeType is audio wav`() {
+    fun `mp3 mimeType is audio mpeg`() {
+        val metadata = UploadMetadata(
+            chunkId = "c1",
+            sessionId = "s1",
+            chunkIndex = 0,
+            fileName = "chunk.mp3",
+            folderName = "260302",
+            bid = "bid-1",
+            mimeType = "audio/mpeg"
+        )
+        assertEquals("audio/mpeg", metadata.mimeType)
+    }
+
+    @Test
+    fun `wav mimeType is audio wav`() {
         val metadata = UploadMetadata(
             chunkId = "c1",
             sessionId = "s1",
             chunkIndex = 0,
             fileName = "chunk.wav",
             folderName = "260302",
-            bid = "bid-1"
+            bid = "bid-1",
+            mimeType = "audio/wav"
         )
         assertEquals("audio/wav", metadata.mimeType)
-    }
-
-    @Test
-    fun `custom mimeType overrides default`() {
-        val metadata = UploadMetadata(
-            chunkId = "c1",
-            sessionId = "s1",
-            chunkIndex = 0,
-            fileName = "chunk.m4a",
-            folderName = "260302",
-            bid = "bid-1",
-            mimeType = "audio/m4a"
-        )
-        assertEquals("audio/m4a", metadata.mimeType)
     }
 
     @Test
@@ -38,22 +39,23 @@ class UploadMetadataTest {
             chunkId = "chunk-42",
             sessionId = "session-99",
             chunkIndex = 5,
-            fileName = "5.m4a",
+            fileName = "5.mp3",
             folderName = "260302",
-            bid = "bid-xyz"
+            bid = "bid-xyz",
+            mimeType = "audio/mpeg"
         )
         assertEquals("chunk-42", metadata.chunkId)
         assertEquals("session-99", metadata.sessionId)
         assertEquals(5, metadata.chunkIndex)
-        assertEquals("5.m4a", metadata.fileName)
+        assertEquals("5.mp3", metadata.fileName)
         assertEquals("260302", metadata.folderName)
         assertEquals("bid-xyz", metadata.bid)
     }
 
     @Test
     fun `data class equality`() {
-        val a = UploadMetadata("c1", "s1", 0, "f.wav", "260302", "bid")
-        val b = UploadMetadata("c1", "s1", 0, "f.wav", "260302", "bid")
+        val a = UploadMetadata("c1", "s1", 0, "f.wav", "260302", "bid", "audio/wav")
+        val b = UploadMetadata("c1", "s1", 0, "f.wav", "260302", "bid", "audio/wav")
         assertEquals(a, b)
         assertEquals(a.hashCode(), b.hashCode())
     }

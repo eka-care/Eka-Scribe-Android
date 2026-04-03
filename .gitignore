@@ -15,3 +15,4 @@
 local.properties
 /.idea/*
 /voice2rx_sdk/src/main/assets/*
+/.claude

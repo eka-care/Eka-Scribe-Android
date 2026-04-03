@@ -287,13 +287,15 @@ internal class TransactionManager(
 
             dataManager.markInProgress(chunk.chunkId)
 
+            val mimeType = if (chunk.fileName.endsWith(".wav")) "audio/wav" else "audio/mpeg"
             val metadata = UploadMetadata(
                 chunkId = chunk.chunkId,
                 sessionId = chunk.sessionId,
                 chunkIndex = chunk.chunkIndex,
                 fileName = chunk.fileName,
                 folderName = folderName,
-                bid = bid
+                bid = bid,
+                mimeType = mimeType
             )
 
             when (val result = chunkUploader.upload(file, metadata)) {

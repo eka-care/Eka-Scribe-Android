@@ -32,6 +32,7 @@ brotiliVersion = "0.1.2"
 ekascribe_sdk = "3.0.8"
 appcompatVersion = "1.7.1"
 materialVersion = "1.13.0"
+tandroidlame = "1.1"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -75,6 +76,7 @@ ok2curl = { module = "com.github.mrmike:ok2curl", version.ref = "ok2curl" }
 brotili = { module = "org.brotli:dec", version.ref = "brotiliVersion" }
 androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompatVersion" }
 material = { group = "com.google.android.material", name = "material", version.ref = "materialVersion" }
+tandroidlame = { module = "com.github.naman14:TAndroidLame", version.ref = "tandroidlame" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
