@@ -237,7 +237,9 @@ dependencies {
     implementation(libs.onnxruntime.android)
 
     // LAME MP3 encoder
-    implementation(libs.tandroidlame)
+    implementation(libs.tandroidlame) {
+        exclude(group = "com.android.support")
+    }
 
     // Testing
     testImplementation(libs.junit)

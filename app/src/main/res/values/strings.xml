@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">Voice2Rx</string>
+    <string name="accessibility_service_description">EkaScribe uses this service to enable audio recording during phone calls for medical documentation.</string>
 </resources>
