@@ -70,7 +70,6 @@ class TestActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        accessibilityEnabled.value = isAccessibilityServiceEnabled()
         scanForRecordings()
     }
 
@@ -177,15 +176,6 @@ class TestActivity : ComponentActivity() {
                 }
             )
         }
-    }
-
-    private fun isAccessibilityServiceEnabled(): Boolean {
-        val enabledServices = Settings.Secure.getString(
-            contentResolver,
-            Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
-        ) ?: return false
-        val serviceName = "$packageName/${ScribeAccessibilityService::class.java.canonicalName}"
-        return enabledServices.contains(serviceName)
     }
 
     private val requestPermissionLauncher = registerForActivityResult(
