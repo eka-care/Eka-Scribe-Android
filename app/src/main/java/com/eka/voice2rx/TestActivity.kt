@@ -5,7 +5,9 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.provider.Settings
+import android.telecom.TelecomManager
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -37,6 +39,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.core.net.toUri
 import androidx.lifecycle.lifecycleScope
 import com.eka.networking.client.NetworkConfig
 import com.eka.networking.token.TokenStorage
@@ -50,6 +53,9 @@ import com.eka.scribesdk.api.models.SessionState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class TestActivity : ComponentActivity() {
     companion object {
@@ -76,10 +82,10 @@ class TestActivity : ComponentActivity() {
     private fun requestStoragePermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             // Android 11+ needs MANAGE_EXTERNAL_STORAGE for all-files access
-            if (!android.os.Environment.isExternalStorageManager()) {
+            if (!Environment.isExternalStorageManager()) {
                 val intent = Intent(
                     Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-                    android.net.Uri.parse("package:$packageName")
+                    "package:$packageName".toUri()
                 )
                 startActivity(intent)
                 return
@@ -112,7 +118,7 @@ class TestActivity : ComponentActivity() {
                     "com.android.phone.settings.PhoneAccountSettingsActivity"
                 )
             },
-            Intent(android.telecom.TelecomManager.ACTION_CHANGE_PHONE_ACCOUNTS),
+            Intent(TelecomManager.ACTION_CHANGE_PHONE_ACCOUNTS),
             Intent(Settings.ACTION_SOUND_SETTINGS)
         )
         for (intent in intents) {
@@ -687,11 +693,8 @@ fun TestScreen(
                             style = MaterialTheme.typography.bodySmall,
                             color = Color.Gray
                         )
-                        val date = java.text.SimpleDateFormat(
-                            "MMM dd, yyyy HH:mm",
-                            java.util.Locale.getDefault()
-                        )
-                            .format(java.util.Date(detectedRecording.dateModified * 1000))
+                        val date = SimpleDateFormat("MMM dd, yyyy HH:mm", Locale.getDefault())
+                            .format(Date(detectedRecording.dateModified * 1000))
                         Text(
                             text = "Date: $date",
                             style = MaterialTheme.typography.bodySmall,

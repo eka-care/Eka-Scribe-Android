@@ -1,6 +1,7 @@
 package com.eka.scribesdk.api
 
 import android.content.Context
+import android.media.MediaMetadataRetriever
 import com.eka.networking.client.EkaNetwork
 import com.eka.networking.client.NetworkConfig
 import com.eka.scribesdk.BuildConfig
@@ -27,6 +28,7 @@ import com.eka.scribesdk.common.logging.NoOpLogger
 import com.eka.scribesdk.common.util.DefaultTimeProvider
 import com.eka.scribesdk.common.util.IdGenerator
 import com.eka.scribesdk.common.util.TimeProvider
+import com.eka.scribesdk.common.util.deleteFile
 import com.eka.scribesdk.data.DataManager
 import com.eka.scribesdk.data.DefaultDataManager
 import com.eka.scribesdk.data.local.db.ScribeDatabase
@@ -44,9 +46,12 @@ import com.eka.scribesdk.data.remote.models.responses.toSessionResult
 import com.eka.scribesdk.data.remote.models.responses.toTemplateItem
 import com.eka.scribesdk.data.remote.models.responses.toUserConfigs
 import com.eka.scribesdk.data.remote.services.ScribeApiService
+import com.eka.scribesdk.data.remote.upload.ChunkUploader
 import com.eka.scribesdk.data.remote.upload.S3ChunkUploader
 import com.eka.scribesdk.data.remote.upload.UploadMetadata
 import com.eka.scribesdk.data.remote.upload.UploadResult
+import com.eka.scribesdk.encoder.AudioEncoder
+import com.eka.scribesdk.encoder.AudioFileChunker
 import com.eka.scribesdk.encoder.Mp3AudioEncoder
 import com.eka.scribesdk.pipeline.Pipeline
 import com.eka.scribesdk.session.SessionManager
@@ -67,6 +72,9 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
  * Public SDK facade. Single entry point for the Eka Scribe SDK.
@@ -90,8 +98,8 @@ object EkaScribe {
     private var dataManager: DataManager? = null
     private var modelDownloader: ModelDownloader? = null
     private var config: EkaScribeConfig? = null
-    private var chunkUploaderRef: com.eka.scribesdk.data.remote.upload.ChunkUploader? = null
-    private var encoderRef: com.eka.scribesdk.encoder.AudioEncoder? = null
+    private var chunkUploaderRef: ChunkUploader? = null
+    private var encoderRef: AudioEncoder? = null
     private var outputDirRef: File? = null
     private var logger: Logger = NoOpLogger()
     private var isInitialized = false
@@ -690,8 +698,8 @@ object EkaScribe {
                 }
 
                 val sessionId = IdGenerator.sessionId()
-                val folderName = java.text.SimpleDateFormat("yyMMdd", java.util.Locale.getDefault())
-                    .format(java.util.Date())
+                val folderName = SimpleDateFormat("yyMMdd", Locale.getDefault())
+                    .format(Date())
                 val timeProvider = DefaultTimeProvider()
 
                 logger.info(TAG, "Processing audio file: $filePath, session: $sessionId")
@@ -733,8 +741,7 @@ object EkaScribe {
                     return@withContext
                 }
 
-                val chunker =
-                    com.eka.scribesdk.encoder.AudioFileChunker(audioEncoder, outDir, logger)
+                val chunker = AudioFileChunker(audioEncoder, outDir, logger)
                 val chunks = chunker.chunkAudioFile(file, sessionId, chunkDurationSec = 25)
 
                 if (chunks.isEmpty()) {
@@ -775,7 +782,7 @@ object EkaScribe {
                     when (val uploadResult = chunkUploader.upload(File(chunk.filePath), metadata)) {
                         is UploadResult.Success -> {
                             dm.markUploaded(chunkId)
-                            com.eka.scribesdk.common.util.deleteFile(File(chunk.filePath), logger)
+                            deleteFile(File(chunk.filePath), logger)
                             logger.info(TAG, "Chunk ${chunk.fileName} uploaded: $sessionId")
                         }
 
@@ -865,10 +872,10 @@ object EkaScribe {
 
     private fun getAudioDurationMs(file: File): Long {
         return try {
-            val retriever = android.media.MediaMetadataRetriever()
+            val retriever = MediaMetadataRetriever()
             retriever.setDataSource(file.absolutePath)
             val durationStr = retriever.extractMetadata(
-                android.media.MediaMetadataRetriever.METADATA_KEY_DURATION
+                MediaMetadataRetriever.METADATA_KEY_DURATION
             )
             retriever.release()
             durationStr?.toLongOrNull() ?: 0L
@@ -878,9 +885,7 @@ object EkaScribe {
         }
     }
 
-    private fun getChunkUploader(): com.eka.scribesdk.data.remote.upload.ChunkUploader? {
-        // The chunk uploader is created during init() and stored in SessionManager's pipeline factory.
-        // For processAudioFile, we need direct access. Access it via the field.
+    private fun getChunkUploader(): ChunkUploader? {
         return chunkUploaderRef
     }
 
