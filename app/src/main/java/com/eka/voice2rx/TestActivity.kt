@@ -1,8 +1,13 @@
 package com.eka.voice2rx
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
+import android.os.Environment
+import android.provider.Settings
+import android.telecom.TelecomManager
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -34,6 +39,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.core.net.toUri
 import androidx.lifecycle.lifecycleScope
 import com.eka.networking.client.NetworkConfig
 import com.eka.networking.token.TokenStorage
@@ -47,6 +53,9 @@ import com.eka.scribesdk.api.models.SessionState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class TestActivity : ComponentActivity() {
     companion object {
@@ -61,6 +70,119 @@ class TestActivity : ComponentActivity() {
     private val chunkCount = mutableIntStateOf(0)
     private val voiceActivity = mutableStateOf("No activity")
     private val resultInfo = mutableStateOf("")
+    private val accessibilityEnabled = mutableStateOf(false)
+    private val detectedRecording = mutableStateOf<CallRecordingScanner.AudioFile?>(null)
+    private val processingStatus = mutableStateOf("")
+
+    override fun onResume() {
+        super.onResume()
+        scanForRecordings()
+    }
+
+    private fun requestStoragePermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            // Android 11+ needs MANAGE_EXTERNAL_STORAGE for all-files access
+            if (!Environment.isExternalStorageManager()) {
+                val intent = Intent(
+                    Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                    "package:$packageName".toUri()
+                )
+                startActivity(intent)
+                return
+            }
+        } else {
+            val permission = Manifest.permission.READ_EXTERNAL_STORAGE
+            if (ContextCompat.checkSelfPermission(
+                    this,
+                    permission
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                requestPermissionLauncher.launch(permission)
+                return
+            }
+        }
+    }
+
+    private fun openDialerCallRecordingSettings() {
+        // Try MIUI dialer settings first
+        val intents = listOf(
+            Intent().apply {
+                setClassName(
+                    "com.android.contacts",
+                    "com.android.contacts.activities.DialtactsActivity"
+                )
+            },
+            Intent().apply {
+                setClassName(
+                    "com.android.phone",
+                    "com.android.phone.settings.PhoneAccountSettingsActivity"
+                )
+            },
+            Intent(TelecomManager.ACTION_CHANGE_PHONE_ACCOUNTS),
+            Intent(Settings.ACTION_SOUND_SETTINGS)
+        )
+        for (intent in intents) {
+            try {
+                if (intent.resolveActivity(packageManager) != null) {
+                    startActivity(intent)
+                    return
+                }
+            } catch (_: Exception) {
+            }
+        }
+        // Fallback: open the dialer app
+        try {
+            val launchIntent = packageManager.getLaunchIntentForPackage("com.android.contacts")
+                ?: packageManager.getLaunchIntentForPackage("com.google.android.dialer")
+            if (launchIntent != null) {
+                startActivity(launchIntent)
+                return
+            }
+        } catch (_: Exception) {
+        }
+        showToast("Please open Phone app > Settings > Call Recording manually")
+    }
+
+    private fun scanForRecordings() {
+        requestStoragePermission()
+        val scanner = CallRecordingScanner(this)
+        val latest = scanner.findLatestCallRecording()
+        detectedRecording.value = latest
+        if (latest != null) {
+            processingStatus.value = "Latest call recording found"
+        } else {
+            processingStatus.value = "No call recordings found"
+        }
+    }
+
+    private fun processDetectedRecording() {
+        val filePath = detectedRecording.value?.path ?: return
+        processingStatus.value = "Processing..."
+
+        lifecycleScope.launch {
+            EkaScribe.processAudioFile(
+                filePath = filePath,
+                sessionConfig = SessionConfig(
+                    languages = listOf("en-IN"),
+                    mode = "consultation",
+                    modelType = "pro",
+                ),
+                onStart = { sessionId ->
+                    currentSessionId.value = sessionId
+                    processingStatus.value = "Uploading: $sessionId"
+                },
+                onError = { error ->
+                    processingStatus.value = "Error: ${error.message}"
+                    showToast("Error: ${error.message}")
+                },
+                onComplete = { sessionId ->
+                    processingStatus.value = "Completed: $sessionId"
+                    detectedRecording.value = null
+                    showToast("Transcription complete!")
+                }
+            )
+        }
+    }
 
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -79,7 +201,7 @@ class TestActivity : ComponentActivity() {
         // Initialize the new EkaScribe SDK
         EkaScribe.init(
             config = EkaScribeConfig(
-                clientId = "client-id",
+                clientId = "doc-web",
                 networkConfig = NetworkConfig(
                     tokenStorage = MyTokenStorage(),
                     appId = "scribe-android",
@@ -105,11 +227,20 @@ class TestActivity : ComponentActivity() {
                     chunks = chunkCount.intValue,
                     voiceActivity = voiceActivity.value,
                     resultInfo = resultInfo.value,
+                    accessibilityEnabled = accessibilityEnabled.value,
+                    onOpenAccessibilitySettings = {
+                        startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                    },
                     onStartClick = { startRecording() },
                     onPauseClick = { pauseRecording() },
                     onResumeClick = { resumeRecording() },
                     onStopClick = { stopRecording() },
-                    checkPermission = { checkAndRequestPermission() }
+                    checkPermission = { checkAndRequestPermission() },
+                    detectedRecording = detectedRecording.value,
+                    processingStatus = processingStatus.value,
+                    onProcessRecording = { processDetectedRecording() },
+                    onRefreshRecordings = { scanForRecordings() },
+                    onOpenDialerSettings = { openDialerCallRecordingSettings() }
                 )
             }
         }
@@ -266,11 +397,18 @@ fun TestScreen(
     chunks: Int,
     voiceActivity: String,
     resultInfo: String,
+    accessibilityEnabled: Boolean,
+    onOpenAccessibilitySettings: () -> Unit,
     onStartClick: () -> Unit,
     onPauseClick: () -> Unit,
     onResumeClick: () -> Unit,
     onStopClick: () -> Unit,
-    checkPermission: () -> Boolean
+    checkPermission: () -> Boolean,
+    detectedRecording: CallRecordingScanner.AudioFile?,
+    processingStatus: String,
+    onProcessRecording: () -> Unit,
+    onRefreshRecordings: () -> Unit,
+    onOpenDialerSettings: () -> Unit
 ) {
     val isRecording = sessionState == SessionState.RECORDING
     val canStop = sessionState == SessionState.RECORDING || sessionState == SessionState.PAUSED
@@ -295,6 +433,41 @@ fun TestScreen(
                 style = MaterialTheme.typography.headlineMedium,
                 modifier = Modifier.padding(vertical = 16.dp)
             )
+
+            // Accessibility Service Status
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (accessibilityEnabled) Color(0xFFE8F5E9) else Color(
+                        0xFFFFEBEE
+                    )
+                )
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = if (accessibilityEnabled) "Accessibility: ENABLED"
+                        else "Accessibility: DISABLED",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = if (accessibilityEnabled) Color(0xFF2E7D32) else Color.Red
+                    )
+                    if (!accessibilityEnabled) {
+                        Button(
+                            onClick = onOpenAccessibilitySettings,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF1976D2)
+                            )
+                        ) {
+                            Text("Enable", style = MaterialTheme.typography.labelMedium)
+                        }
+                    }
+                }
+            }
 
             // Status Card
             Card(
@@ -429,6 +602,121 @@ fun TestScreen(
                 enabled = canStop
             ) {
                 Text("STOP RECORDING", style = MaterialTheme.typography.titleMedium)
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Setup Guide Card
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = Color(0xFFFFF8E1)
+                )
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "Setup: Enable Call Recording",
+                        style = MaterialTheme.typography.titleSmall
+                    )
+                    Text(
+                        text = "1. Open Phone app (Dialer)\n" +
+                                "2. Tap Settings (gear icon)\n" +
+                                "3. Tap \"Call Recording\"\n" +
+                                "4. Enable \"Record calls automatically\"\n" +
+                                "5. After each call, come back here and tap Refresh",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFF5D4037)
+                    )
+                    Button(
+                        onClick = onOpenDialerSettings,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFFF57F17)
+                        )
+                    ) {
+                        Text("OPEN PHONE APP")
+                    }
+                }
+            }
+
+            // Call Recording Section
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = Color(0xFFF3E5F5)
+                )
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Call Recordings",
+                            style = MaterialTheme.typography.titleSmall
+                        )
+                        Button(
+                            onClick = onRefreshRecordings,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF7B1FA2)
+                            )
+                        ) {
+                            Text("Refresh", style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+
+                    if (processingStatus.isNotEmpty()) {
+                        Text(
+                            text = processingStatus,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFF6A1B9A)
+                        )
+                    }
+
+                    if (detectedRecording != null) {
+                        Text(
+                            text = detectedRecording.name,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        val durationSec = detectedRecording.duration / 1000
+                        val minutes = durationSec / 60
+                        val seconds = durationSec % 60
+                        Text(
+                            text = "Duration: ${minutes}m ${seconds}s",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.Gray
+                        )
+                        val date = SimpleDateFormat("MMM dd, yyyy HH:mm", Locale.getDefault())
+                            .format(Date(detectedRecording.dateModified * 1000))
+                        Text(
+                            text = "Date: $date",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.Gray
+                        )
+                        Button(
+                            onClick = onProcessRecording,
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF9C27B0)
+                            )
+                        ) {
+                            Text("PROCESS CALL RECORDING")
+                        }
+                    } else {
+                        Text(
+                            text = "No call recordings found on device",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.Gray
+                        )
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.height(16.dp))
