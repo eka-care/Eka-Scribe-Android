@@ -1,7 +1,6 @@
 package com.eka.scribesdk.api
 
 import android.content.Context
-import android.media.MediaMetadataRetriever
 import com.eka.networking.client.EkaNetwork
 import com.eka.networking.client.NetworkConfig
 import com.eka.scribesdk.BuildConfig
@@ -26,38 +25,20 @@ import com.eka.scribesdk.common.logging.DefaultLogger
 import com.eka.scribesdk.common.logging.Logger
 import com.eka.scribesdk.common.logging.NoOpLogger
 import com.eka.scribesdk.common.util.DefaultTimeProvider
-import com.eka.scribesdk.common.util.IdGenerator
 import com.eka.scribesdk.common.util.TimeProvider
-import com.eka.scribesdk.common.util.deleteFile
 import com.eka.scribesdk.data.DataManager
 import com.eka.scribesdk.data.DefaultDataManager
 import com.eka.scribesdk.data.ScribeRepository
 import com.eka.scribesdk.data.local.db.ScribeDatabase
-import com.eka.scribesdk.data.local.db.entity.AudioChunkEntity
-import com.eka.scribesdk.data.local.db.entity.SessionEntity
-import com.eka.scribesdk.data.local.db.entity.TransactionStage
-import com.eka.scribesdk.data.local.db.entity.UploadState
 import com.eka.scribesdk.data.local.db.entity.toScribeSession
 import com.eka.scribesdk.data.remote.S3CredentialProvider
-import com.eka.scribesdk.data.remote.models.requests.UpdateSessionRequest
-import com.eka.scribesdk.data.remote.models.requests.UpdateTemplatesRequest
-import com.eka.scribesdk.data.remote.models.requests.UpdateUserConfigRequest
-import com.eka.scribesdk.data.remote.models.responses.toScribeHistoryItem
-import com.eka.scribesdk.data.remote.models.responses.toSessionResult
-import com.eka.scribesdk.data.remote.models.responses.toTemplateItem
-import com.eka.scribesdk.data.remote.models.responses.toUserConfigs
 import com.eka.scribesdk.data.remote.services.ScribeApiService
-import com.eka.scribesdk.data.remote.upload.ChunkUploader
 import com.eka.scribesdk.data.remote.upload.S3ChunkUploader
-import com.eka.scribesdk.data.remote.upload.UploadMetadata
-import com.eka.scribesdk.data.remote.upload.UploadResult
-import com.eka.scribesdk.encoder.AudioEncoder
-import com.eka.scribesdk.encoder.AudioFileChunker
 import com.eka.scribesdk.encoder.Mp3AudioEncoder
 import com.eka.scribesdk.pipeline.Pipeline
+import com.eka.scribesdk.session.AudioFileProcessor
 import com.eka.scribesdk.session.SessionManager
 import com.eka.scribesdk.session.TransactionManager
-import com.eka.scribesdk.session.TransactionPollResult
 import com.eka.scribesdk.session.TransactionResult
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -71,9 +52,6 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 /**
  * Public SDK facade. Single entry point for the Eka Scribe SDK.
@@ -98,9 +76,7 @@ object EkaScribe {
     private var dataManager: DataManager? = null
     private var modelDownloader: ModelDownloader? = null
     private var config: EkaScribeConfig? = null
-    private var chunkUploaderRef: ChunkUploader? = null
-    private var encoderRef: AudioEncoder? = null
-    private var outputDirRef: File? = null
+    private var audioFileProcessor: AudioFileProcessor? = null
     private var logger: Logger = NoOpLogger()
     private var isInitialized = false
     private var sdkScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -181,7 +157,6 @@ object EkaScribe {
         dataManager = dm
 
         val encoder = Mp3AudioEncoder(logger)
-        encoderRef = encoder
 
         val credentialProvider = S3CredentialProvider(
             apiService = cogApiService,
@@ -195,11 +170,8 @@ object EkaScribe {
             maxRetryCount = EkaScribeConfig.MAX_UPLOAD_RETRIES,
             logger = logger
         )
-        chunkUploaderRef = chunkUploader
-
         val outputDir = File(context.filesDir, BuildConfig.OUTPUT_DIR)
         if (!outputDir.exists()) outputDir.mkdirs()
-        outputDirRef = outputDir
 
         val downloader =
             ModelDownloader(filesDir = context.applicationContext.filesDir, logger = logger)
@@ -237,6 +209,14 @@ object EkaScribe {
             logger = logger
         )
         transactionManager = txnManager
+        audioFileProcessor = AudioFileProcessor(
+            transactionManager = txnManager,
+            dataManager = dm,
+            chunkUploader = chunkUploader,
+            encoder = encoder,
+            outputDir = outputDir,
+            logger = logger
+        )
         scribeRepository = ScribeRepository(
             apiService = developerApiService,
             logger = logger
@@ -486,7 +466,7 @@ object EkaScribe {
 
     /**
      * Process a pre-recorded audio file through the transcription pipeline.
-     * Uploads the file to S3 and triggers init → stop → commit → poll.
+     * Chunks the file into 25s segments, uploads to S3, and triggers transcription.
      *
      * @param filePath Absolute path to the audio file (MP3/WAV/M4A)
      * @param sessionConfig Session configuration (languages, mode, templates, etc.)
@@ -501,208 +481,9 @@ object EkaScribe {
         onError: (ScribeError) -> Unit = {},
         onComplete: (String) -> Unit = {}
     ) {
-        val txnManager = transactionManager
+        val processor = audioFileProcessor
             ?: throw ScribeException(ErrorCode.INVALID_CONFIG, "SDK not initialized")
-        val dm = requireDataManager()
-
-        withContext(Dispatchers.IO) {
-            try {
-                val file = File(filePath)
-                if (!file.exists()) {
-                    onError(ScribeError(ErrorCode.UNKNOWN, "File not found: $filePath"))
-                    return@withContext
-                }
-
-                val sessionId = IdGenerator.sessionId()
-                val folderName = SimpleDateFormat("yyMMdd", Locale.getDefault())
-                    .format(Date())
-                val timeProvider = DefaultTimeProvider()
-
-                logger.info(TAG, "Processing audio file: $filePath, session: $sessionId")
-                onStart(sessionId)
-
-                // 1. Save session to DB
-                val session = SessionEntity(
-                    sessionId = sessionId,
-                    createdAt = timeProvider.nowMillis(),
-                    updatedAt = timeProvider.nowMillis(),
-                    state = SessionState.PROCESSING.name,
-                    uploadStage = TransactionStage.INIT.name,
-                    folderName = folderName
-                )
-                dm.saveSession(session)
-
-                // 2. Init transaction
-                val effectiveConfig = sessionConfig
-
-                val initResult = txnManager.initTransaction(sessionId, effectiveConfig, folderName)
-                if (initResult is TransactionResult.Error) {
-                    onError(ScribeError(ErrorCode.INIT_TRANSACTION_FAILED, initResult.message))
-                    return@withContext
-                }
-
-                val bid = (initResult as TransactionResult.Success).bid
-
-                // 3. Chunk the audio file into 25s segments
-                val audioEncoder = encoderRef ?: run {
-                    onError(ScribeError(ErrorCode.UNKNOWN, "Encoder not available"))
-                    return@withContext
-                }
-                val outDir = outputDirRef ?: run {
-                    onError(ScribeError(ErrorCode.UNKNOWN, "Output directory not available"))
-                    return@withContext
-                }
-                val chunkUploader = getChunkUploader() ?: run {
-                    onError(ScribeError(ErrorCode.UNKNOWN, "Chunk uploader not available"))
-                    return@withContext
-                }
-
-                val chunker = AudioFileChunker(audioEncoder, outDir, logger)
-                val chunks = chunker.chunkAudioFile(file, sessionId, chunkDurationSec = 25)
-
-                if (chunks.isEmpty()) {
-                    onError(ScribeError(ErrorCode.UNKNOWN, "Failed to chunk audio file"))
-                    return@withContext
-                }
-
-                logger.info(TAG, "Created ${chunks.size} chunks from ${file.name}")
-
-                // 4. Save and upload each chunk
-                for (chunk in chunks) {
-                    val chunkId = IdGenerator.chunkId(sessionId, chunk.index)
-                    val chunkEntity = AudioChunkEntity(
-                        chunkId = chunkId,
-                        sessionId = sessionId,
-                        chunkIndex = chunk.index,
-                        filePath = chunk.filePath,
-                        fileName = chunk.fileName,
-                        startTimeMs = chunk.startTimeMs,
-                        endTimeMs = chunk.endTimeMs,
-                        durationMs = chunk.durationMs,
-                        uploadState = UploadState.PENDING.name,
-                        createdAt = timeProvider.nowMillis()
-                    )
-                    dm.saveChunk(chunkEntity)
-
-                    dm.markInProgress(chunkId)
-                    val metadata = UploadMetadata(
-                        chunkId = chunkId,
-                        sessionId = sessionId,
-                        chunkIndex = chunk.index,
-                        fileName = chunk.fileName,
-                        folderName = folderName,
-                        bid = bid,
-                        mimeType = "audio/mpeg"
-                    )
-
-                    when (val uploadResult = chunkUploader.upload(File(chunk.filePath), metadata)) {
-                        is UploadResult.Success -> {
-                            dm.markUploaded(chunkId)
-                            deleteFile(File(chunk.filePath), logger)
-                            logger.info(TAG, "Chunk ${chunk.fileName} uploaded: $sessionId")
-                        }
-
-                        is UploadResult.Failure -> {
-                            dm.markFailed(chunkId)
-                            onError(
-                                ScribeError(
-                                    ErrorCode.RETRY_EXHAUSTED,
-                                    "Upload failed for chunk ${chunk.fileName}: ${uploadResult.error}"
-                                )
-                            )
-                            return@withContext
-                        }
-                    }
-                }
-
-                // 5b. Upload full original recording as well
-                val fullExtension = file.extension.lowercase()
-                val fullMimeType = when (fullExtension) {
-                    "mp3" -> "audio/mpeg"
-                    "wav" -> "audio/wav"
-                    "m4a" -> "audio/mp4"
-                    "aac" -> "audio/aac"
-                    else -> "audio/mpeg"
-                }
-                val fullMetadata = UploadMetadata(
-                    chunkId = "${sessionId}_full_audio",
-                    sessionId = sessionId,
-                    chunkIndex = -1,
-                    fileName = "full_audio.${fullExtension}",
-                    folderName = folderName,
-                    bid = bid,
-                    mimeType = fullMimeType
-                )
-                when (val fullUploadResult = chunkUploader.upload(file, fullMetadata)) {
-                    is UploadResult.Success -> {
-                        logger.info(TAG, "Full recording uploaded: $sessionId")
-                    }
-
-                    is UploadResult.Failure -> {
-                        logger.warn(
-                            TAG,
-                            "Full recording upload failed (non-blocking): ${fullUploadResult.error}"
-                        )
-                    }
-                }
-
-                // 6. Stop transaction
-                val stopResult = txnManager.stopTransaction(sessionId)
-                if (stopResult is TransactionResult.Error) {
-                    onError(ScribeError(ErrorCode.STOP_TRANSACTION_FAILED, stopResult.message))
-                    return@withContext
-                }
-
-                // 7. Commit transaction
-                val commitResult = txnManager.commitTransaction(sessionId)
-                if (commitResult is TransactionResult.Error) {
-                    onError(ScribeError(ErrorCode.COMMIT_TRANSACTION_FAILED, commitResult.message))
-                    return@withContext
-                }
-
-                // 8. Poll for result
-                val pollResult = txnManager.pollResult(sessionId)
-                when (pollResult) {
-                    is TransactionPollResult.Success -> {
-                        dm.updateSessionState(sessionId, SessionState.COMPLETED.name)
-                        logger.info(TAG, "Audio file processing completed: $sessionId")
-                        onComplete(sessionId)
-                    }
-
-                    is TransactionPollResult.Failed -> {
-                        onError(ScribeError(ErrorCode.TRANSCRIPTION_FAILED, pollResult.error))
-                    }
-
-                    is TransactionPollResult.Timeout -> {
-                        dm.updateSessionState(sessionId, SessionState.COMPLETED.name)
-                        logger.warn(TAG, "Poll timeout, result may arrive later: $sessionId")
-                        onComplete(sessionId)
-                    }
-                }
-            } catch (e: Exception) {
-                logger.error(TAG, "Failed to process audio file", e)
-                onError(ScribeError(ErrorCode.UNKNOWN, e.message ?: "Failed to process audio file"))
-            }
-        }
-    }
-
-    private fun getAudioDurationMs(file: File): Long {
-        return try {
-            val retriever = MediaMetadataRetriever()
-            retriever.setDataSource(file.absolutePath)
-            val durationStr = retriever.extractMetadata(
-                MediaMetadataRetriever.METADATA_KEY_DURATION
-            )
-            retriever.release()
-            durationStr?.toLongOrNull() ?: 0L
-        } catch (e: Exception) {
-            logger.warn(TAG, "Could not determine audio duration: ${e.message}")
-            0L
-        }
-    }
-
-    private fun getChunkUploader(): ChunkUploader? {
-        return chunkUploaderRef
+        processor.process(filePath, sessionConfig, onStart, onError, onComplete)
     }
 
     // ---- Lifecycle ----
@@ -715,9 +496,7 @@ object EkaScribe {
         apiService = null
         dataManager = null
         modelDownloader = null
-        chunkUploaderRef = null
-        encoderRef = null
-        outputDirRef = null
+        audioFileProcessor = null
         config = null
         sdkScope.cancel()
         sdkScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
