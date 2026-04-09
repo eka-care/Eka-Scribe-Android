@@ -392,8 +392,7 @@ object EkaScribe {
      */
     suspend fun pollSessionResult(sessionId: String): Result<SessionResult> =
         withContext(Dispatchers.IO) {
-            val conf = config ?: return@withContext Result.failure(Exception("SDK not initialized"))
-            requireRepository().pollSessionResult(sessionId, conf.pollMaxRetries, conf.pollDelayMs)
+            requireRepository().pollSessionResult(sessionId, pollMaxRetries = EkaScribeConfig.MAX_UPLOAD_RETRIES, pollDelayMs = EkaScribeConfig.POLL_DELAY_MS)
         }
 
     /**
@@ -409,11 +408,9 @@ object EkaScribe {
      */
     suspend fun pollTranscriptResult(sessionId: String): Result<SessionResult> =
         withContext(Dispatchers.IO) {
-            val conf = config ?: return@withContext Result.failure(Exception("SDK not initialized"))
             requireRepository().pollTranscriptResult(
                 sessionId,
-                conf.pollMaxRetries,
-                conf.pollDelayMs
+                pollMaxRetries = EkaScribeConfig.MAX_UPLOAD_RETRIES, pollDelayMs = EkaScribeConfig.POLL_DELAY_MS
             )
         }
 
