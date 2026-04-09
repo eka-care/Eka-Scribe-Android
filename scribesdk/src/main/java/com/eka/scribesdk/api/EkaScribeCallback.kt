@@ -10,6 +10,8 @@ interface EkaScribeCallback {
     fun onSessionResumed(sessionId: String)
     fun onSessionStopped(sessionId: String, chunkCount: Int)
     fun onError(error: ScribeError)
+    fun onTranscriptReady(sessionId: String, result: SessionResult) {}
+    fun onOutputReady(sessionId: String, result: SessionResult) {}
     fun onSessionCompleted(sessionId: String, result: SessionResult) {}
     fun onSessionFailed(sessionId: String, error: ScribeError) {}
     fun onSessionCancelled(sessionId: String) {}

@@ -225,6 +225,31 @@ private fun ScribeResultResponse.Data.Output.toTemplateOutput(sessionId: String)
     )
 }
 
+internal fun ScribeResultResponse.toTranscriptResult(sessionId: String): SessionResult {
+    val outputs = mutableListOf<TemplateOutput>()
+    data?.templateResults?.transcript?.mapNotNull { transcript ->
+        transcript?.toTranscriptOutput(sessionId)
+    }?.let { outputs.addAll(it) }
+    return SessionResult(
+        templates = outputs,
+        audioQuality = data?.audioMatrix?.quality
+    )
+}
+
+internal fun ScribeResultResponse.toOutputTemplatesResult(sessionId: String): SessionResult {
+    val outputs = mutableListOf<TemplateOutput>()
+    data?.templateResults?.custom?.mapNotNull { output ->
+        output?.toTemplateOutput(sessionId)
+    }?.let { outputs.addAll(it) }
+    data?.templateResults?.integration?.mapNotNull { output ->
+        output?.toTemplateOutput(sessionId)
+    }?.let { outputs.addAll(it) }
+    return SessionResult(
+        templates = outputs,
+        audioQuality = data?.audioMatrix?.quality
+    )
+}
+
 private fun ScribeResultResponse.Data.Transcript.toTranscriptOutput(sessionId: String): TemplateOutput? {
     val data = value ?: return null
     if (status !in SUCCESS_STATES) return null

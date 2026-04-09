@@ -120,7 +120,7 @@ class SquimAudioAnalyserTest {
         )
 
         // Wait for model to load in background
-        delay(200)
+        delay(500)
 
         // Submit frames — they should be processed
         repeat(50) { i ->
@@ -128,7 +128,7 @@ class SquimAudioAnalyserTest {
         }
 
         // Give the inference coroutine time to execute
-        delay(300)
+        delay(500)
 
         verify(atLeast = 1) { provider.analyse(any()) }
 
