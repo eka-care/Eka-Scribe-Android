@@ -1,5 +1,6 @@
 package com.eka.scribesdk.session
 
+import com.eka.scribesdk.api.EkaScribeConfig
 import com.eka.scribesdk.api.models.ScribeError
 import com.eka.scribesdk.api.models.SessionConfig
 import com.eka.scribesdk.api.models.SessionState
@@ -116,7 +117,7 @@ internal class AudioFileProcessor(
                         fileName = chunk.fileName,
                         folderName = folderName,
                         bid = bid,
-                        mimeType = "audio/mpeg"
+                        mimeType = EkaScribeConfig.AUDIO_FORMAT.mimeType
                     )
 
                     when (val result = chunkUploader.upload(File(chunk.filePath), metadata)) {
@@ -193,7 +194,7 @@ internal class AudioFileProcessor(
             "wav" -> "audio/wav"
             "m4a" -> "audio/mp4"
             "aac" -> "audio/aac"
-            else -> "audio/mpeg"
+            else -> EkaScribeConfig.AUDIO_FORMAT.mimeType
         }
         val metadata = UploadMetadata(
             chunkId = "${sessionId}_full_audio",

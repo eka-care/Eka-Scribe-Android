@@ -9,5 +9,6 @@ data class EncodedChunk(
 
 enum class AudioFormat(val mimeType: String, val extension: String) {
     WAV("audio/wav", "wav"),
-    MP3("audio/mpeg", "mp3")
+    MP3("audio/mpeg", "mp3"),
+    MP4("audio/mp4", "mp4")
 }

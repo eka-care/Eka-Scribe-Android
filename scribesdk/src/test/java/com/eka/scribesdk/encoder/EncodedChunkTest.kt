@@ -31,10 +31,11 @@ class EncodedChunkTest {
     }
 
     @Test
-    fun `AudioFormat has exactly 2 values`() {
-        assertEquals(2, AudioFormat.entries.size)
+    fun `AudioFormat has exactly 3 values`() {
+        assertEquals(3, AudioFormat.entries.size)
         assertEquals("WAV", AudioFormat.WAV.name)
         assertEquals("MP3", AudioFormat.MP3.name)
+        assertEquals("MP4", AudioFormat.MP4.name)
     }
 
     @Test

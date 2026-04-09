@@ -162,23 +162,24 @@ internal class Pipeline(
         if (allFrames.isEmpty()) return null
         return try {
             val sampleRate = allFrames.first().sampleRate
-            // Encode as .mp3 first (encoder internally does outputPath.replace(".mp3", ".wav"))
-            val mp3Path = File(outputDir, "${sessionId}_full_audio.mp3").absolutePath
-            encoder.encode(allFrames, sampleRate, mp3Path)
+            val ext = EkaScribeConfig.AUDIO_FORMAT.extension
+            val audioPath = File(outputDir, "${sessionId}_full_audio.$ext").absolutePath
+            val encoded = encoder.encode(allFrames, sampleRate, audioPath)
 
-            // Rename to .mp3_ per naming convention
-            val mp3File = File(mp3Path)
-            val mp3_File = File(outputDir, "${sessionId}_full_audio.mp3_")
-            mp3File.renameTo(mp3_File)
+            // Rename with trailing underscore per naming convention
+            val encodedFile = File(encoded.filePath)
+            val renamedFile =
+                File(outputDir, "${sessionId}_full_audio.${encoded.format.extension}_")
+            encodedFile.renameTo(renamedFile)
 
             allFrames.clear()
-            logger.info(TAG, "Full audio generated: ${mp3_File.absolutePath}")
+            logger.info(TAG, "Full audio generated: ${renamedFile.absolutePath}")
             onEvent?.invoke(
                 SessionEventName.FULL_AUDIO_GENERATED, EventType.SUCCESS,
                 "Full audio file generated",
-                mapOf("filePath" to mp3_File.absolutePath)
+                mapOf("filePath" to renamedFile.absolutePath)
             )
-            FullAudioResult(mp3_File.absolutePath, sessionId, folderName, bid)
+            FullAudioResult(renamedFile.absolutePath, sessionId, folderName, bid)
         } catch (e: Exception) {
             logger.error(TAG, "Full audio generation failed", e)
             onEvent?.invoke(
@@ -233,9 +234,9 @@ internal class Pipeline(
         persistenceJob = scope.launch(Dispatchers.IO) {
             for (chunk in chunkChannel) {
                 try {
-                    // 1-based file naming: 1.mp3, 2.mp3, ...
+                    val chunkExt = EkaScribeConfig.AUDIO_FORMAT.extension
                     val outputPath =
-                        File(outputDir, "${sessionId}_${chunk.index + 1}.mp3").absolutePath
+                        File(outputDir, "${sessionId}_${chunk.index + 1}.$chunkExt").absolutePath
 
                     val encoded = encoder.encode(
                         frames = chunk.frames,

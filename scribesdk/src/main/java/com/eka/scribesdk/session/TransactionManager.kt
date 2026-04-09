@@ -1,5 +1,6 @@
 package com.eka.scribesdk.session
 
+import com.eka.scribesdk.api.EkaScribeConfig
 import com.eka.scribesdk.api.models.OutputTemplate
 import com.eka.scribesdk.api.models.PatientDetail
 import com.eka.scribesdk.api.models.SessionConfig
@@ -20,6 +21,7 @@ import com.eka.scribesdk.data.remote.services.ScribeApiService
 import com.eka.scribesdk.data.remote.upload.ChunkUploader
 import com.eka.scribesdk.data.remote.upload.UploadMetadata
 import com.eka.scribesdk.data.remote.upload.UploadResult
+import com.eka.scribesdk.encoder.AudioFormat
 import com.google.gson.Gson
 import com.haroldadmin.cnradapter.NetworkResponse
 import kotlinx.coroutines.delay
@@ -290,7 +292,13 @@ internal class TransactionManager(
 
             dataManager.markInProgress(chunk.chunkId)
 
-            val mimeType = if (chunk.fileName.endsWith(".wav")) "audio/wav" else "audio/mpeg"
+            val mimeType = when {
+                chunk.fileName.endsWith(".wav") -> AudioFormat.WAV.mimeType
+                chunk.fileName.endsWith(".mp3") -> AudioFormat.MP3.mimeType
+                chunk.fileName.endsWith(".m4a") -> "audio/mp4"
+                chunk.fileName.endsWith(".${EkaScribeConfig.AUDIO_FORMAT.extension}") -> EkaScribeConfig.AUDIO_FORMAT.mimeType
+                else -> EkaScribeConfig.AUDIO_FORMAT.mimeType
+            }
             val metadata = UploadMetadata(
                 chunkId = chunk.chunkId,
                 sessionId = chunk.sessionId,

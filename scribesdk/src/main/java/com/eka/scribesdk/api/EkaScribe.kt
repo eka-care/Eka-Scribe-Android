@@ -34,7 +34,7 @@ import com.eka.scribesdk.data.local.db.entity.toScribeSession
 import com.eka.scribesdk.data.remote.S3CredentialProvider
 import com.eka.scribesdk.data.remote.services.ScribeApiService
 import com.eka.scribesdk.data.remote.upload.S3ChunkUploader
-import com.eka.scribesdk.encoder.Mp3AudioEncoder
+import com.eka.scribesdk.encoder.AacAudioEncoder
 import com.eka.scribesdk.pipeline.Pipeline
 import com.eka.scribesdk.session.AudioFileProcessor
 import com.eka.scribesdk.session.SessionManager
@@ -156,7 +156,7 @@ object EkaScribe {
         )
         dataManager = dm
 
-        val encoder = Mp3AudioEncoder(logger)
+        val encoder = AacAudioEncoder(logger)
 
         val credentialProvider = S3CredentialProvider(
             apiService = cogApiService,
@@ -468,7 +468,7 @@ object EkaScribe {
      * Process a pre-recorded audio file through the transcription pipeline.
      * Chunks the file into 25s segments, uploads to S3, and triggers transcription.
      *
-     * @param filePath Absolute path to the audio file (MP3/WAV/M4A)
+     * @param filePath Absolute path to the audio file (AAC/MP3/WAV/M4A)
      * @param sessionConfig Session configuration (languages, mode, templates, etc.)
      * @param onStart Called with session ID when processing starts
      * @param onError Called with error details if processing fails
