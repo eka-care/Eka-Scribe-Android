@@ -34,7 +34,7 @@ import com.eka.scribesdk.data.local.db.entity.toScribeSession
 import com.eka.scribesdk.data.remote.S3CredentialProvider
 import com.eka.scribesdk.data.remote.services.ScribeApiService
 import com.eka.scribesdk.data.remote.upload.S3ChunkUploader
-import com.eka.scribesdk.encoder.AacAudioEncoder
+import com.eka.scribesdk.encoder.Mp3AudioEncoder
 import com.eka.scribesdk.pipeline.Pipeline
 import com.eka.scribesdk.session.AudioFileProcessor
 import com.eka.scribesdk.session.SessionManager
@@ -156,7 +156,7 @@ object EkaScribe {
         )
         dataManager = dm
 
-        val encoder = AacAudioEncoder(logger)
+        val encoder = Mp3AudioEncoder(logger)
 
         val credentialProvider = S3CredentialProvider(
             apiService = cogApiService,

@@ -295,8 +295,6 @@ internal class TransactionManager(
             val mimeType = when {
                 chunk.fileName.endsWith(".wav") -> AudioFormat.WAV.mimeType
                 chunk.fileName.endsWith(".mp3") -> AudioFormat.MP3.mimeType
-                chunk.fileName.endsWith(".m4a") -> "audio/mp4"
-                chunk.fileName.endsWith(".${EkaScribeConfig.AUDIO_FORMAT.extension}") -> EkaScribeConfig.AUDIO_FORMAT.mimeType
                 else -> EkaScribeConfig.AUDIO_FORMAT.mimeType
             }
             val metadata = UploadMetadata(
