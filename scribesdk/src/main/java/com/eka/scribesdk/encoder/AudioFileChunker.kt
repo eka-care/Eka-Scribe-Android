@@ -3,6 +3,7 @@ package com.eka.scribesdk.encoder
 import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
+import com.eka.scribesdk.api.EkaScribeConfig
 import com.eka.scribesdk.common.logging.Logger
 import com.eka.scribesdk.recorder.AudioFrame
 import java.io.File
@@ -80,7 +81,10 @@ internal class AudioFileChunker(
 
             // 1-based file naming to match real-time pipeline
             val fileIndex = chunkIndex + 1
-            val outputPath = File(outputDir, "${sessionId}_${fileIndex}.mp3").absolutePath
+            val outputPath = File(
+                outputDir,
+                "${sessionId}_${fileIndex}.${EkaScribeConfig.AUDIO_FORMAT.extension}"
+            ).absolutePath
             val encoded = encoder.encode(frames, TARGET_SAMPLE_RATE, outputPath)
 
             val startTimeMs = offset.toLong() * 1000 / TARGET_SAMPLE_RATE
