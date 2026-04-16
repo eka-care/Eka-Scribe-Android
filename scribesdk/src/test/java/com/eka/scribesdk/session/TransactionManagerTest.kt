@@ -880,19 +880,21 @@ internal class TransactionManagerTest {
     }
 
     @Test
-    fun `pollResult with null data returns Timeout after max retries`() = runTest {
+    fun `pollResult with null data returns Failed (vacuous all-failure)`() = runTest {
         val api = FakeApiService()
         val emptyResult = ScribeResultResponse(data = null)
         api.pollResponses = MutableList(10) { netSuccess(emptyResult) }
-        val (manager, _, _) = createManager(api = api)
+        val dm = FakeDataManager()
+        val (manager, _, _) = createManager(api = api, dataManager = dm)
 
         val result = manager.pollResult(SESSION_ID)
 
-        assertTrue(result is TransactionPollResult.Timeout)
+        assertTrue(result is TransactionPollResult.Failed)
+        assertEquals(TransactionStage.FAILURE.name, dm.uploadStages[SESSION_ID])
     }
 
     @Test
-    fun `pollResult with null output list returns Timeout`() = runTest {
+    fun `pollResult with null templateResults returns Failed (vacuous all-failure)`() = runTest {
         val api = FakeApiService()
         val resultWithNullOutput = ScribeResultResponse(
             data = ScribeResultResponse.Data(
@@ -903,11 +905,13 @@ internal class TransactionManagerTest {
             )
         )
         api.pollResponses = MutableList(10) { netSuccess(resultWithNullOutput) }
-        val (manager, _, _) = createManager(api = api)
+        val dm = FakeDataManager()
+        val (manager, _, _) = createManager(api = api, dataManager = dm)
 
         val result = manager.pollResult(SESSION_ID)
 
-        assertTrue(result is TransactionPollResult.Timeout)
+        assertTrue(result is TransactionPollResult.Failed)
+        assertEquals(TransactionStage.FAILURE.name, dm.uploadStages[SESSION_ID])
     }
 
     @Test
@@ -1111,11 +1115,10 @@ internal class TransactionManagerTest {
     )
 
     private fun makeResultResponse(status: ResultStatus): ScribeResultResponse {
-        val output = ScribeResultResponse.Data.Output(
+        val transcript = ScribeResultResponse.Data.Transcript(
             errors = null,
-            name = "output",
+            lang = null,
             status = status,
-            templateId = null,
             type = null,
             value = "test result",
             warnings = null
@@ -1124,8 +1127,12 @@ internal class TransactionManagerTest {
             data = ScribeResultResponse.Data(
                 audioMatrix = null,
                 createdAt = null,
-                output = listOf(output),
-                templateResults = null
+                output = emptyList(),
+                templateResults = ScribeResultResponse.Data.TemplateResults(
+                    custom = null,
+                    integration = null,
+                    transcript = listOf(transcript)
+                )
             )
         )
     }
