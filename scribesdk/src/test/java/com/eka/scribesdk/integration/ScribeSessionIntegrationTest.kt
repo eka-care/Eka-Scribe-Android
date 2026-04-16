@@ -138,14 +138,18 @@ internal class ScribeSessionIntegrationTest {
         NetworkResponse.Success(body, okResponse(body, code))
 
     private fun makeResultResponse(status: ResultStatus): ScribeResultResponse {
-        val output = ScribeResultResponse.Data.Output(
-            errors = null, name = "output", status = status,
-            templateId = null, type = null, value = "result", warnings = null
+        val transcript = ScribeResultResponse.Data.Transcript(
+            errors = null, lang = null, status = status,
+            type = null, value = "result", warnings = null
         )
         return ScribeResultResponse(
             data = ScribeResultResponse.Data(
                 audioMatrix = null, createdAt = null,
-                output = listOf(output), templateResults = null
+                output = emptyList(),
+                templateResults = ScribeResultResponse.Data.TemplateResults(
+                    custom = null, integration = null,
+                    transcript = listOf(transcript)
+                )
             )
         )
     }

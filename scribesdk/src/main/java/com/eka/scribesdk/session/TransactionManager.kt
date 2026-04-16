@@ -222,15 +222,21 @@ internal class TransactionManager(
                         return@repeat
                     }
 
-                    val outputStatuses = response.body.data?.output?.mapNotNull { it?.status }
+                    val outputStatuses = mutableListOf<ResultStatus>()
+                    outputStatuses.addAll(response.body.data?.templateResults?.integration?.mapNotNull { it?.status }
+                        ?: emptyList())
+                    outputStatuses.addAll(response.body.data?.templateResults?.transcript?.mapNotNull { it?.status }
+                        ?: emptyList())
+                    outputStatuses.addAll(response.body.data?.templateResults?.custom?.mapNotNull { it?.status }
+                        ?: emptyList())
 
-                    if (outputStatuses?.any { it in successStates } == true) {
+                    if (outputStatuses.any { it in successStates }) {
                         dataManager.updateUploadStage(sessionId, TransactionStage.COMPLETED.name)
                         logger.info(TAG, "Poll result success: $sessionId")
                         return TransactionPollResult.Success(response.body)
                     }
 
-                    if (outputStatuses?.all { it in failureStates } == true) {
+                    if (outputStatuses.all { it in failureStates }) {
                         dataManager.updateUploadStage(sessionId, TransactionStage.FAILURE.name)
                         logger.warn(TAG, "Poll result failure: $sessionId")
                         return TransactionPollResult.Failed("Transcription processing failed")
