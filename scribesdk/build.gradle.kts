@@ -212,7 +212,7 @@ dependencies {
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)
     ksp(libs.room.compiler)
-    implementation("com.github.kaushik-naik:TAndroidLame:a485052f28")
+    implementation(libs.kaushik.naik.tandroidlame)
 
     // Retrofit + OkHttp
     implementation(libs.retrofit)
