@@ -28,6 +28,6 @@ data class EkaScribeConfig(
         internal const val MAX_UPLOAD_RETRIES = 2
         internal const val POLL_MAX_RETRIES = 3
         internal const val POLL_DELAY_MS = 2000L
-        internal val AUDIO_FORMAT = AudioFormat.MP4
+        internal val AUDIO_FORMAT = AudioFormat.MP3
     }
 }

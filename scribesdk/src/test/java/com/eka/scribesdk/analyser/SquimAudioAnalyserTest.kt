@@ -108,7 +108,7 @@ class SquimAudioAnalyserTest {
     }
 
     @Test
-    fun `frames are processed after model is loaded`() = runTest {
+    fun `frames are processed after model is loaded`() {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val provider = createMockProvider() // Instant load
 
@@ -119,18 +119,16 @@ class SquimAudioAnalyserTest {
             logger = logger
         )
 
-        // Wait for model to load in background
-        delay(500)
+        // Deterministically wait for background load — polls until verified or timeout
+        verify(timeout = 5000) { provider.load() }
 
         // Submit frames — they should be processed
         repeat(50) { i ->
             analyser.submitFrame(makeFrame(i.toLong()))
         }
 
-        // Give the inference coroutine time to execute
-        delay(500)
-
-        verify(atLeast = 1) { provider.analyse(any()) }
+        // Poll until inference coroutine runs or timeout
+        verify(timeout = 5000, atLeast = 1) { provider.analyse(any()) }
 
         analyser.release()
     }

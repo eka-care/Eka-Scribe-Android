@@ -222,15 +222,21 @@ internal class TransactionManager(
                         return@repeat
                     }
 
-                    val outputStatuses = response.body.data?.output?.mapNotNull { it?.status }
+                    val outputStatuses = mutableListOf<ResultStatus>()
+                    outputStatuses.addAll(response.body.data?.templateResults?.integration?.mapNotNull { it?.status }
+                        ?: emptyList())
+                    outputStatuses.addAll(response.body.data?.templateResults?.transcript?.mapNotNull { it?.status }
+                        ?: emptyList())
+                    outputStatuses.addAll(response.body.data?.templateResults?.custom?.mapNotNull { it?.status }
+                        ?: emptyList())
 
-                    if (outputStatuses?.any { it in successStates } == true) {
+                    if (outputStatuses.any { it in successStates }) {
                         dataManager.updateUploadStage(sessionId, TransactionStage.COMPLETED.name)
                         logger.info(TAG, "Poll result success: $sessionId")
                         return TransactionPollResult.Success(response.body)
                     }
 
-                    if (outputStatuses?.all { it in failureStates } == true) {
+                    if (outputStatuses.all { it in failureStates }) {
                         dataManager.updateUploadStage(sessionId, TransactionStage.FAILURE.name)
                         logger.warn(TAG, "Poll result failure: $sessionId")
                         return TransactionPollResult.Failed("Transcription processing failed")
@@ -295,8 +301,6 @@ internal class TransactionManager(
             val mimeType = when {
                 chunk.fileName.endsWith(".wav") -> AudioFormat.WAV.mimeType
                 chunk.fileName.endsWith(".mp3") -> AudioFormat.MP3.mimeType
-                chunk.fileName.endsWith(".m4a") -> "audio/mp4"
-                chunk.fileName.endsWith(".${EkaScribeConfig.AUDIO_FORMAT.extension}") -> EkaScribeConfig.AUDIO_FORMAT.mimeType
                 else -> EkaScribeConfig.AUDIO_FORMAT.mimeType
             }
             val metadata = UploadMetadata(
