@@ -371,7 +371,7 @@ internal class SessionManagerTest {
     }
 
     @Test
-    fun `stop transitions to COMPLETED when pollResult times out`() = runTest {
+    fun `stop transitions to ERROR when transcript poll times out`() = runTest {
         val tm = mockk<TransactionManager>(relaxed = true)
         coEvery { tm.initTransaction(any(), any(), any()) } returns TransactionResult.Success(
             "folder",
@@ -381,6 +381,7 @@ internal class SessionManagerTest {
         coEvery { tm.stopTransaction(any()) } returns TransactionResult.Success()
         coEvery { tm.commitTransaction(any()) } returns TransactionResult.Success()
         coEvery { tm.pollResult(any()) } returns TransactionPollResult.Timeout
+        coEvery { tm.pollResult(any(), any()) } returns TransactionPollResult.Timeout
 
         val manager = createManagerWithSuccessInit(tm = tm)
         manager.start(mockContext)
@@ -389,7 +390,7 @@ internal class SessionManagerTest {
         manager.stop()
         Thread.sleep(200)
 
-        assertEquals(SessionState.COMPLETED, manager.currentState)
+        assertEquals(SessionState.ERROR, manager.currentState)
     }
 
     @Test

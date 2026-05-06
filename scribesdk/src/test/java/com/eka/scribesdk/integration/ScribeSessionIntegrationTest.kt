@@ -358,7 +358,7 @@ internal class ScribeSessionIntegrationTest {
     // =====================================================================
 
     @Test
-    fun `scenario 6 - poll timeout results in COMPLETED state`() {
+    fun `scenario 6 - poll timeout results in ERROR state`() {
         fakeApi.initResponse = netSuccess(initOk("bid-timeout"))
         fakeApi.stopResponse = netSuccess(stopOk())
         fakeApi.commitResponse = netSuccess(stopOk())
@@ -376,14 +376,14 @@ internal class ScribeSessionIntegrationTest {
         waitFor(2000) { manager.currentState == SessionState.RECORDING }
         manager.stop()
 
-        // Poll timeout leads to COMPLETED (not ERROR) per SessionManager.stop() logic
+        // Poll timeout now calls handleTransactionError → ERROR so user can start a new session
         waitFor(30000) {
             manager.currentState == SessionState.COMPLETED || manager.currentState == SessionState.ERROR
         }
 
         assertEquals(
-            "Poll timeout should result in COMPLETED",
-            SessionState.COMPLETED,
+            "Poll timeout should result in ERROR so a new session can start",
+            SessionState.ERROR,
             manager.currentState
         )
     }

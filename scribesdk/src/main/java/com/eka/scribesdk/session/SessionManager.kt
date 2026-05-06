@@ -419,6 +419,11 @@ internal class SessionManager(
                     }
 
                     is TransactionPollResult.Failed -> {
+                        handleTransactionError(
+                            sessionId,
+                            ErrorCode.TRANSCRIPTION_FAILED,
+                            transcriptPollResult.error
+                        )
                         logger.warn(
                             TAG,
                             "Transcript poll failed: ${transcriptPollResult.error}, proceeding to full output poll"
@@ -426,11 +431,19 @@ internal class SessionManager(
                     }
 
                     is TransactionPollResult.Timeout -> {
+                        handleTransactionError(
+                            sessionId,
+                            ErrorCode.POLL_TIMEOUT,
+                            "Result timeout!"
+                        )
                         logger.warn(
                             TAG,
                             "Transcript poll timeout, proceeding to full output poll: $sessionId"
                         )
                     }
+                }
+                if (transcriptPollResult !is TransactionPollResult.Success) {
+                    return@launch
                 }
 
                 // 7. Poll for full output (Phase 2 — may be cancelled if new session starts)
@@ -446,10 +459,8 @@ internal class SessionManager(
                         logger.info(TAG, "Output templates ready: $sessionId")
 
                         // If not already COMPLETED (transcript failed/timed out), mark now
-                        if (currentState != SessionState.COMPLETED) {
-                            dataManager.updateSessionState(sessionId, SessionState.COMPLETED.name)
-                            transition(SessionState.COMPLETED)
-                        }
+                        dataManager.updateSessionState(sessionId, SessionState.COMPLETED.name)
+                        transition(SessionState.COMPLETED)
                         val sessionResult = fullPollResult.result.toSessionResult(sessionId)
                         callback?.onSessionCompleted(sessionId, sessionResult)
                         emitter?.emit(
@@ -467,26 +478,20 @@ internal class SessionManager(
                         )
                         // If transcript succeeded, session is already COMPLETED — only fire failure callback
                         // If transcript also failed, handle as full error
-                        if (currentState != SessionState.COMPLETED) {
-                            handleTransactionError(
-                                sessionId,
-                                ErrorCode.TRANSCRIPTION_FAILED,
-                                fullPollResult.error
-                            )
-                        } else {
-                            callback?.onSessionFailed(
-                                sessionId,
-                                ScribeError(ErrorCode.TRANSCRIPTION_FAILED, fullPollResult.error)
-                            )
-                        }
+                        handleTransactionError(
+                            sessionId,
+                            ErrorCode.TRANSCRIPTION_FAILED,
+                            fullPollResult.error
+                        )
                     }
 
                     is TransactionPollResult.Timeout -> {
                         // If transcript succeeded, session is already COMPLETED — just log
-                        if (currentState != SessionState.COMPLETED) {
-                            dataManager.updateSessionState(sessionId, SessionState.COMPLETED.name)
-                            transition(SessionState.COMPLETED)
-                        }
+                        handleTransactionError(
+                            sessionId,
+                            ErrorCode.POLL_TIMEOUT,
+                            "Result timeout!"
+                        )
                         emitter?.emit(
                             SessionEventName.POLL_RESULT_TIMEOUT, EventType.ERROR,
                             "Poll timed out, output may complete later"
