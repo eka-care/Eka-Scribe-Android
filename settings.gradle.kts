@@ -28,4 +28,5 @@ dependencyResolutionManagement {
 rootProject.name = "Voice2Rx"
 include(":app")
 include(":scribesdk")
+include(":voice2rx_sdk")
 include(":sample-java")
