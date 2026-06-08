@@ -52,6 +52,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Public SDK facade. Single entry point for the Eka Scribe SDK.
@@ -78,7 +79,8 @@ object EkaScribe {
     private var config: EkaScribeConfig? = null
     private var audioFileProcessor: AudioFileProcessor? = null
     private var logger: Logger = NoOpLogger()
-    private var isInitialized = false
+
+    private var isInitialized = AtomicBoolean(false)
     private var sdkScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val _analyserStateFlow = MutableStateFlow<AnalyserState>(AnalyserState.Idle)
@@ -92,9 +94,9 @@ object EkaScribe {
      * @param callback Lifecycle callback for session events
      */
     fun init(config: EkaScribeConfig, context: Context, callback: EkaScribeCallback) {
-        if (isInitialized) {
+        if (isInitialized.get()) {
             logger.warn(TAG, "SDK already initialized, re-initializing")
-            destroy()
+            return
         }
         if (config.debugMode) {
             logger = DefaultLogger()
@@ -249,8 +251,7 @@ object EkaScribe {
                 }
             }
         }
-
-        isInitialized = true
+        isInitialized.set(true)
         logger.info(TAG, "SDK initialized")
     }
 
@@ -501,14 +502,14 @@ object EkaScribe {
         sdkScope.cancel()
         sdkScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         _analyserStateFlow.value = AnalyserState.Idle
-        isInitialized = false
+        isInitialized.set(false)
         logger.info(TAG, "SDK destroyed")
     }
 
     // ---- Internal helpers ----
 
     private fun requireInitialized(): SessionManager {
-        if (!isInitialized || sessionManager == null) {
+        if (!isInitialized.get() || sessionManager == null) {
             throw ScribeException(
                 ErrorCode.INVALID_CONFIG,
                 "EkaScribe SDK not initialized. Call EkaScribe.init() first."
