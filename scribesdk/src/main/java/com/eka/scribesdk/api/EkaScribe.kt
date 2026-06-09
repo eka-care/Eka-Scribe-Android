@@ -313,32 +313,32 @@ object EkaScribe {
     /**
      * Get all sessions from the local database.
      */
-    suspend fun getSessions(): List<ScribeSession> {
-        return requireDataManager().getAllSessions().map { it.toScribeSession() }
-    }
-
-    /**
-     * Get a session by ID from the local database.
-     */
-    suspend fun getSession(sessionId: String): ScribeSession? {
-        return requireDataManager().getSession(sessionId)?.toScribeSession()
-    }
-
-    /**
-     * Observe the upload progress (upload stage) for a session as a Flow.
-     */
-    fun getUploadProgress(sessionId: String): Flow<UploadStage?> {
-        val dm = requireDataManager()
-        return dm.sessionFlow(sessionId).map { session ->
-            session?.uploadStage?.let {
-                try {
-                    UploadStage.valueOf(it)
-                } catch (e: Exception) {
-                    null
-                }
-            }
-        }
-    }
+//    suspend fun getSessions(): List<ScribeSession> {
+//        return requireDataManager().getAllSessions().map { it.toScribeSession() }
+//    }
+//
+//    /**
+//     * Get a session by ID from the local database.
+//     */
+//    suspend fun getSession(sessionId: String): ScribeSession? {
+//        return requireDataManager().getSession(sessionId)?.toScribeSession()
+//    }
+//
+//    /**
+//     * Observe the upload progress (upload stage) for a session as a Flow.
+//     */
+//    fun getUploadProgress(sessionId: String): Flow<UploadStage?> {
+//        val dm = requireDataManager()
+//        return dm.sessionFlow(sessionId).map { session ->
+//            session?.uploadStage?.let {
+//                try {
+//                    UploadStage.valueOf(it)
+//                } catch (e: Exception) {
+//                    null
+//                }
+//            }
+//        }
+//    }
 
     // ---- Transaction lifecycle APIs ----
 
@@ -524,11 +524,12 @@ object EkaScribe {
         )
     }
 
-    private fun requireDataManager(): DataManager {
-        return dataManager ?: throw ScribeException(
-            ErrorCode.INVALID_CONFIG,
-            "EkaScribe SDK not initialized. Call EkaScribe.init() first."
-        )
-    }
-
+//    private fun requireDataManager(): DataManager {
+////        return dataManager ?: throw ScribeException(
+////            ErrorCode.INVALID_CONFIG,
+////            "EkaScribe SDK not initialized. Call EkaScribe.init() first."
+////        )
+////    }
+//        return
+//    }
 }
