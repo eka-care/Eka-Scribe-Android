@@ -60,6 +60,8 @@ internal class ScribeResultResponseMapperTest {
                 templateResults = ScribeResultResponse.Data.TemplateResults(
                     custom = listOf(
                         ScribeResultResponse.Data.Output(
+                            documentId = null,
+                            documentType = "custom",
                             errors = null,
                             name = "out",
                             status = ResultStatus.SUCCESS,
@@ -88,6 +90,8 @@ internal class ScribeResultResponseMapperTest {
                 templateResults = ScribeResultResponse.Data.TemplateResults(
                     custom = listOf(
                         ScribeResultResponse.Data.Output(
+                            documentId = null,
+                            documentType = "custom",
                             errors = null,
                             name = "out",
                             status = ResultStatus.SUCCESS,
@@ -116,6 +120,8 @@ internal class ScribeResultResponseMapperTest {
                 templateResults = ScribeResultResponse.Data.TemplateResults(
                     custom = listOf(
                         ScribeResultResponse.Data.Output(
+                            documentId = null,
+                            documentType = "custom",
                             errors = null,
                             name = "out",
                             status = ResultStatus.IN_PROGRESS,
@@ -125,6 +131,8 @@ internal class ScribeResultResponseMapperTest {
                             warnings = null
                         ),
                         ScribeResultResponse.Data.Output(
+                            documentId = null,
+                            documentType = "custom",
                             errors = null,
                             name = "fail",
                             status = ResultStatus.FAILURE,
@@ -155,6 +163,8 @@ internal class ScribeResultResponseMapperTest {
                     integration = null,
                     transcript = listOf(
                         ScribeResultResponse.Data.Transcript(
+                            documentId = null,
+                            documentType = "transcript",
                             errors = null,
                             lang = "en",
                             status = ResultStatus.SUCCESS,
@@ -182,6 +192,8 @@ internal class ScribeResultResponseMapperTest {
                     integration = null,
                     transcript = listOf(
                         ScribeResultResponse.Data.Transcript(
+                            documentId = null,
+                            documentType = "transcript",
                             errors = null,
                             lang = "en",
                             status = ResultStatus.IN_PROGRESS,

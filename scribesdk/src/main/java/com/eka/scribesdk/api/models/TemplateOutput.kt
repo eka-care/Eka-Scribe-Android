@@ -15,6 +15,8 @@ data class TemplateOutput(
     val sessionId: String,
     @SerializedName("templateId")
     val templateId: String? = null,
+    @SerializedName("documentId")
+    val documentId: String,
     @SerializedName("isEditable")
     val isEditable: Boolean = false,
     @SerializedName("type")

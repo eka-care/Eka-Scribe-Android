@@ -1116,6 +1116,8 @@ internal class TransactionManagerTest {
 
     private fun makeResultResponse(status: ResultStatus): ScribeResultResponse {
         val transcript = ScribeResultResponse.Data.Transcript(
+            documentId = null,
+            documentType = "transcript",
             errors = null,
             lang = null,
             status = status,

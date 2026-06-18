@@ -408,7 +408,7 @@ object EkaScribe {
     /**
      * Update the session output (e.g., after user edits).
      * @param updatedData List of updated session data
-     * SessionData includes data and templateId where data is encoded in base64 string.
+     * SessionData includes data, templateId, and documentId where data is encoded in base64 string.
      */
     suspend fun updateSessionResult(
         sessionId: String,

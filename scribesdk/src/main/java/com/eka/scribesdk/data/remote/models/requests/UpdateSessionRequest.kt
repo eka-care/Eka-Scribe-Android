@@ -9,7 +9,7 @@ internal class UpdateSessionRequest : ArrayList<UpdateSessionRequest.UpdateSessi
     data class UpdateSessionRequestItem(
         @SerializedName("data")
         var data: String,
-        @SerializedName("template-id")
-        var templateId: String
+        @SerializedName("document-id")
+        var documentId: String
     )
 }
