@@ -100,7 +100,7 @@ internal class ScribeRepository(
             request.addAll(updatedData.map {
                 UpdateSessionRequest.UpdateSessionRequestItem(
                     data = it.data,
-                    templateId = it.templateId
+                    documentId = it.documentId
                 )
             })
             when (val response = apiService.updateSessionOutput(sessionId, request)) {

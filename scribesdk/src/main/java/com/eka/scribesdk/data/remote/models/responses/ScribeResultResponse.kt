@@ -33,6 +33,10 @@ internal data class ScribeResultResponse(
 
         @Keep
         data class Output(
+            @SerializedName("document_id")
+            val documentId: String?,
+            @SerializedName("document_type")
+            val documentType: String?,
             @SerializedName("errors")
             val errors: List<ResultError?>?,
             @SerializedName("name")
@@ -51,6 +55,10 @@ internal data class ScribeResultResponse(
 
         @Keep
         data class Integration(
+            @SerializedName("document_id")
+            val documentId: String?,
+            @SerializedName("document_type")
+            val documentType: String?,
             @SerializedName("errors")
             val errors: List<ResultError?>?,
             @SerializedName("name")
@@ -79,6 +87,10 @@ internal data class ScribeResultResponse(
 
         @Keep
         data class Transcript(
+            @SerializedName("document_id")
+            val documentId: String?,
+            @SerializedName("document_type")
+            val documentType: String?,
             @SerializedName("errors")
             val errors: List<ResultError?>?,
             @SerializedName("lang")
@@ -153,9 +165,10 @@ private val SUCCESS_STATES = setOf(ResultStatus.SUCCESS, ResultStatus.PARTIAL_CO
 internal fun ScribeResultResponse.toSessionResult(sessionId: String): SessionResult {
     val outputs = mutableListOf<TemplateOutput>()
 
-    data?.templateResults?.custom?.mapNotNull { output ->
-        output?.toTemplateOutput(sessionId)
-    }?.let { outputs.addAll(it) }
+    data?.templateResults?.custom
+        ?.mapNotNull { it }
+        ?.mapNotNull { it.toTemplateOutput(sessionId) }
+        ?.let { outputs.addAll(it) }
 
     data?.templateResults?.integration?.mapNotNull { output ->
         output?.toTemplateOutput(sessionId)
@@ -174,6 +187,7 @@ internal fun ScribeResultResponse.toSessionResult(sessionId: String): SessionRes
 private fun ScribeResultResponse.Data.Integration.toTemplateOutput(sessionId: String): TemplateOutput? {
     val data = value ?: return null
     val id = templateId ?: return null
+    val documentId = documentId ?: return null
     if (status !in SUCCESS_STATES) return null
 
     val sections = mutableListOf<SectionData>()
@@ -192,7 +206,8 @@ private fun ScribeResultResponse.Data.Integration.toTemplateOutput(sessionId: St
         sections = sections,
         sessionId = sessionId,
         templateId = id,
-        isEditable = type == OutputType.JSON,
+        documentId = documentId,
+        isEditable = false,
         type = templateType,
         rawOutput = data
     )
@@ -201,6 +216,7 @@ private fun ScribeResultResponse.Data.Integration.toTemplateOutput(sessionId: St
 private fun ScribeResultResponse.Data.Output.toTemplateOutput(sessionId: String): TemplateOutput? {
     val data = value ?: return null
     val id = templateId ?: return null
+    val documentId = documentId ?: return null
     if (status !in SUCCESS_STATES) return null
 
     val sections = mutableListOf<SectionData>()
@@ -219,7 +235,8 @@ private fun ScribeResultResponse.Data.Output.toTemplateOutput(sessionId: String)
         sections = sections,
         sessionId = sessionId,
         templateId = id,
-        isEditable = type == OutputType.JSON,
+        documentId = documentId,
+        isEditable = true,
         type = templateType,
         rawOutput = data
     )
@@ -238,9 +255,11 @@ internal fun ScribeResultResponse.toTranscriptResult(sessionId: String): Session
 
 internal fun ScribeResultResponse.toOutputTemplatesResult(sessionId: String): SessionResult {
     val outputs = mutableListOf<TemplateOutput>()
-    data?.templateResults?.custom?.mapNotNull { output ->
-        output?.toTemplateOutput(sessionId)
-    }?.let { outputs.addAll(it) }
+    data?.templateResults?.custom
+        ?.mapNotNull { it }
+        ?.filter { it.documentType == "custom" || it.documentType == "document" }
+        ?.mapNotNull { it.toTemplateOutput(sessionId) }
+        ?.let { outputs.addAll(it) }
     data?.templateResults?.integration?.mapNotNull { output ->
         output?.toTemplateOutput(sessionId)
     }?.let { outputs.addAll(it) }
@@ -252,6 +271,7 @@ internal fun ScribeResultResponse.toOutputTemplatesResult(sessionId: String): Se
 
 private fun ScribeResultResponse.Data.Transcript.toTranscriptOutput(sessionId: String): TemplateOutput? {
     val data = value ?: return null
+    val documentId = documentId ?: return null
     if (status !in SUCCESS_STATES) return null
 
     val name = "Transcript"
@@ -271,6 +291,7 @@ private fun ScribeResultResponse.Data.Transcript.toTranscriptOutput(sessionId: S
         sections = sections,
         sessionId = sessionId,
         templateId = "transcript",
+        documentId = documentId,
         type = templateType,
         isEditable = false,
         rawOutput = data
