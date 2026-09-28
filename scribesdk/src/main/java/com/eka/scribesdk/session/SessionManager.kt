@@ -31,6 +31,7 @@ import com.eka.scribesdk.data.remote.upload.UploadResult
 import com.eka.scribesdk.pipeline.FullAudioResult
 import com.eka.scribesdk.pipeline.Pipeline
 import com.google.gson.Gson
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -186,7 +187,7 @@ internal class SessionManager(
                         "Init transaction failed: ${initResult.message}",
                         mapOf("error" to initResult.message)
                     )
-                    transition(SessionState.ERROR)
+                    transitionToErrorIfAllowed()
                     callback?.onError(
                         ScribeError(ErrorCode.INIT_TRANSACTION_FAILED, initResult.message)
                     )
@@ -231,7 +232,7 @@ internal class SessionManager(
                     "Session start failed: ${e.message}",
                     mapOf("error" to (e.message ?: "unknown"))
                 )
-                transition(SessionState.ERROR)
+                transitionToErrorIfAllowed()
                 val error = ScribeError(ErrorCode.UNKNOWN, e.message ?: "Failed to start session")
                 callback?.onError(
                     error
@@ -504,6 +505,12 @@ internal class SessionManager(
                 if (fullAudioResult != null && EkaScribeConfig.FULL_AUDIO_OUTPUT) {
                     launchDeferredFullAudioUpload(fullAudioResult)
                 }
+            } catch (e: CancellationException) {
+                // cancel()/destroy()/a new start() cancelled this work and already reset the
+                // state (usually to IDLE). Moving to ERROR from there is invalid and used to crash
+                // the host app on this IO thread, so just let the cancellation propagate.
+                logger.info(TAG, "stop() for $sessionId cancelled in state ${_stateFlow.value}")
+                throw e
             } catch (e: Exception) {
                 logger.error(TAG, "Error stopping session", e)
                 emitter?.emit(
@@ -511,12 +518,16 @@ internal class SessionManager(
                     "Session failed with exception: ${e.message}",
                     mapOf("error" to (e.message ?: "unknown"))
                 )
-                transition(SessionState.ERROR)
+                transitionToErrorIfAllowed()
                 callback?.onError(
                     ScribeError(ErrorCode.UNKNOWN, e.message ?: "Failed to stop session")
                 )
             } finally {
-                cleanup()
+                // Only clean up if this is still the active session - a new start() may have
+                // begun while the final poll was running, and cleanup() would cancel its scope.
+                if (activeSessionId == sessionId) {
+                    cleanup()
+                }
             }
         }
     }
@@ -561,8 +572,26 @@ internal class SessionManager(
     }
 
     private fun handleTransactionError(sessionId: String, errorCode: ErrorCode, message: String) {
-        transition(SessionState.ERROR)
+        // After a successful transcript the state is already COMPLETED; a failed/timed-out
+        // full-output poll should only fire the failure callback, not throw COMPLETED -> ERROR.
+        transitionToErrorIfAllowed()
         callback?.onSessionFailed(sessionId, ScribeError(errorCode, message))
+    }
+
+    /**
+     * Moves to ERROR only when the state machine allows it. Error paths can run after the state
+     * was already reset (cancel()/destroy()/new start() -> IDLE) or finished (COMPLETED); throwing
+     * there escapes as an uncaught exception on a background thread and crashes the host app.
+     */
+    private fun transitionToErrorIfAllowed() {
+        val current = _stateFlow.value
+        if (current == SessionState.ERROR) return
+        if (current.canTransitionTo(SessionState.ERROR)) {
+            logger.debug(TAG, "State: $current -> ${SessionState.ERROR}")
+            _stateFlow.value = SessionState.ERROR
+        } else {
+            logger.warn(TAG, "Skipping $current -> ${SessionState.ERROR}: not allowed from $current")
+        }
     }
 
     private fun transition(newState: SessionState) {

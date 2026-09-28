@@ -22,6 +22,7 @@ import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.mockkStatic
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.test.runTest
@@ -31,6 +32,7 @@ import org.junit.Assert.fail
 import org.junit.Before
 import org.junit.Test
 import java.io.File
+import java.util.Collections
 
 /**
  * Tests for SessionManager's synchronous state machine logic.
@@ -392,6 +394,78 @@ internal class SessionManagerTest {
 
         assertEquals(SessionState.ERROR, manager.currentState)
     }
+
+    /** Captures exceptions that escape background coroutines (e.g. the stop() coroutine). */
+    private fun <T> withUncaughtExceptionCapture(block: (List<Throwable>) -> T): T {
+        val captured = Collections.synchronizedList(mutableListOf<Throwable>())
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { _, e -> captured.add(e) }
+        try {
+            return block(captured)
+        } finally {
+            Thread.setDefaultUncaughtExceptionHandler(previous)
+        }
+    }
+
+    @Test
+    fun `cancel while stop is in flight does not crash with IDLE to ERROR`() = runTest {
+        withUncaughtExceptionCapture { uncaught ->
+            val tm = mockk<TransactionManager>(relaxed = true)
+            coEvery { tm.initTransaction(any(), any(), any()) } returns TransactionResult.Success(
+                "folder",
+                "bid"
+            )
+            // Keep the stop() coroutine suspended so cancel() lands mid-flight
+            coEvery { tm.retryFailedUploads(any()) } coAnswers {
+                delay(5_000)
+                true
+            }
+
+            val manager = createManagerWithSuccessInit(tm = tm)
+            manager.start(mockContext)
+            Thread.sleep(200)
+
+            manager.stop()
+            Thread.sleep(100)
+            manager.cancel()
+            Thread.sleep(300)
+
+            assertEquals(SessionState.IDLE, manager.currentState)
+            assertTrue("Uncaught exceptions: $uncaught", uncaught.isEmpty())
+        }
+    }
+
+    @Test
+    fun `full output poll failure after transcript success stays COMPLETED and does not crash`() =
+        runTest {
+            withUncaughtExceptionCapture { uncaught ->
+                val tm = mockk<TransactionManager>(relaxed = true)
+                coEvery { tm.initTransaction(any(), any(), any()) } returns TransactionResult.Success(
+                    "folder",
+                    "bid"
+                )
+                coEvery { tm.retryFailedUploads(any()) } returns true
+                coEvery { tm.stopTransaction(any()) } returns TransactionResult.Success()
+                coEvery { tm.commitTransaction(any()) } returns TransactionResult.Success()
+                coEvery { tm.pollResult(any(), eq("transcript")) } returns TransactionPollResult.Success(
+                    com.eka.scribesdk.data.remote.models.responses.ScribeResultResponse(null)
+                )
+                coEvery { tm.pollResult(any(), isNull()) } returns TransactionPollResult.Failed("boom")
+
+                val callback = mockk<EkaScribeCallback>(relaxed = true)
+                val manager = createManagerWithSuccessInit(tm = tm)
+                manager.setCallback(callback)
+                manager.start(mockContext)
+                Thread.sleep(200)
+
+                manager.stop()
+                Thread.sleep(500)
+
+                assertEquals(SessionState.COMPLETED, manager.currentState)
+                io.mockk.verify { callback.onSessionFailed(any(), any()) }
+                assertTrue("Uncaught exceptions: $uncaught", uncaught.isEmpty())
+            }
+        }
 
     @Test
     fun `deferred full audio upload does not trigger when fullAudioOutput is disabled`() =
