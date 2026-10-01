@@ -31,6 +31,7 @@ import com.eka.scribesdk.data.remote.upload.UploadResult
 import com.eka.scribesdk.pipeline.FullAudioResult
 import com.eka.scribesdk.pipeline.Pipeline
 import com.google.gson.Gson
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -186,7 +187,7 @@ internal class SessionManager(
                         "Init transaction failed: ${initResult.message}",
                         mapOf("error" to initResult.message)
                     )
-                    transition(SessionState.ERROR)
+                    transitionToErrorIfAllowed()
                     callback?.onError(
                         ScribeError(ErrorCode.INIT_TRANSACTION_FAILED, initResult.message)
                     )
@@ -231,7 +232,7 @@ internal class SessionManager(
                     "Session start failed: ${e.message}",
                     mapOf("error" to (e.message ?: "unknown"))
                 )
-                transition(SessionState.ERROR)
+                transitionToErrorIfAllowed()
                 val error = ScribeError(ErrorCode.UNKNOWN, e.message ?: "Failed to start session")
                 callback?.onError(
                     error
@@ -504,6 +505,10 @@ internal class SessionManager(
                 if (fullAudioResult != null && EkaScribeConfig.FULL_AUDIO_OUTPUT) {
                     launchDeferredFullAudioUpload(fullAudioResult)
                 }
+            } catch (e: CancellationException) {
+                // cancel()/destroy()/start() already reset the state; don't move to ERROR
+                logger.info(TAG, "stop() for $sessionId cancelled in state ${_stateFlow.value}")
+                throw e
             } catch (e: Exception) {
                 logger.error(TAG, "Error stopping session", e)
                 emitter?.emit(
@@ -511,12 +516,15 @@ internal class SessionManager(
                     "Session failed with exception: ${e.message}",
                     mapOf("error" to (e.message ?: "unknown"))
                 )
-                transition(SessionState.ERROR)
+                transitionToErrorIfAllowed()
                 callback?.onError(
                     ScribeError(ErrorCode.UNKNOWN, e.message ?: "Failed to stop session")
                 )
             } finally {
-                cleanup()
+                // A new session may have started meanwhile; don't tear it down
+                if (activeSessionId == sessionId) {
+                    cleanup()
+                }
             }
         }
     }
@@ -561,8 +569,20 @@ internal class SessionManager(
     }
 
     private fun handleTransactionError(sessionId: String, errorCode: ErrorCode, message: String) {
-        transition(SessionState.ERROR)
+        transitionToErrorIfAllowed()
         callback?.onSessionFailed(sessionId, ScribeError(errorCode, message))
+    }
+
+    /** Error paths can run after the state was reset (IDLE) or finished (COMPLETED). */
+    private fun transitionToErrorIfAllowed() {
+        val current = _stateFlow.value
+        if (current == SessionState.ERROR) return
+        if (current.canTransitionTo(SessionState.ERROR)) {
+            logger.debug(TAG, "State: $current -> ${SessionState.ERROR}")
+            _stateFlow.value = SessionState.ERROR
+        } else {
+            logger.warn(TAG, "Skipping $current -> ${SessionState.ERROR}: not allowed from $current")
+        }
     }
 
     private fun transition(newState: SessionState) {
