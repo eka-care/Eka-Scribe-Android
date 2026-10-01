@@ -395,8 +395,9 @@ internal class SessionManagerTest {
         assertEquals(SessionState.ERROR, manager.currentState)
     }
 
-    /** Captures exceptions that escape background coroutines (e.g. the stop() coroutine). */
-    private fun <T> withUncaughtExceptionCapture(block: (List<Throwable>) -> T): T {
+    /** Captures exceptions that escape background coroutines (e.g. the stop() coroutine).
+     *  inline so the block can call suspend functions from the runTest body. */
+    private inline fun <T> withUncaughtExceptionCapture(block: (List<Throwable>) -> T): T {
         val captured = Collections.synchronizedList(mutableListOf<Throwable>())
         val previous = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { _, e -> captured.add(e) }
