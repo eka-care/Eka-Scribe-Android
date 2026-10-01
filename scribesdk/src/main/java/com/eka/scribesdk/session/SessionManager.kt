@@ -506,9 +506,7 @@ internal class SessionManager(
                     launchDeferredFullAudioUpload(fullAudioResult)
                 }
             } catch (e: CancellationException) {
-                // cancel()/destroy()/a new start() cancelled this work and already reset the
-                // state (usually to IDLE). Moving to ERROR from there is invalid and used to crash
-                // the host app on this IO thread, so just let the cancellation propagate.
+                // cancel()/destroy()/start() already reset the state; don't move to ERROR
                 logger.info(TAG, "stop() for $sessionId cancelled in state ${_stateFlow.value}")
                 throw e
             } catch (e: Exception) {
@@ -523,8 +521,7 @@ internal class SessionManager(
                     ScribeError(ErrorCode.UNKNOWN, e.message ?: "Failed to stop session")
                 )
             } finally {
-                // Only clean up if this is still the active session - a new start() may have
-                // begun while the final poll was running, and cleanup() would cancel its scope.
+                // A new session may have started meanwhile; don't tear it down
                 if (activeSessionId == sessionId) {
                     cleanup()
                 }
@@ -572,17 +569,11 @@ internal class SessionManager(
     }
 
     private fun handleTransactionError(sessionId: String, errorCode: ErrorCode, message: String) {
-        // After a successful transcript the state is already COMPLETED; a failed/timed-out
-        // full-output poll should only fire the failure callback, not throw COMPLETED -> ERROR.
         transitionToErrorIfAllowed()
         callback?.onSessionFailed(sessionId, ScribeError(errorCode, message))
     }
 
-    /**
-     * Moves to ERROR only when the state machine allows it. Error paths can run after the state
-     * was already reset (cancel()/destroy()/new start() -> IDLE) or finished (COMPLETED); throwing
-     * there escapes as an uncaught exception on a background thread and crashes the host app.
-     */
+    /** Error paths can run after the state was reset (IDLE) or finished (COMPLETED). */
     private fun transitionToErrorIfAllowed() {
         val current = _stateFlow.value
         if (current == SessionState.ERROR) return
