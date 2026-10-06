@@ -37,6 +37,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.emptyFlow
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -479,6 +480,61 @@ internal class ScribeSessionIntegrationTest {
             manager.currentState == SessionState.COMPLETED || manager.currentState == SessionState.ERROR
         }
         assertEquals(SessionState.COMPLETED, manager.currentState)
+    }
+
+    @Test
+    fun `scenario 8b - focus regained after auto-pause resumes recording`() {
+        fakeApi.initResponse = netSuccess(initOk("bid-focus-resume"))
+
+        val manager = createSessionManager()
+        var sessionId = ""
+        kotlinx.coroutines.runBlocking {
+            manager.start(context = mockContext, onStart = { sessionId = it })
+        }
+        waitFor(2000) { manager.currentState == SessionState.RECORDING }
+
+        // Phone call takes focus -> SDK pauses
+        audioFocusFlow.tryEmit(false)
+        waitFor(1000) { manager.currentState == SessionState.PAUSED }
+        assertEquals(SessionState.PAUSED, manager.currentState)
+
+        // Call ends, focus returns -> SDK resumes on its own
+        audioFocusFlow.tryEmit(true)
+        waitFor(1000) { manager.currentState == SessionState.RECORDING }
+        assertEquals(
+            "Focus regain should auto-resume a session the SDK paused itself",
+            SessionState.RECORDING,
+            manager.currentState
+        )
+        assertTrue(
+            "onSessionResumed should be called on auto-resume",
+            callbackRecorder.resumedIds.contains(sessionId)
+        )
+    }
+
+    @Test
+    fun `scenario 8c - manual pause is not auto-resumed when focus returns`() {
+        fakeApi.initResponse = netSuccess(initOk("bid-manual-pause"))
+
+        val manager = createSessionManager()
+        var sessionId = ""
+        kotlinx.coroutines.runBlocking {
+            manager.start(context = mockContext, onStart = { sessionId = it })
+        }
+        waitFor(2000) { manager.currentState == SessionState.RECORDING }
+
+        // Doctor pauses, then a call comes and goes
+        manager.pause()
+        audioFocusFlow.tryEmit(false)
+        audioFocusFlow.tryEmit(true)
+        waitFor(1000) { callbackRecorder.focusChanges.contains(true) }
+
+        assertEquals(
+            "A manual pause must stay paused after focus returns",
+            SessionState.PAUSED,
+            manager.currentState
+        )
+        assertFalse(callbackRecorder.resumedIds.contains(sessionId))
     }
 
     // =====================================================================

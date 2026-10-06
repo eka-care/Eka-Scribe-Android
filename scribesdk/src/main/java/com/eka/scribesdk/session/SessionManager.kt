@@ -82,6 +82,11 @@ internal class SessionManager(
     private var eventEmitter: SessionEventEmitter? = null
     private var sessionScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
+    // True only when the SDK paused because another app (e.g. a phone call) took audio focus.
+    // Such pauses resume automatically when focus returns; a manual pause is never auto-resumed.
+    @Volatile
+    private var pausedByFocusLoss = false
+
     val currentState: SessionState get() = _stateFlow.value
 
     fun setCallback(callback: EkaScribeCallback) {
@@ -133,7 +138,7 @@ internal class SessionManager(
 
         withContext(Dispatchers.IO) {
             try {
-                val folderName = SimpleDateFormat("yyMMdd", Locale.getDefault()).format(Date())
+                val folderName = SimpleDateFormat("yyMMdd", Locale.US).format(Date())
 
                 // Build the init request and serialize metadata upfront
                 // so it can be included in the initial INSERT (avoids a separate UPDATE)
@@ -263,6 +268,7 @@ internal class SessionManager(
     }
 
     fun resume() {
+        pausedByFocusLoss = false
         val current = _stateFlow.value
         if (current == SessionState.RECORDING) {
             logger.info(TAG, "resume() called while already RECORDING — no-op")
@@ -625,8 +631,17 @@ internal class SessionManager(
         }
         scope.launch {
             activePipeline.audioFocusFlow.collect { hasFocus ->
-                if (!hasFocus && _stateFlow.value == SessionState.RECORDING) {
-                    pause()
+                try {
+                    if (!hasFocus && _stateFlow.value == SessionState.RECORDING) {
+                        pause()
+                        pausedByFocusLoss = true
+                    } else if (hasFocus && pausedByFocusLoss && _stateFlow.value == SessionState.PAUSED) {
+                        // Focus is back (e.g. the call ended): resume only what we paused ourselves
+                        resume()
+                    }
+                } catch (e: ScribeException) {
+                    // stop()/cancel() raced this focus event; the new state wins
+                    logger.warn(TAG, "Ignoring audio focus change in state ${_stateFlow.value}", e)
                 }
                 emitter.emit(
                     SessionEventName.AUDIO_FOCUS_CHANGED, EventType.INFO,
@@ -639,6 +654,7 @@ internal class SessionManager(
     }
 
     private fun cleanup() {
+        pausedByFocusLoss = false
         pipeline = null
         activeSessionId = null
         activeSessionConfig = null

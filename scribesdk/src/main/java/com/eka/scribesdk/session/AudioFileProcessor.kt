@@ -55,7 +55,7 @@ internal class AudioFileProcessor(
                 }
 
                 val sessionId = IdGenerator.sessionId()
-                val folderName = SimpleDateFormat("yyMMdd", Locale.getDefault()).format(Date())
+                val folderName = SimpleDateFormat("yyMMdd", Locale.US).format(Date())
                 val timeProvider = DefaultTimeProvider()
 
                 logger.info(TAG, "Processing audio file: $filePath, session: $sessionId")

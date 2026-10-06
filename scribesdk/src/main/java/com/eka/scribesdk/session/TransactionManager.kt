@@ -351,7 +351,7 @@ internal class TransactionManager(
                 ?: return TransactionResult.Error("No session config available for recovery")
 
                 val folderName = session.folderName
-                    ?: SimpleDateFormat("yyMMdd", Locale.getDefault()).format(Date())
+                    ?: SimpleDateFormat("yyMMdd", Locale.US).format(Date())
                 val initResult = initTransaction(sessionId, config, folderName)
                 if (initResult is TransactionResult.Success) {
                     // Automatically progress to next stage if successful
