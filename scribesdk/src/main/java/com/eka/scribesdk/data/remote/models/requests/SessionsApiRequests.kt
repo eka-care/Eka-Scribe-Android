@@ -39,3 +39,12 @@ internal data class EndSessionRequest(
     @SerializedName("audio_files_sent")
     val audioFilesSent: Int
 )
+
+/** Body for `POST /voice/api/v1/documents`; with document_id it updates that document. */
+@Keep
+internal data class UpsertDocumentRequest(
+    @SerializedName("session_id")
+    val sessionId: String,
+    @SerializedName("document_id")
+    val documentId: String? = null
+)

@@ -18,6 +18,7 @@ import com.eka.scribesdk.data.remote.models.responses.toTranscriptResult
 import com.eka.scribesdk.data.remote.models.responses.toUserConfigs
 import com.eka.scribesdk.data.remote.services.ScribeApiService
 import com.eka.scribesdk.session.SessionFetchState
+import com.eka.scribesdk.session.SessionsDocumentWriter
 import com.eka.scribesdk.session.SessionsResultFetcher
 import com.haroldadmin.cnradapter.NetworkResponse
 import kotlinx.coroutines.delay
@@ -27,7 +28,9 @@ internal class ScribeRepository(
     private val logger: Logger,
     /** Reads results for Sessions API sessions; legacy sessions keep using v3/status. */
     private val sessionsResultFetcher: SessionsResultFetcher? = null,
-    private val usesSessionsApi: suspend (sessionId: String) -> Boolean = { false }
+    private val usesSessionsApi: suspend (sessionId: String) -> Boolean = { false },
+    /** Saves edits for Sessions API sessions via the Documents API; legacy sessions use PATCH v3/status. */
+    private val sessionsDocumentWriter: SessionsDocumentWriter? = null
 ) {
     companion object {
         private const val TAG = "ScribeRepository"
@@ -101,6 +104,10 @@ internal class ScribeRepository(
         updatedData: List<SessionData>
     ): Result<Boolean> {
         return try {
+            val writer = sessionsDocumentWriter
+            if (writer != null && usesSessionsApi(sessionId)) {
+                return writer.save(sessionId, updatedData)
+            }
             val request = UpdateSessionRequest()
             request.addAll(updatedData.map {
                 UpdateSessionRequest.UpdateSessionRequestItem(

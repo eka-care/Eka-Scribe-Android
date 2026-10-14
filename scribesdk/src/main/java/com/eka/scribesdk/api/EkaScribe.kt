@@ -44,6 +44,7 @@ import com.eka.scribesdk.pipeline.Pipeline
 import com.eka.scribesdk.session.AudioFileProcessor
 import com.eka.scribesdk.session.SessionManager
 import com.eka.scribesdk.session.SessionsApiFlow
+import com.eka.scribesdk.session.SessionsDocumentWriter
 import com.eka.scribesdk.session.SessionsResultFetcher
 import com.eka.scribesdk.session.TransactionManager
 import com.eka.scribesdk.session.TransactionResult
@@ -267,7 +268,8 @@ object EkaScribe {
             apiService = developerApiService,
             logger = logger,
             sessionsResultFetcher = sessionsResultFetcher,
-            usesSessionsApi = { sessionId -> dm.getSession(sessionId)?.apiFlow == ApiFlow.SESSIONS_V1 }
+            usesSessionsApi = { sessionId -> dm.getSession(sessionId)?.apiFlow == ApiFlow.SESSIONS_V1 },
+            sessionsDocumentWriter = SessionsDocumentWriter(apiService = sessionsApiService, logger = logger)
         )
 
         sessionManager = SessionManager(

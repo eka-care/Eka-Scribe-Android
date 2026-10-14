@@ -1,6 +1,7 @@
 package com.eka.scribesdk.data.remote.services
 
 import com.eka.scribesdk.data.remote.models.responses.CreateSessionResponse
+import com.eka.scribesdk.data.remote.models.responses.DocumentEnvelopeResponse
 import com.eka.scribesdk.data.remote.models.responses.EndSessionResponse
 import com.eka.scribesdk.data.remote.models.responses.GetSessionResponse
 import com.eka.scribesdk.data.remote.models.responses.PatchSessionResponse
@@ -47,6 +48,15 @@ internal interface SessionsApiService {
         @Path("session_id") sessionId: String,
         @Body request: JsonObject
     ): NetworkResponse<EndSessionResponse, SessionsErrorResponse>
+
+    /**
+     * Create (no document_id) or update (with document_id) a document. The response carries a
+     * pre-signed PUT URL for the content. Docs: /ekascribe/api-reference/documents/create-update-document
+     */
+    @POST("voice/api/v1/documents")
+    suspend fun upsertDocument(
+        @Body request: JsonObject
+    ): NetworkResponse<DocumentEnvelopeResponse, SessionsErrorResponse>
 
     /** 202 = still processing, 200 = completed, 206 = partial; 410 (expired) arrives as ServerError. */
     @GET("voice/v1/sessions/{session_id}")
