@@ -49,6 +49,7 @@ import com.eka.scribesdk.api.EkaScribeCallback
 import com.eka.scribesdk.api.EkaScribeConfig
 import com.eka.scribesdk.api.models.ScribeError
 import com.eka.scribesdk.api.models.SessionConfig
+import com.eka.scribesdk.api.models.OutputTemplate
 import com.eka.scribesdk.api.models.SessionResult
 import com.eka.scribesdk.api.models.SessionState
 import kotlinx.coroutines.CoroutineScope
@@ -273,12 +274,21 @@ class TestActivity : ComponentActivity() {
         try {
             errorMessage.value = ""
             resultInfo.value = ""
-            val sessionConfig = SessionConfig(
-                languages = listOf("en-IN"),
-                mode = "dictation",
-                modelType = "pro"
-            )
             lifecycleScope.launch {
+                val template = EkaScribe.getTemplates().getOrNull().orEmpty().let { templates ->
+                    templates.firstOrNull { it.isFavorite }
+                        ?: templates.firstOrNull { it.default }
+                        ?: templates.firstOrNull()
+                }
+                Log.i(TAG, "Using note template: ${template?.title} (${template?.id})")
+                val sessionConfig = SessionConfig(
+                    languages = listOf("en-IN"),
+                    mode = "dictation",
+                    modelType = "pro",
+                    outputTemplates = template?.let {
+                        listOf(OutputTemplate(templateId = it.id, templateName = it.title))
+                    }
+                )
                 EkaScribe.startSession(
                     context = this@TestActivity,
                     sessionConfig,
@@ -377,12 +387,28 @@ class TestActivity : ComponentActivity() {
             showToast("Error: ${error.message}")
         }
 
+        override fun onTranscriptReady(sessionId: String, result: SessionResult) {
+            Log.d(TAG, "Transcript ready: $sessionId")
+            resultInfo.value = "Transcript ready\n\n" + formatResult(result)
+        }
+
         override fun onSessionCompleted(sessionId: String, result: SessionResult) {
             Log.d(TAG, "Session completed: $sessionId")
             val outputCount = result.templates.size
-            resultInfo.value = "Completed! Outputs: $outputCount"
+            resultInfo.value = "Completed! Outputs: $outputCount\n\n" + formatResult(result)
             showToast("Session completed with $outputCount outputs")
         }
+
+        // Shows every template (transcript + notes) section by section, to verify the content
+        private fun formatResult(result: SessionResult): String =
+            result.templates.joinToString("\n\n") { template ->
+                val header = "=== ${template.name ?: template.templateId} " +
+                    "(${template.type}, template=${template.templateId}, doc=${template.documentId}) ==="
+                val body = template.sections.joinToString("\n\n") { section ->
+                    listOfNotNull(section.title?.let { "## $it" }, section.value).joinToString("\n")
+                }.ifBlank { "(empty)" }
+                "$header\n$body"
+            }.ifBlank { "(no templates returned)" }
 
         override fun onSessionFailed(sessionId: String, error: ScribeError) {
             Log.e(TAG, "Session failed: $sessionId - ${error.code}: ${error.message}")
