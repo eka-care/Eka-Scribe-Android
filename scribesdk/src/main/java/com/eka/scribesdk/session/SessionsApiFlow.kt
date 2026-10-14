@@ -1,0 +1,220 @@
+package com.eka.scribesdk.session
+
+import com.eka.scribesdk.BuildConfig
+import com.eka.scribesdk.api.models.PatientDetail
+import com.eka.scribesdk.api.models.SessionConfig
+import com.eka.scribesdk.common.logging.Logger
+import com.eka.scribesdk.data.DataManager
+import com.eka.scribesdk.data.local.db.entity.TransactionStage
+import com.eka.scribesdk.data.remote.models.requests.CreateSessionRequest
+import com.eka.scribesdk.data.remote.models.requests.EndSessionRequest
+import com.eka.scribesdk.data.remote.models.requests.PatchSessionRequest
+import com.eka.scribesdk.data.remote.models.responses.readableMessage
+import com.eka.scribesdk.data.remote.services.SessionsApiService
+import com.google.gson.Gson
+import com.google.gson.JsonObject
+import com.haroldadmin.cnradapter.NetworkResponse
+
+/**
+ * Session lifecycle on the EkaScribe Sessions API (`/voice/v1/sessions`):
+ * create -> PATCH session_mode -> (chunks via SessionsChunkUploader) -> end.
+ *
+ * Maps onto the existing [TransactionStage] machine so recovery works unchanged:
+ * INIT --create--> STOP --end--> COMMIT --(no API)--> ANALYZING.
+ */
+internal class SessionsApiFlow(
+    private val apiService: SessionsApiService,
+    private val dataManager: DataManager,
+    private val flavour: String,
+    private val logger: Logger
+) {
+    companion object {
+        private const val TAG = "SessionsApiFlow"
+        private const val UPLOAD_TYPE_CHUNKED = "chunked"
+        private const val MAX_TEMPLATES = 2
+        private const val AUTO_DETECT = "auto_detect"
+        private const val STATUS_CANCELLED = "cancelled"
+    }
+
+    // Default Gson drops null fields, so optional values are omitted from request bodies
+    private val gson = Gson()
+
+    /** `POST /sessions` then `PATCH session_mode`. On success the stage moves to STOP. */
+    suspend fun createSession(sessionId: String, sessionConfig: SessionConfig): TransactionResult {
+        val request = CreateSessionRequest(
+            uploadType = UPLOAD_TYPE_CHUNKED,
+            sessionId = sessionId,
+            templates = toTemplateIds(sessionConfig),
+            model = sessionConfig.modelType,
+            languageHint = toLanguageHint(sessionConfig.languages),
+            patientDetails = toPatientDetails(sessionConfig.patientDetails),
+            additionalData = toAdditionalData(sessionConfig)
+        )
+
+        when (val response = apiService.createSession(request.toJson())) {
+            is NetworkResponse.Success -> {
+                val serverSessionId = response.body.sessionId
+                if (!serverSessionId.isNullOrBlank() && serverSessionId != sessionId) {
+                    // The local DB is keyed by our id; continuing would upload to the wrong session
+                    logger.error(TAG, "Server returned a different session id: $serverSessionId (sent $sessionId)")
+                    return TransactionResult.Error("Server returned a different session id")
+                }
+                logger.info(
+                    TAG,
+                    "Session created: $sessionId, storage=${response.body.storageProvider}, expires=${response.body.expiresAt}"
+                )
+            }
+
+            is NetworkResponse.ServerError -> {
+                // 409: already created by an earlier attempt (e.g. recovery after a crash) — continue
+                if (response.code == 409) {
+                    logger.info(TAG, "Session already exists, continuing: $sessionId")
+                } else {
+                    val message = response.body.readableMessage("Create session failed")
+                    logger.error(TAG, "Create session server error ${response.code}: $sessionId - $message")
+                    return TransactionResult.Error(message)
+                }
+            }
+
+            is NetworkResponse.NetworkError -> {
+                logger.error(TAG, "Create session network error: $sessionId", response.error)
+                return TransactionResult.Error("Network error: ${response.error.message}")
+            }
+
+            is NetworkResponse.UnknownError -> {
+                logger.error(TAG, "Create session unknown error: $sessionId", response.error)
+                return TransactionResult.Error("Unknown error: ${response.error.message}")
+            }
+        }
+
+        // session_mode is not part of the create body; it can only be set by PATCH before end
+        val modeResult = patchSession(sessionId, PatchSessionRequest(sessionMode = sessionConfig.mode))
+        if (modeResult is TransactionResult.Error) return modeResult
+
+        dataManager.updateUploadStage(sessionId, TransactionStage.STOP.name)
+        return TransactionResult.Success()
+    }
+
+    /** `POST /sessions/{id}/end`. Starts server-side processing; the stage moves to COMMIT. */
+    suspend fun endSession(sessionId: String): TransactionResult {
+        val uploadedCount = dataManager.getUploadedChunks(sessionId).size
+        val request = EndSessionRequest(audioFilesSent = uploadedCount)
+
+        return when (val response = apiService.endSession(sessionId, request.toJson())) {
+            is NetworkResponse.Success -> {
+                dataManager.updateUploadStage(sessionId, TransactionStage.COMMIT.name)
+                logger.info(
+                    TAG,
+                    "Session ended: $sessionId, sent=$uploadedCount, received=${response.body.audioFilesReceived}"
+                )
+                TransactionResult.Success()
+            }
+
+            is NetworkResponse.ServerError -> {
+                val message = response.body.readableMessage("End session failed")
+                // 400 "session already ended": an earlier end call succeeded (e.g. before a crash)
+                if (response.code == 400 && message.contains("ended", ignoreCase = true)) {
+                    dataManager.updateUploadStage(sessionId, TransactionStage.COMMIT.name)
+                    logger.info(TAG, "Session already ended, continuing: $sessionId")
+                    TransactionResult.Success()
+                } else {
+                    logger.error(TAG, "End session server error ${response.code}: $sessionId - $message")
+                    TransactionResult.Error(message)
+                }
+            }
+
+            is NetworkResponse.NetworkError -> {
+                logger.error(TAG, "End session network error: $sessionId", response.error)
+                TransactionResult.Error("Network error: ${response.error.message}")
+            }
+
+            is NetworkResponse.UnknownError -> {
+                logger.error(TAG, "End session unknown error: $sessionId", response.error)
+                TransactionResult.Error("Unknown error: ${response.error.message}")
+            }
+        }
+    }
+
+    /** Marks the session cancelled on the server. Best effort: failures are only logged. */
+    suspend fun cancelSession(sessionId: String) {
+        val result = patchSession(
+            sessionId,
+            PatchSessionRequest(userStatus = STATUS_CANCELLED, processingStatus = STATUS_CANCELLED)
+        )
+        if (result is TransactionResult.Error) {
+            logger.warn(TAG, "Cancel session failed (ignored): $sessionId - ${result.message}")
+        }
+    }
+
+    private suspend fun patchSession(sessionId: String, request: PatchSessionRequest): TransactionResult {
+        return when (val response = apiService.patchSession(sessionId, request.toJson())) {
+            is NetworkResponse.Success -> TransactionResult.Success()
+            is NetworkResponse.ServerError -> {
+                val message = response.body.readableMessage("Update session failed")
+                logger.error(TAG, "Patch session server error ${response.code}: $sessionId - $message")
+                TransactionResult.Error(message)
+            }
+
+            is NetworkResponse.NetworkError -> {
+                logger.error(TAG, "Patch session network error: $sessionId", response.error)
+                TransactionResult.Error("Network error: ${response.error.message}")
+            }
+
+            is NetworkResponse.UnknownError -> {
+                logger.error(TAG, "Patch session unknown error: $sessionId", response.error)
+                TransactionResult.Error("Unknown error: ${response.error.message}")
+            }
+        }
+    }
+
+    private fun Any.toJson(): JsonObject = gson.toJsonTree(this).asJsonObject
+
+    /** Template IDs, capped at the documented max of 2. */
+    private fun toTemplateIds(sessionConfig: SessionConfig): List<String>? {
+        val ids = sessionConfig.outputTemplates
+            ?.map { it.templateId.trim() }
+            ?.filter { it.isNotEmpty() }
+            ?.distinct()
+            .orEmpty()
+        if (ids.size > MAX_TEMPLATES) {
+            logger.warn(TAG, "Sessions API allows $MAX_TEMPLATES templates, dropping: ${ids.drop(MAX_TEMPLATES)}")
+        }
+        return ids.take(MAX_TEMPLATES).ifEmpty { null }
+    }
+
+    /** ISO 639-1 codes as documented: "en-IN" -> "en", "hi" -> "hi"; "auto_detect" is kept. */
+    private fun toLanguageHint(languages: List<String>): List<String>? =
+        languages
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .map {
+                if (it.equals(AUTO_DETECT, ignoreCase = true)) {
+                    AUTO_DETECT
+                } else {
+                    it.substringBefore('-').substringBefore('_').lowercase()
+                }
+            }
+            .distinct()
+            .ifEmpty { null }
+
+    /** Same keys the web client sends; `oid` is indexed by the server. */
+    private fun toPatientDetails(patient: PatientDetail?): Map<String, String>? {
+        if (patient == null) return null
+        return buildMap<String, String> {
+            patient.patientId?.takeIf { it.isNotBlank() }?.let { put("oid", it) }
+            patient.name?.takeIf { it.isNotBlank() }?.let { put("name", it) }
+            patient.age?.let { put("age", it.toString()) }
+            patient.biologicalSex?.takeIf { it.isNotBlank() }?.let { put("gender", it) }
+        }.ifEmpty { null }
+    }
+
+    /** Fields with no first-class slot in the create body travel in additional_data. */
+    private fun toAdditionalData(sessionConfig: SessionConfig): Map<String, String> =
+        buildMap<String, String> {
+            put("_flavour", flavour)
+            put("sdk_version", BuildConfig.SDK_VERSION_NAME)
+            sessionConfig.speciality?.takeIf { it.isNotBlank() }?.let { put("speciality", it) }
+            sessionConfig.section?.takeIf { it.isNotBlank() }?.let { put("section", it) }
+            sessionConfig.patientDetails?.visitId?.takeIf { it.isNotBlank() }?.let { put("visit_id", it) }
+        }
+}

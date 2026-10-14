@@ -415,7 +415,11 @@ internal class Pipeline(
             val chunkConfig = ChunkConfig(
                 preferredDurationSec = EkaScribeConfig.PREFERRED_CHUNK_DURATION_SEC,
                 desperationDurationSec = EkaScribeConfig.DESPERATION_CHUNK_DURATION_SEC,
-                maxDurationSec = EkaScribeConfig.MAX_CHUNK_DURATION_SEC,
+                maxDurationSec = if (config.useSessionsApi) {
+                    EkaScribeConfig.SESSIONS_API_MAX_CHUNK_DURATION_SEC
+                } else {
+                    EkaScribeConfig.MAX_CHUNK_DURATION_SEC
+                },
                 overlapDurationSec = EkaScribeConfig.OVERLAP_DURATION_SEC
             )
 
