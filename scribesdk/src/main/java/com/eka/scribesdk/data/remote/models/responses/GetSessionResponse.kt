@@ -63,7 +63,9 @@ private val gson = Gson()
  * Values are re-encoded as base64 because those mappers decode base64.
  */
 internal fun GetSessionResponse.toScribeResultResponse(
-    codec: Base64Codec = AndroidBase64Codec
+    codec: Base64Codec = AndroidBase64Codec,
+    /** templateId -> display name; the API returns no names, so they come from the local session config. */
+    templateNames: Map<String, String> = emptyMap()
 ): ScribeResultResponse {
     val custom = mutableListOf<ScribeResultResponse.Data.Output?>()
     val integration = mutableListOf<ScribeResultResponse.Data.Integration?>()
@@ -76,6 +78,7 @@ internal fun GetSessionResponse.toScribeResultResponse(
         val name = entry.stringOrNull("name")
             ?: entry.stringOrNull("document_name")
             ?: entry.stringOrNull("template_name")
+            ?: templateNames[templateId]?.takeIf { it.isNotBlank() }
             ?: templateId
 
         when {

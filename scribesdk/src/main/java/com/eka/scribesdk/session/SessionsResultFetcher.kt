@@ -28,7 +28,9 @@ internal sealed class SessionFetchState {
  */
 internal class SessionsResultFetcher(
     private val apiService: SessionsApiService,
-    private val logger: Logger
+    private val logger: Logger,
+    /** templateId -> name for a session (from its saved config); used as note titles. */
+    private val templateNames: suspend (sessionId: String) -> Map<String, String> = { emptyMap() }
 ) {
     companion object {
         private const val TAG = "SessionsResultFetcher"
@@ -46,7 +48,9 @@ internal class SessionsResultFetcher(
                     SessionFetchState.Error(response.body.message ?: "Processing failed", retryable = false)
 
                 else -> SessionFetchState.Done(
-                    result = response.body.toScribeResultResponse(),
+                    result = response.body.toScribeResultResponse(
+                        templateNames = templateNames(sessionId)
+                    ),
                     partial = response.code == HTTP_PARTIAL
                 )
             }

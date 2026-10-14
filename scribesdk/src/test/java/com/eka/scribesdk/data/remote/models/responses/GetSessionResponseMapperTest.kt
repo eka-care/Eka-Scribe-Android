@@ -116,6 +116,15 @@ internal class GetSessionResponseMapperTest {
     }
 
     @Test
+    fun `template name comes from the saved config when the API has none`() {
+        val result = response(
+            """[{"t-1": {"status": "success", "document_id": "doc_7", "data": "Note"}}]"""
+        ).toScribeResultResponse(JvmCodec, templateNames = mapOf("t-1" to "SOAP Note"))
+
+        assertEquals("SOAP Note", result.data!!.templateResults!!.custom!!.single()!!.name)
+    }
+
+    @Test
     fun `templates given as a plain object are also read`() {
         val result = response(
             """{"soap": {"status": "success", "document_id": "doc_6", "data": "Note"}}"""
