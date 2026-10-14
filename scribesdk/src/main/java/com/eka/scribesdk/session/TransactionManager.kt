@@ -236,6 +236,9 @@ internal class TransactionManager(
      * HTTP 200 with SUCCESS status = done.
      */
     suspend fun pollResult(sessionId: String, templateId: String? = null): TransactionPollResult {
+        // Sessions API: one GET returns transcript and templates together; templateId isn't needed
+        sessionsFlowFor(sessionId)?.let { return it.pollResult(sessionId) }
+
         val successStates = setOf(ResultStatus.SUCCESS, ResultStatus.PARTIAL_COMPLETED)
         val failureStates = setOf(ResultStatus.FAILURE)
 
