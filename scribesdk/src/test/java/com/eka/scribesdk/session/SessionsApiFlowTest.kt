@@ -11,6 +11,7 @@ import com.eka.scribesdk.data.local.db.entity.SessionEntity
 import com.eka.scribesdk.data.local.db.entity.TransactionStage
 import com.eka.scribesdk.data.remote.models.responses.CreateSessionResponse
 import com.eka.scribesdk.data.remote.models.responses.EndSessionResponse
+import com.eka.scribesdk.data.remote.models.responses.GetSessionResponse
 import com.eka.scribesdk.data.remote.models.responses.PatchSessionResponse
 import com.eka.scribesdk.data.remote.models.responses.SessionsApiError
 import com.eka.scribesdk.data.remote.models.responses.SessionsErrorResponse
@@ -19,6 +20,7 @@ import com.eka.scribesdk.data.remote.services.ScribeApiService
 import com.eka.scribesdk.data.remote.services.SessionsApiService
 import com.eka.scribesdk.data.remote.upload.ChunkUploader
 import com.google.gson.JsonObject
+import com.google.gson.JsonParser
 import com.haroldadmin.cnradapter.NetworkResponse
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -72,6 +74,8 @@ internal class SessionsApiFlowTest {
         var createResponse: NetworkResponse<CreateSessionResponse, SessionsErrorResponse>? = null
         var patchResponse: NetworkResponse<PatchSessionResponse, SessionsErrorResponse>? = null
         var endResponse: NetworkResponse<EndSessionResponse, SessionsErrorResponse>? = null
+        val getResponses = ArrayDeque<NetworkResponse<GetSessionResponse, SessionsErrorResponse>>()
+        var getCalls = 0
 
         override suspend fun createSession(request: JsonObject) =
             createResponse!!.also { createBodies += request }
@@ -84,6 +88,11 @@ internal class SessionsApiFlowTest {
 
         override suspend fun endSession(sessionId: String, request: JsonObject) =
             endResponse!!.also { endBodies += request }
+
+        override suspend fun getSession(sessionId: String): NetworkResponse<GetSessionResponse, SessionsErrorResponse> {
+            getCalls++
+            return if (getResponses.size > 1) getResponses.removeFirst() else getResponses.first()
+        }
     }
 
     private fun createdOk(id: String = SESSION_ID) = netSuccess<CreateSessionResponse, SessionsErrorResponse>(
@@ -131,6 +140,26 @@ internal class SessionsApiFlowTest {
 
     private fun flow(api: FakeSessionsApi, dm: DataManager) =
         SessionsApiFlow(apiService = api, dataManager = dm, flavour = "android", logger = NoOpLogger())
+
+    private fun flowWithResults(api: FakeSessionsApi, dm: DataManager) = SessionsApiFlow(
+        apiService = api,
+        dataManager = dm,
+        flavour = "android",
+        logger = NoOpLogger(),
+        resultFetcher = SessionsResultFetcher(api, NoOpLogger())
+    )
+
+    // Failed templates and no transcript: the adapter needs no base64, so it runs on the JVM
+    private fun failedOnlyBody() = GetSessionResponse(
+        sessionId = SESSION_ID, status = "completed", createdAt = null, languageDetected = null,
+        transcript = null, message = null,
+        templates = JsonParser.parseString("""[{"soap": {"status": "failure", "document_id": "d1"}}]""")
+    )
+
+    private fun processingBody() = GetSessionResponse(
+        sessionId = SESSION_ID, status = "processing", createdAt = null, languageDetected = null,
+        transcript = null, message = null, templates = null
+    )
 
     // ---- createSession ----
 
@@ -249,6 +278,46 @@ internal class SessionsApiFlowTest {
 
         assertEquals(1, api.endBodies.size)
         coVerify { dm.updateUploadStage(SESSION_ID, TransactionStage.ANALYZING.name) }
+    }
+
+    // ---- pollResult ----
+
+    @Test
+    fun `pollResult keeps polling on 202 and fails when processing produced no output`() = runTest {
+        val api = FakeSessionsApi().apply {
+            getResponses.addLast(netSuccess(processingBody(), code = 202))
+            getResponses.addLast(netSuccess(failedOnlyBody(), code = 200))
+        }
+        val dm = mockk<DataManager>(relaxed = true)
+
+        val result = flowWithResults(api, dm).pollResult(SESSION_ID)
+
+        assertEquals(2, api.getCalls)
+        assertTrue(result is TransactionPollResult.Failed)
+        coVerify { dm.updateUploadStage(SESSION_ID, TransactionStage.FAILURE.name) }
+    }
+
+    @Test
+    fun `pollResult maps 410 to an expired failure`() = runTest {
+        val api = FakeSessionsApi().apply { getResponses.addLast(netServerError("expired", 410)) }
+        val dm = mockk<DataManager>(relaxed = true)
+
+        val result = flowWithResults(api, dm).pollResult(SESSION_ID)
+
+        assertTrue(result is TransactionPollResult.Failed)
+        assertEquals("Session expired before processing", (result as TransactionPollResult.Failed).error)
+        assertEquals(1, api.getCalls)
+    }
+
+    @Test
+    fun `pollResult stops on a non-retryable error`() = runTest {
+        val api = FakeSessionsApi().apply { getResponses.addLast(netServerError("not found", 404)) }
+        val dm = mockk<DataManager>(relaxed = true)
+
+        val result = flowWithResults(api, dm).pollResult(SESSION_ID)
+
+        assertTrue(result is TransactionPollResult.Failed)
+        assertEquals(1, api.getCalls)
     }
 
     @Test

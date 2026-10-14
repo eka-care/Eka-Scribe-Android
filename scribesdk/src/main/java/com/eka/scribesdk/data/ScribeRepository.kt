@@ -17,12 +17,17 @@ import com.eka.scribesdk.data.remote.models.responses.toTemplateItem
 import com.eka.scribesdk.data.remote.models.responses.toTranscriptResult
 import com.eka.scribesdk.data.remote.models.responses.toUserConfigs
 import com.eka.scribesdk.data.remote.services.ScribeApiService
+import com.eka.scribesdk.session.SessionFetchState
+import com.eka.scribesdk.session.SessionsResultFetcher
 import com.haroldadmin.cnradapter.NetworkResponse
 import kotlinx.coroutines.delay
 
 internal class ScribeRepository(
     private val apiService: ScribeApiService,
-    private val logger: Logger
+    private val logger: Logger,
+    /** Reads results for Sessions API sessions; legacy sessions keep using v3/status. */
+    private val sessionsResultFetcher: SessionsResultFetcher? = null,
+    private val usesSessionsApi: suspend (sessionId: String) -> Boolean = { false }
 ) {
     companion object {
         private const val TAG = "ScribeRepository"
@@ -253,12 +258,30 @@ internal class ScribeRepository(
 
     // ---- Private helpers ----
 
+    private suspend fun sessionsFetcherFor(sessionId: String): SessionsResultFetcher? {
+        val fetcher = sessionsResultFetcher ?: return null
+        return if (usesSessionsApi(sessionId)) fetcher else null
+    }
+
+    private fun SessionFetchState?.toResult(
+        mapper: (ScribeResultResponse) -> SessionResult
+    ): Result<SessionResult> = when (this) {
+        is SessionFetchState.Done -> Result.success(mapper(result))
+        is SessionFetchState.Processing -> Result.failure(Exception("Session still processing"))
+        is SessionFetchState.Expired -> Result.failure(Exception("Session expired"))
+        is SessionFetchState.Error -> Result.failure(Exception(message))
+        null -> Result.failure(Exception("Failed to get output"))
+    }
+
     private suspend fun fetchResult(
         sessionId: String,
         templateId: String?,
         mapper: (ScribeResultResponse) -> SessionResult
     ): Result<SessionResult> {
         return try {
+            sessionsFetcherFor(sessionId)?.let { fetcher ->
+                return fetcher.fetch(sessionId).toResult(mapper)
+            }
             when (val response = apiService.getTransactionResult(sessionId, templateId)) {
                 is NetworkResponse.Success -> {
                     if (response.code == 202) {
@@ -288,6 +311,9 @@ internal class ScribeRepository(
         mapper: (ScribeResultResponse) -> SessionResult
     ): Result<SessionResult> {
         return try {
+            sessionsFetcherFor(sessionId)?.let { fetcher ->
+                return fetcher.poll(sessionId, pollMaxRetries, pollDelayMs).toResult(mapper)
+            }
             repeat(pollMaxRetries) {
                 when (val response = apiService.getTransactionResult(sessionId, templateId)) {
                     is NetworkResponse.Success -> {

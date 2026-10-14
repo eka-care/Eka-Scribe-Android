@@ -9,6 +9,8 @@ import com.eka.scribesdk.data.local.db.entity.TransactionStage
 import com.eka.scribesdk.data.remote.models.requests.CreateSessionRequest
 import com.eka.scribesdk.data.remote.models.requests.EndSessionRequest
 import com.eka.scribesdk.data.remote.models.requests.PatchSessionRequest
+import com.eka.scribesdk.data.remote.models.responses.ResultStatus
+import com.eka.scribesdk.data.remote.models.responses.ScribeResultResponse
 import com.eka.scribesdk.data.remote.models.responses.readableMessage
 import com.eka.scribesdk.data.remote.services.SessionsApiService
 import com.google.gson.Gson
@@ -20,13 +22,14 @@ import com.haroldadmin.cnradapter.NetworkResponse
  * create -> PATCH session_mode -> (chunks via SessionsChunkUploader) -> end.
  *
  * Maps onto the existing [TransactionStage] machine so recovery works unchanged:
- * INIT --create--> STOP --end--> COMMIT --(no API)--> ANALYZING.
+ * INIT --create--> STOP --end--> COMMIT --(no API)--> ANALYZING --GET /sessions--> COMPLETED.
  */
 internal class SessionsApiFlow(
     private val apiService: SessionsApiService,
     private val dataManager: DataManager,
     private val flavour: String,
-    private val logger: Logger
+    private val logger: Logger,
+    private val resultFetcher: SessionsResultFetcher? = null
 ) {
     companion object {
         private const val TAG = "SessionsApiFlow"
@@ -34,6 +37,12 @@ internal class SessionsApiFlow(
         private const val MAX_TEMPLATES = 2
         private const val AUTO_DETECT = "auto_detect"
         private const val STATUS_CANCELLED = "cancelled"
+
+        // Same cadence as the web client: every 2s; give up after 2 minutes
+        private const val POLL_INTERVAL_MS = 2_000L
+        private const val POLL_TIMEOUT_MS = 120_000L
+        private const val POLL_MAX_ATTEMPTS = (POLL_TIMEOUT_MS / POLL_INTERVAL_MS).toInt()
+        private val USABLE_STATES = setOf(ResultStatus.SUCCESS, ResultStatus.PARTIAL_COMPLETED)
     }
 
     // Default Gson drops null fields, so optional values are omitted from request bodies
@@ -133,6 +142,50 @@ internal class SessionsApiFlow(
                 TransactionResult.Error("Unknown error: ${response.error.message}")
             }
         }
+    }
+
+    /**
+     * Polls `GET /sessions/{id}` until processing finishes. 200 and 206 both complete the session
+     * (206 = some templates failed); 410 means it expired. Moves the stage to COMPLETED or FAILURE.
+     */
+    suspend fun pollResult(sessionId: String): TransactionPollResult {
+        val fetcher = resultFetcher
+            ?: return TransactionPollResult.Failed("Sessions API result fetcher not configured")
+
+        return when (val state = fetcher.poll(sessionId, POLL_MAX_ATTEMPTS, POLL_INTERVAL_MS)) {
+            is SessionFetchState.Done -> {
+                if (state.result.hasUsableOutput()) {
+                    dataManager.updateUploadStage(sessionId, TransactionStage.COMPLETED.name)
+                    logger.info(TAG, "Result ready: $sessionId (partial=${state.partial})")
+                    TransactionPollResult.Success(state.result)
+                } else {
+                    dataManager.updateUploadStage(sessionId, TransactionStage.FAILURE.name)
+                    logger.warn(TAG, "Session finished without usable output: $sessionId")
+                    TransactionPollResult.Failed("Processing finished without any output")
+                }
+            }
+
+            is SessionFetchState.Expired -> {
+                dataManager.updateUploadStage(sessionId, TransactionStage.FAILURE.name)
+                logger.warn(TAG, "Session expired: $sessionId")
+                TransactionPollResult.Failed("Session expired before processing")
+            }
+
+            is SessionFetchState.Error -> {
+                logger.error(TAG, "Result fetch failed: $sessionId - ${state.message}")
+                TransactionPollResult.Failed(state.message)
+            }
+
+            // poll() never returns Processing; null means it timed out
+            SessionFetchState.Processing, null -> TransactionPollResult.Timeout
+        }
+    }
+
+    private fun ScribeResultResponse.hasUsableOutput(): Boolean {
+        val results = data?.templateResults ?: return false
+        return !results.transcript.isNullOrEmpty() ||
+            results.custom.orEmpty().any { it?.status in USABLE_STATES } ||
+            results.integration.orEmpty().any { it?.status in USABLE_STATES }
     }
 
     /** Marks the session cancelled on the server. Best effort: failures are only logged. */
