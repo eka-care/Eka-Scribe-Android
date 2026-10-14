@@ -70,3 +70,25 @@ internal data class SessionsApiError(
 
 internal fun SessionsErrorResponse?.readableMessage(fallback: String): String =
     this?.error?.message ?: this?.message ?: this?.error?.code ?: fallback
+
+/** `POST /voice/api/v1/documents` response: `{ "status", "data": Document }`. */
+@Keep
+internal data class DocumentEnvelopeResponse(
+    @SerializedName("status")
+    val status: String?,
+    @SerializedName("data")
+    val data: DocumentData?
+) {
+    @Keep
+    data class DocumentData(
+        @SerializedName("document_id")
+        val documentId: String?,
+        @SerializedName("session_id")
+        val sessionId: String?,
+        @SerializedName("status")
+        val status: String?,
+        /** PUT URL for the document content (valid for a short time). */
+        @SerializedName("presigned_url")
+        val presignedUrl: String?
+    )
+}

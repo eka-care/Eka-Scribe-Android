@@ -3,6 +3,7 @@ package com.eka.scribesdk.session
 import com.eka.scribesdk.api.models.OutputTemplate
 import com.eka.scribesdk.api.models.PatientDetail
 import com.eka.scribesdk.api.models.SessionConfig
+import com.eka.scribesdk.api.models.SessionData
 import com.eka.scribesdk.common.logging.NoOpLogger
 import com.eka.scribesdk.data.DataManager
 import com.eka.scribesdk.data.local.db.entity.ApiFlow
@@ -10,6 +11,7 @@ import com.eka.scribesdk.data.local.db.entity.AudioChunkEntity
 import com.eka.scribesdk.data.local.db.entity.SessionEntity
 import com.eka.scribesdk.data.local.db.entity.TransactionStage
 import com.eka.scribesdk.data.remote.models.responses.CreateSessionResponse
+import com.eka.scribesdk.data.remote.models.responses.DocumentEnvelopeResponse
 import com.eka.scribesdk.data.remote.models.responses.EndSessionResponse
 import com.eka.scribesdk.data.remote.models.responses.GetSessionResponse
 import com.eka.scribesdk.data.remote.models.responses.PatchSessionResponse
@@ -76,6 +78,8 @@ internal class SessionsApiFlowTest {
         var endResponse: NetworkResponse<EndSessionResponse, SessionsErrorResponse>? = null
         val getResponses = ArrayDeque<NetworkResponse<GetSessionResponse, SessionsErrorResponse>>()
         var getCalls = 0
+        val upsertBodies = mutableListOf<JsonObject>()
+        var upsertResponse: NetworkResponse<DocumentEnvelopeResponse, SessionsErrorResponse>? = null
 
         override suspend fun createSession(request: JsonObject) =
             createResponse!!.also { createBodies += request }
@@ -88,6 +92,9 @@ internal class SessionsApiFlowTest {
 
         override suspend fun endSession(sessionId: String, request: JsonObject) =
             endResponse!!.also { endBodies += request }
+
+        override suspend fun upsertDocument(request: JsonObject) =
+            upsertResponse!!.also { upsertBodies += request }
 
         override suspend fun getSession(sessionId: String): NetworkResponse<GetSessionResponse, SessionsErrorResponse> {
             getCalls++
@@ -318,6 +325,51 @@ internal class SessionsApiFlowTest {
 
         assertTrue(result is TransactionPollResult.Failed)
         assertEquals(1, api.getCalls)
+    }
+
+    // ---- SessionsDocumentWriter ----
+
+    private fun uploadUrlOk(url: String = "https://s3.example/put") =
+        netSuccess<DocumentEnvelopeResponse, SessionsErrorResponse>(
+            DocumentEnvelopeResponse("success", DocumentEnvelopeResponse.DocumentData("doc-1", SESSION_ID, "success", url))
+        )
+
+    @Test
+    fun `document writer gets an upload url and PUTs the base64 content`() = runTest {
+        val api = FakeSessionsApi().apply { upsertResponse = uploadUrlOk() }
+        val puts = mutableListOf<Pair<String, String>>()
+        val writer = SessionsDocumentWriter(api, NoOpLogger()) { url, body -> puts += url to body; true }
+
+        val result = writer.save(SESSION_ID, listOf(SessionData(templateId = "t1", documentId = "doc-1", data = "SGVsbG8=")))
+
+        assertTrue(result.isSuccess)
+        val body = api.upsertBodies.single()
+        assertEquals(SESSION_ID, body["session_id"].asString)
+        assertEquals("doc-1", body["document_id"].asString)
+        assertEquals(listOf("https://s3.example/put" to "SGVsbG8="), puts)
+    }
+
+    @Test
+    fun `document writer refreshes the url once when the PUT fails`() = runTest {
+        val api = FakeSessionsApi().apply { upsertResponse = uploadUrlOk() }
+        var attempts = 0
+        val writer = SessionsDocumentWriter(api, NoOpLogger()) { _, _ -> ++attempts == 2 }
+
+        val result = writer.save(SESSION_ID, listOf(SessionData("t1", "doc-1", "SGVsbG8=")))
+
+        assertTrue(result.isSuccess)
+        assertEquals(2, api.upsertBodies.size)
+    }
+
+    @Test
+    fun `document writer fails when the server refuses the update`() = runTest {
+        val api = FakeSessionsApi().apply { upsertResponse = netServerError("Document not found", 404) }
+        val writer = SessionsDocumentWriter(api, NoOpLogger()) { _, _ -> true }
+
+        val result = writer.save(SESSION_ID, listOf(SessionData("t1", "doc-1", "SGVsbG8=")))
+
+        assertTrue(result.isFailure)
+        assertEquals("Document not found", result.exceptionOrNull()?.message)
     }
 
     @Test
