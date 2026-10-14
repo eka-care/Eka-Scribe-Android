@@ -29,6 +29,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -56,6 +57,9 @@ import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.LocalContext
+import com.eka.scribesdk.api.models.UploadStage
 
 class TestActivity : ComponentActivity() {
     companion object {
@@ -212,7 +216,8 @@ class TestActivity : ComponentActivity() {
                     baseUrl = "https://api.eka.care/",
                     headers = mapOf()
                 ),
-                debugMode = true
+                debugMode = true,
+                useSessionsApi = true
             ),
             context = this,
             callback = MyScribeCallback()
@@ -602,6 +607,45 @@ fun TestScreen(
                 enabled = canStop
             ) {
                 Text("STOP RECORDING", style = MaterialTheme.typography.titleMedium)
+            }
+
+            // CANCEL: discards the session; on the Sessions API it also PATCHes it as cancelled
+            OutlinedButton(
+                onClick = { EkaScribe.cancelSession() },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp),
+                enabled = canStop
+            ) {
+                Text("CANCEL RECORDING")
+            }
+
+            // RETRY: resumes the newest unfinished session (e.g. after the app was killed mid-recording)
+            val retryScope = rememberCoroutineScope()
+            val retryContext = LocalContext.current
+            OutlinedButton(
+                onClick = {
+                    retryScope.launch {
+                        val finished = setOf(UploadStage.COMPLETED, UploadStage.FAILURE, UploadStage.ERROR)
+                        val unfinished = EkaScribe.getSessions()
+                            .filter { it.uploadStage !in finished }
+                            .maxByOrNull { it.createdAt }
+                        if (unfinished == null) {
+                            Toast.makeText(retryContext, "No unfinished session", Toast.LENGTH_SHORT).show()
+                            return@launch
+                        }
+                        Log.i("TestActivity", "Retrying ${unfinished.sessionId} from stage ${unfinished.uploadStage}")
+                        val result = EkaScribe.retrySession(unfinished.sessionId)
+                        Log.i("TestActivity", "Retry result for ${unfinished.sessionId}: $result")
+                        Toast.makeText(retryContext, "Retry: $result", Toast.LENGTH_LONG).show()
+                    }
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp),
+                enabled = !canStop
+            ) {
+                Text("RETRY LAST UNFINISHED SESSION")
             }
 
             Spacer(modifier = Modifier.height(16.dp))
