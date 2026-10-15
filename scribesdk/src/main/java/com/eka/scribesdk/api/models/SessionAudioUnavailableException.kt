@@ -1,6 +1,9 @@
 package com.eka.scribesdk.api.models
 
-/** Why [com.eka.scribesdk.api.EkaScribe.downloadSessionAudio] could not return the recording. */
+/**
+ * Why the server recording is not available (see [com.eka.scribesdk.api.EkaScribe.getSessionAudioLink]
+ * and [com.eka.scribesdk.api.EkaScribe.downloadSessionAudio]).
+ */
 class SessionAudioUnavailableException(
     val reason: Reason,
     message: String

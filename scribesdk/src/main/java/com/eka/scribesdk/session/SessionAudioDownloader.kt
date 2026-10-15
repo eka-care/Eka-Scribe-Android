@@ -1,5 +1,6 @@
 package com.eka.scribesdk.session
 
+import com.eka.scribesdk.api.models.SessionAudioLink
 import com.eka.scribesdk.api.models.SessionAudioUnavailableException
 import com.eka.scribesdk.api.models.SessionAudioUnavailableException.Reason
 import com.eka.scribesdk.common.logging.Logger
@@ -12,31 +13,30 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import java.io.File
+import java.io.OutputStream
 import java.text.ParseException
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 /**
- * The session's full recording as a local file: the one on this device if present, otherwise
- * downloaded via Get Session Audio (`GET /voice/v1/sessions/{id}/audio`, a fresh presigned MP3 URL)
- * while the session is inside the 24-hour retention window. Downloads land in the SDK output dir
- * as `<sessionId>_full_audio.mp3`, where locally recorded audio lives too.
+ * The server copy of a session's recording, via Get Session Audio
+ * (`GET /voice/v1/sessions/{id}/audio`, a fresh presigned URL for the combined MP3). Only for
+ * sessions under 24 hours old (retention); older ones fail with [Reason.EXPIRED] without a call.
+ * For recordings not on this device, e.g. sessions recorded on another phone.
  */
 internal class SessionAudioDownloader(
     private val apiService: SessionsApiService,
     private val dataManager: DataManager,
-    private val outputDir: File,
     private val logger: Logger,
     private val now: () -> Long = System::currentTimeMillis,
-    /** Writes the body of [url] to [target]; true on success. Replaceable in tests. */
-    private val downloadTo: suspend (url: String, target: File) -> Boolean = { url, target -> defaultDownload(url, target) }
+    /** Streams the body of [url] into [destination]; true on success. Replaceable in tests. */
+    private val streamTo: suspend (url: String, destination: OutputStream) -> Boolean =
+        { url, destination -> defaultStream(url, destination) }
 ) {
     companion object {
         private const val TAG = "SessionAudioDownloader"
         internal val RETENTION_MS = TimeUnit.HOURS.toMillis(24)
-        private const val FULL_AUDIO_MARKER = "_full_audio."
         private const val HTTP_FORBIDDEN = 403
         private const val HTTP_NOT_FOUND = 404
         private const val HTTP_GONE = 410
@@ -50,62 +50,55 @@ internal class SessionAudioDownloader(
                 .build()
         }
 
-        private suspend fun defaultDownload(url: String, target: File): Boolean = withContext(Dispatchers.IO) {
-            plainClient.newCall(Request.Builder().url(url).get().build()).execute().use { response ->
-                val body = response.body
-                if (!response.isSuccessful || body == null) return@use false
-                target.outputStream().use { out -> body.byteStream().copyTo(out) }
-                true
+        private suspend fun defaultStream(url: String, destination: OutputStream): Boolean =
+            withContext(Dispatchers.IO) {
+                plainClient.newCall(Request.Builder().url(url).get().build()).execute().use { response ->
+                    val body = response.body
+                    if (!response.isSuccessful || body == null) return@use false
+                    body.byteStream().copyTo(destination)
+                    true
+                }
             }
+    }
+
+    /** A fresh download link, if the server has the recording and the session is under 24 hours old. */
+    suspend fun link(sessionId: String): Result<SessionAudioLink> {
+        val createdAt = createdAtMillis(sessionId)
+        if (createdAt != null && now() - createdAt > RETENTION_MS) {
+            return unavailable(Reason.EXPIRED, "Recordings are kept for 24 hours")
+        }
+        return when (val response = apiService.getSessionAudio(sessionId)) {
+            is NetworkResponse.Success -> {
+                val url = response.body.audioUrl?.takeIf { it.isNotBlank() }
+                    ?: return unavailable(Reason.FAILED, "No download link was returned")
+                Result.success(SessionAudioLink(url, response.body.expiresAt?.let { it * 1000 }))
+            }
+
+            is NetworkResponse.ServerError -> {
+                val reason = reasonFor(response.code, response.body?.error?.code)
+                unavailable(reason, response.body.readableMessage("Recording unavailable (HTTP ${response.code})"))
+            }
+
+            is NetworkResponse.NetworkError -> Result.failure(response.error)
+            is NetworkResponse.UnknownError -> Result.failure(response.error)
         }
     }
 
-    suspend fun download(sessionId: String): Result<File> {
-        localFile(sessionId)?.let { return Result.success(it) }
-
-        val createdAt = createdAtMillis(sessionId)
-        if (createdAt != null && now() - createdAt > RETENTION_MS) {
-            return unavailable(Reason.EXPIRED, "Recordings are kept for 24 hours. This one has expired.")
-        }
-
-        val url = when (val response = apiService.getSessionAudio(sessionId)) {
-            is NetworkResponse.Success -> response.body.audioUrl?.takeIf { it.isNotBlank() }
-                ?: return unavailable(Reason.FAILED, "No download link was returned for this recording.")
-
-            is NetworkResponse.ServerError -> return unavailable(
-                reasonFor(response.code, response.body?.error?.code),
-                messageFor(response.code, response.body?.error?.code, response.body.readableMessage("Recording unavailable"))
-            )
-
-            is NetworkResponse.NetworkError -> return Result.failure(response.error)
-            is NetworkResponse.UnknownError -> return Result.failure(response.error)
-        }
-
-        val target = File(outputDir, "$sessionId${FULL_AUDIO_MARKER}mp3")
-        val partial = File(outputDir, "$sessionId.audio-download.tmp")
-        val downloaded = try {
-            outputDir.mkdirs()
-            downloadTo(url, partial) && partial.renameTo(target)
+    /** Fetches a fresh link and streams the MP3 into [destination] (not closed here). */
+    suspend fun download(sessionId: String, destination: OutputStream): Result<Unit> {
+        val link = link(sessionId).getOrElse { return Result.failure(it) }
+        val streamed = try {
+            streamTo(link.url, destination)
         } catch (e: CancellationException) {
-            partial.delete()
             throw e
         } catch (e: Exception) {
             logger.warn(TAG, "Recording download failed: $sessionId", e)
             false
         }
-        if (!downloaded) {
-            partial.delete()
-            return unavailable(Reason.FAILED, "Couldn't download the recording. Please try again.")
-        }
-        // Age the file by the recording time so host-side 24h retention stays relative to the consultation
-        createdAt?.let { target.setLastModified(it) }
-        logger.info(TAG, "Recording downloaded: $sessionId (${target.length()} bytes)")
-        return Result.success(target)
+        if (!streamed) return unavailable(Reason.FAILED, "Couldn't download the recording")
+        logger.info(TAG, "Recording downloaded: $sessionId")
+        return Result.success(Unit)
     }
-
-    private fun localFile(sessionId: String): File? =
-        outputDir.listFiles { file -> file.name.startsWith(sessionId + FULL_AUDIO_MARKER) && file.length() > 0 }
-            ?.firstOrNull()
 
     /** Local DB for sessions recorded here, else `created_at` from Get Session; null if unknown. */
     private suspend fun createdAtMillis(sessionId: String): Long? {
@@ -124,15 +117,8 @@ internal class SessionAudioDownloader(
         else -> Reason.FAILED
     }
 
-    private fun messageFor(code: Int?, errorCode: String?, serverMessage: String): String = when (reasonFor(code, errorCode)) {
-        Reason.NOT_ENABLED -> "Full audio access isn't enabled for this account."
-        Reason.NOT_READY -> "The recording is still being prepared. Please try again in a moment."
-        Reason.EXPIRED, Reason.NOT_FOUND -> "Recording is no longer available."
-        Reason.FAILED -> serverMessage
-    }
-
-    private fun unavailable(reason: Reason, message: String): Result<File> {
-        logger.warn(TAG, "Recording unavailable ($reason): $message")
+    private fun <T> unavailable(reason: Reason, message: String): Result<T> {
+        logger.info(TAG, "Recording unavailable ($reason): $message")
         return Result.failure(SessionAudioUnavailableException(reason, message))
     }
 }

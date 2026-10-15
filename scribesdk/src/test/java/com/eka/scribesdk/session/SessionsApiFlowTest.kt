@@ -41,9 +41,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.io.File
 import java.io.IOException
-import java.nio.file.Files
 import retrofit2.Response
 
 internal class SessionsApiFlowTest {
@@ -333,12 +331,10 @@ internal class SessionsApiFlowTest {
     // ---- recording download (Get Session Audio) ----
 
     private val hourMs = 60 * 60 * 1000L
-    private val nowMs = 1_800_000_000_000L
-
-    private fun audioDir(): File = Files.createTempDirectory("scribe-audio").toFile()
+    private val nowMs = 1_800_000_000_000L // 2027-01-15T08:00:00Z
 
     private fun audioOk() = netSuccess<SessionAudioResponse, SessionsErrorResponse>(
-        SessionAudioResponse(SESSION_ID, "success", "https://s3.example/audio.mp3?sig", 86_400, null)
+        SessionAudioResponse(SESSION_ID, "success", "https://s3.example/audio.mp3?sig", 86_400, 1_800_086_400)
     )
 
     private fun audioError(code: Int, errorCode: String) = NetworkResponse.ServerError<SessionAudioResponse, SessionsErrorResponse>(
@@ -350,48 +346,34 @@ internal class SessionsApiFlowTest {
         coEvery { dm.getSession(SESSION_ID) } returns createdAt?.let { sessionsEntity().copy(createdAt = it) }
     }
 
-    private fun downloader(api: FakeSessionsApi, dm: DataManager, dir: File, downloads: MutableList<String> = mutableListOf()) =
-        SessionAudioDownloader(api, dm, dir, NoOpLogger(), now = { nowMs }) { url, target ->
-            downloads += url
-            target.writeText("mp3-bytes")
-            true
-        }
-
-    private fun Result<File>.reason() = (exceptionOrNull() as SessionAudioUnavailableException).reason
-
-    @Test
-    fun `recording on this device is returned without any call`() = runTest {
-        val dir = audioDir()
-        val local = File(dir, "${SESSION_ID}_full_audio.m4a").apply { writeText("local") }
-        val api = FakeSessionsApi()
-
-        val result = downloader(api, dmWithSession(nowMs - 30 * hourMs), dir).download(SESSION_ID)
-
-        assertEquals(local, result.getOrNull())
-        assertEquals(0, api.audioCalls)
+    private fun downloader(
+        api: FakeSessionsApi,
+        dm: DataManager,
+        streamed: MutableList<String> = mutableListOf(),
+        succeeds: Boolean = true
+    ) = SessionAudioDownloader(api, dm, NoOpLogger(), now = { nowMs }) { url, destination ->
+        streamed += url
+        destination.write("mp3-bytes".toByteArray())
+        succeeds
     }
 
+    private fun <T> Result<T>.reason() = (exceptionOrNull() as SessionAudioUnavailableException).reason
+
     @Test
-    fun `missing recording under 24 hours is downloaded next to local recordings`() = runTest {
-        val dir = audioDir()
+    fun `link is returned for a session under 24 hours`() = runTest {
         val api = FakeSessionsApi().apply { audioResponse = audioOk() }
-        val downloads = mutableListOf<String>()
-        val createdAt = nowMs - 2 * hourMs
 
-        val file = downloader(api, dmWithSession(createdAt), dir, downloads).download(SESSION_ID).getOrThrow()
+        val link = downloader(api, dmWithSession(nowMs - 2 * hourMs)).link(SESSION_ID).getOrThrow()
 
-        assertEquals("${SESSION_ID}_full_audio.mp3", file.name)
-        assertEquals("mp3-bytes", file.readText())
-        assertEquals(listOf("https://s3.example/audio.mp3?sig"), downloads)
-        assertEquals(createdAt, file.lastModified())
-        assertTrue(dir.listFiles()!!.none { it.name.endsWith(".tmp") })
+        assertEquals("https://s3.example/audio.mp3?sig", link.url)
+        assertEquals(1_800_086_400_000L, link.expiresAtMillis)
     }
 
     @Test
-    fun `recording older than 24 hours is expired without calling the audio API`() = runTest {
+    fun `session older than 24 hours has no link and makes no audio call`() = runTest {
         val api = FakeSessionsApi()
 
-        val result = downloader(api, dmWithSession(nowMs - 25 * hourMs), audioDir()).download(SESSION_ID)
+        val result = downloader(api, dmWithSession(nowMs - 25 * hourMs)).link(SESSION_ID)
 
         assertEquals(SessionAudioUnavailableException.Reason.EXPIRED, result.reason())
         assertEquals(0, api.audioCalls)
@@ -399,20 +381,20 @@ internal class SessionsApiFlowTest {
 
     @Test
     fun `session from another device uses the server created_at for the 24 hour check`() = runTest {
-        // nowMs is 2027-01-15T08:00:00Z
         val old = FakeSessionsApi().apply {
             getResponses.addLast(netSuccess(processingBody().copy(createdAt = "2027-01-14T07:59:00Z")))
         }
-        val oldResult = downloader(old, dmWithSession(null), audioDir()).download(SESSION_ID)
-        assertEquals(SessionAudioUnavailableException.Reason.EXPIRED, oldResult.reason())
+        assertEquals(
+            SessionAudioUnavailableException.Reason.EXPIRED,
+            downloader(old, dmWithSession(null)).link(SESSION_ID).reason()
+        )
         assertEquals(0, old.audioCalls)
 
         val recent = FakeSessionsApi().apply {
             getResponses.addLast(netSuccess(processingBody().copy(createdAt = "2027-01-15T06:30:00.123456Z")))
             audioResponse = audioOk()
         }
-        val recentResult = downloader(recent, dmWithSession(null), audioDir()).download(SESSION_ID)
-        assertTrue(recentResult.isSuccess)
+        assertTrue(downloader(recent, dmWithSession(null)).link(SESSION_ID).isSuccess)
         assertEquals(1, recent.audioCalls)
     }
 
@@ -425,24 +407,36 @@ internal class SessionsApiFlowTest {
         )
         for ((response, reason) in cases) {
             val api = FakeSessionsApi().apply { audioResponse = response }
-            val result = downloader(api, dmWithSession(nowMs - hourMs), audioDir()).download(SESSION_ID)
-            assertEquals(reason, result.reason())
+            assertEquals(reason, downloader(api, dmWithSession(nowMs - hourMs)).link(SESSION_ID).reason())
         }
     }
 
     @Test
-    fun `a failed download leaves no partial file`() = runTest {
-        val dir = audioDir()
+    fun `download streams the recording into the destination`() = runTest {
         val api = FakeSessionsApi().apply { audioResponse = audioOk() }
-        val failing = SessionAudioDownloader(api, dmWithSession(nowMs - hourMs), dir, NoOpLogger(), now = { nowMs }) { _, target ->
-            target.writeText("half")
-            false
-        }
+        val streamed = mutableListOf<String>()
+        val destination = java.io.ByteArrayOutputStream()
 
-        val result = failing.download(SESSION_ID)
+        val result = downloader(api, dmWithSession(nowMs - hourMs), streamed).download(SESSION_ID, destination)
 
-        assertEquals(SessionAudioUnavailableException.Reason.FAILED, result.reason())
-        assertTrue(dir.listFiles()!!.isEmpty())
+        assertTrue(result.isSuccess)
+        assertEquals(listOf("https://s3.example/audio.mp3?sig"), streamed)
+        assertEquals("mp3-bytes", destination.toString())
+    }
+
+    @Test
+    fun `download fails cleanly when the transfer fails or the link is unavailable`() = runTest {
+        val failing = FakeSessionsApi().apply { audioResponse = audioOk() }
+        val failed = downloader(failing, dmWithSession(nowMs - hourMs), succeeds = false)
+            .download(SESSION_ID, java.io.ByteArrayOutputStream())
+        assertEquals(SessionAudioUnavailableException.Reason.FAILED, failed.reason())
+
+        val expired = FakeSessionsApi()
+        val streamed = mutableListOf<String>()
+        val result = downloader(expired, dmWithSession(nowMs - 30 * hourMs), streamed)
+            .download(SESSION_ID, java.io.ByteArrayOutputStream())
+        assertEquals(SessionAudioUnavailableException.Reason.EXPIRED, result.reason())
+        assertTrue(streamed.isEmpty())
     }
 
     @Test

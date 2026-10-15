@@ -6,6 +6,8 @@ import com.eka.networking.client.NetworkConfig
 import com.eka.scribesdk.BuildConfig
 import com.eka.scribesdk.analyser.AnalyserState
 import com.eka.scribesdk.analyser.ModelDownloader
+import com.eka.scribesdk.api.models.SessionAudioLink
+import com.eka.scribesdk.api.models.SessionAudioUnavailableException
 import com.eka.scribesdk.api.models.AudioQualityMetrics
 import com.eka.scribesdk.api.models.ScribeError
 import com.eka.scribesdk.api.models.ScribeHistoryItem
@@ -66,6 +68,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.OutputStream
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -240,7 +243,6 @@ object EkaScribe {
         sessionAudioDownloader = SessionAudioDownloader(
             apiService = sessionsApiService,
             dataManager = dm,
-            outputDir = outputDir,
             logger = logger
         )
 
@@ -422,17 +424,28 @@ object EkaScribe {
     }
 
     /**
-     * The session's full recording as a local MP3/M4A file. Returns the file on this device when
-     * present; otherwise, if the session is under 24 hours old, downloads it via Get Session Audio
-     * (`GET /voice/v1/sessions/{id}/audio`). Older sessions fail with
-     * [SessionAudioUnavailableException] (reason EXPIRED) without a network call; see its reasons
-     * for the other failures (not ready yet, full audio not enabled, not found, download failed).
+     * A fresh download link for the session's recording on the server (Get Session Audio), for
+     * recordings not on this device, e.g. sessions recorded on another phone. Sessions older than
+     * 24 hours fail with [SessionAudioUnavailableException] (EXPIRED) without a network call; other
+     * reasons: NOT_READY (still being combined), NOT_ENABLED (full audio off for the business),
+     * NOT_FOUND. Use it to decide whether to offer a download; links expire, so don't store them.
      */
-    suspend fun downloadSessionAudio(sessionId: String): Result<File> = withContext(Dispatchers.IO) {
+    suspend fun getSessionAudioLink(sessionId: String): Result<SessionAudioLink> = withContext(Dispatchers.IO) {
         val downloader = sessionAudioDownloader
             ?: return@withContext Result.failure(IllegalStateException("EkaScribe is not initialized"))
-        downloader.download(sessionId)
+        downloader.link(sessionId)
     }
+
+    /**
+     * Downloads the session's recording (MP3) from the server into [destination], fetching a fresh
+     * link first. Same rules and failures as [getSessionAudioLink]. [destination] is not closed.
+     */
+    suspend fun downloadSessionAudio(sessionId: String, destination: OutputStream): Result<Unit> =
+        withContext(Dispatchers.IO) {
+            val downloader = sessionAudioDownloader
+                ?: return@withContext Result.failure(IllegalStateException("EkaScribe is not initialized"))
+            downloader.download(sessionId, destination)
+        }
 
     /**
      * Observe the upload progress (upload stage) for a session as a Flow.
