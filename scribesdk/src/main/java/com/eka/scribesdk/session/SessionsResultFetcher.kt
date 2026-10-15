@@ -3,6 +3,7 @@ package com.eka.scribesdk.session
 import com.eka.scribesdk.common.logging.Logger
 import com.eka.scribesdk.data.remote.models.responses.ScribeResultResponse
 import com.eka.scribesdk.data.remote.models.responses.readableMessage
+import com.eka.scribesdk.data.remote.models.responses.templateIds
 import com.eka.scribesdk.data.remote.models.responses.toScribeResultResponse
 import com.eka.scribesdk.data.remote.services.SessionsApiService
 import com.haroldadmin.cnradapter.NetworkResponse
@@ -29,8 +30,9 @@ internal sealed class SessionFetchState {
 internal class SessionsResultFetcher(
     private val apiService: SessionsApiService,
     private val logger: Logger,
-    /** templateId -> name for a session (from its saved config); used as note titles. */
-    private val templateNames: suspend (sessionId: String) -> Map<String, String> = { emptyMap() }
+    /** templateId -> name for a session's templates; used as note titles. */
+    private val templateNames: suspend (sessionId: String, templateIds: List<String>) -> Map<String, String> =
+        { _, _ -> emptyMap() }
 ) {
     companion object {
         private const val TAG = "SessionsResultFetcher"
@@ -49,7 +51,7 @@ internal class SessionsResultFetcher(
 
                 else -> SessionFetchState.Done(
                     result = response.body.toScribeResultResponse(
-                        templateNames = templateNames(sessionId)
+                        templateNames = templateNames(sessionId, response.body.templateIds())
                     ),
                     partial = response.code == HTTP_PARTIAL
                 )
