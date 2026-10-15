@@ -5,6 +5,7 @@ import com.eka.scribesdk.data.remote.models.responses.DocumentEnvelopeResponse
 import com.eka.scribesdk.data.remote.models.responses.EndSessionResponse
 import com.eka.scribesdk.data.remote.models.responses.GetSessionResponse
 import com.eka.scribesdk.data.remote.models.responses.PatchSessionResponse
+import com.eka.scribesdk.data.remote.models.responses.ProcessTemplateResponse
 import com.eka.scribesdk.data.remote.models.responses.SessionsErrorResponse
 import com.eka.scribesdk.data.remote.models.responses.UploadAudioResponse
 import com.google.gson.JsonObject
@@ -15,6 +16,7 @@ import retrofit2.http.GET
 import retrofit2.http.PATCH
 import retrofit2.http.POST
 import retrofit2.http.Path
+import retrofit2.http.Query
 
 /**
  * EkaScribe Sessions API (`/voice/v1/sessions`).
@@ -67,6 +69,24 @@ internal interface SessionsApiService {
     suspend fun listSessionDocuments(
         @Path("session_id") sessionId: String
     ): NetworkResponse<JsonObject, SessionsErrorResponse>
+
+    /**
+     * Process Template: generate another note for an ended session (async). Returns the new
+     * `document_id`; poll [getSessionDocument] until it is done.
+     * Docs: /ekascribe/api-reference/sessions/process-template
+     */
+    @POST("voice/v1/sessions/{session_id}/process/template/{template_id}")
+    suspend fun processTemplate(
+        @Path("session_id") sessionId: String,
+        @Path("template_id") templateId: String
+    ): NetworkResponse<ProcessTemplateResponse, SessionsErrorResponse>
+
+    /** Get Session filtered to one document (documented `document_id` query parameter). */
+    @GET("voice/v1/sessions/{session_id}")
+    suspend fun getSessionDocument(
+        @Path("session_id") sessionId: String,
+        @Query("document_id") documentId: String
+    ): NetworkResponse<GetSessionResponse, SessionsErrorResponse>
 
     /** 202 = still processing, 200 = completed, 206 = partial; 410 (expired) arrives as ServerError. */
     @GET("voice/v1/sessions/{session_id}")

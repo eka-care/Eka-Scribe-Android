@@ -6,6 +6,7 @@ import com.eka.scribesdk.api.models.SessionConfig
 import com.eka.scribesdk.api.models.SessionData
 import com.eka.scribesdk.common.logging.NoOpLogger
 import com.eka.scribesdk.data.DataManager
+import com.eka.scribesdk.data.ScribeRepository
 import com.eka.scribesdk.data.local.db.entity.ApiFlow
 import com.eka.scribesdk.data.local.db.entity.AudioChunkEntity
 import com.eka.scribesdk.data.local.db.entity.SessionEntity
@@ -15,6 +16,7 @@ import com.eka.scribesdk.data.remote.models.responses.DocumentEnvelopeResponse
 import com.eka.scribesdk.data.remote.models.responses.EndSessionResponse
 import com.eka.scribesdk.data.remote.models.responses.GetSessionResponse
 import com.eka.scribesdk.data.remote.models.responses.PatchSessionResponse
+import com.eka.scribesdk.data.remote.models.responses.ProcessTemplateResponse
 import com.eka.scribesdk.data.remote.models.responses.SessionsApiError
 import com.eka.scribesdk.data.remote.models.responses.SessionsErrorResponse
 import com.eka.scribesdk.data.remote.models.responses.UploadAudioResponse
@@ -37,6 +39,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.IOException
 import retrofit2.Response
 
 internal class SessionsApiFlowTest {
@@ -82,6 +85,9 @@ internal class SessionsApiFlowTest {
         var upsertResponse: NetworkResponse<DocumentEnvelopeResponse, SessionsErrorResponse>? = null
         /** null = the call throws, like a network failure. */
         var documentsResponse: NetworkResponse<JsonObject, SessionsErrorResponse>? = null
+        var processResponse: NetworkResponse<ProcessTemplateResponse, SessionsErrorResponse>? = null
+        val processCalls = mutableListOf<Pair<String, String>>()
+        val documentQueries = mutableListOf<String>()
 
         override suspend fun createSession(request: JsonObject) =
             createResponse!!.also { createBodies += request }
@@ -97,6 +103,12 @@ internal class SessionsApiFlowTest {
 
         override suspend fun upsertDocument(request: JsonObject) =
             upsertResponse!!.also { upsertBodies += request }
+
+        override suspend fun processTemplate(sessionId: String, templateId: String) =
+            processResponse!!.also { processCalls += sessionId to templateId }
+
+        override suspend fun getSessionDocument(sessionId: String, documentId: String) =
+            getSession(sessionId).also { documentQueries += documentId }
 
         override suspend fun listSessionDocuments(sessionId: String) =
             documentsResponse ?: error("documents call failed")
@@ -307,6 +319,113 @@ internal class SessionsApiFlowTest {
         assertEquals(2, api.getCalls)
         assertTrue(result is TransactionPollResult.Failed)
         coVerify { dm.updateUploadStage(SESSION_ID, TransactionStage.FAILURE.name) }
+    }
+
+    // ---- convert to another template (Process Template) ----
+
+    private fun processStarted(documentId: String? = "d9") = netSuccess<ProcessTemplateResponse, SessionsErrorResponse>(
+        ProcessTemplateResponse(SESSION_ID, "t-9", documentId, "in-progress", "Template generation in progress"),
+        code = 202
+    )
+
+    private fun documentBody(status: String, documentId: String = "d9") = GetSessionResponse(
+        sessionId = SESSION_ID, status = "completed", createdAt = null, languageDetected = null,
+        transcript = null, message = null,
+        templates = JsonParser.parseString("""[{"t-9": {"status": "$status", "document_id": "$documentId"}}]""")
+    )
+
+    private fun processor(api: FakeSessionsApi, maxAttempts: Int = 5) =
+        SessionsTemplateProcessor(api, NoOpLogger(), maxAttempts = maxAttempts, intervalMs = 10)
+
+    @Test
+    fun `convert starts Process Template and waits for the new note`() = runTest {
+        val api = FakeSessionsApi().apply {
+            processResponse = processStarted()
+            getResponses.addLast(netSuccess(processingBody(), code = 202))
+            getResponses.addLast(netSuccess(documentBody("in-progress")))
+            getResponses.addLast(netSuccess(documentBody("success")))
+        }
+
+        val result = processor(api).process(SESSION_ID, "t-9")
+
+        assertTrue(result.isSuccess)
+        assertEquals(listOf(SESSION_ID to "t-9"), api.processCalls)
+        assertEquals(listOf("d9", "d9", "d9"), api.documentQueries)
+    }
+
+    @Test
+    fun `convert polls the whole session when no document id comes back`() = runTest {
+        val api = FakeSessionsApi().apply {
+            processResponse = processStarted(documentId = null)
+            getResponses.addLast(netSuccess(documentBody("success")))
+        }
+
+        val result = processor(api).process(SESSION_ID, "t-9")
+
+        assertTrue(result.isSuccess)
+        assertTrue(api.documentQueries.isEmpty())
+        assertEquals(1, api.getCalls)
+    }
+
+    @Test
+    fun `convert fails when the new note fails`() = runTest {
+        val api = FakeSessionsApi().apply {
+            processResponse = processStarted()
+            getResponses.addLast(netSuccess(documentBody("failure")))
+        }
+
+        val result = processor(api).process(SESSION_ID, "t-9")
+
+        assertTrue(result.isFailure)
+        assertEquals(1, api.getCalls)
+    }
+
+    @Test
+    fun `convert fails without polling when Process Template is refused`() = runTest {
+        val api = FakeSessionsApi().apply { processResponse = netServerError("Session not found", 404) }
+
+        val result = processor(api).process(SESSION_ID, "t-9")
+
+        assertEquals("Session not found", result.exceptionOrNull()?.message)
+        assertEquals(0, api.getCalls)
+    }
+
+    @Test
+    fun `convert keeps polling through server errors and gives up after the budget`() = runTest {
+        val api = FakeSessionsApi().apply {
+            processResponse = processStarted()
+            getResponses.addLast(netServerError("busy", 503))
+            getResponses.addLast(netSuccess(documentBody("in-progress")))
+        }
+
+        val result = processor(api, maxAttempts = 3).process(SESSION_ID, "t-9")
+
+        assertTrue(result.isFailure)
+        assertEquals(3, api.getCalls)
+    }
+
+    @Test
+    fun `repository converts Sessions API sessions with Process Template, legacy with convert-to-template`() = runTest {
+        val api = FakeSessionsApi().apply {
+            processResponse = processStarted()
+            getResponses.addLast(netSuccess(documentBody("success")))
+        }
+        val legacyApi = mockk<ScribeApiService>()
+        coEvery { legacyApi.convertTransactionResult("legacy-session", "t-9") } returns
+            NetworkResponse.NetworkError(IOException("legacy endpoint called"))
+        val repository = ScribeRepository(
+            apiService = legacyApi,
+            logger = NoOpLogger(),
+            usesSessionsApi = { sessionId -> sessionId == SESSION_ID },
+            sessionsTemplateProcessor = processor(api)
+        )
+
+        assertTrue(repository.convertTransactionResult(SESSION_ID, "t-9").isSuccess)
+        assertEquals(listOf(SESSION_ID to "t-9"), api.processCalls)
+
+        val legacy = repository.convertTransactionResult("legacy-session", "t-9")
+        assertEquals("legacy endpoint called", legacy.exceptionOrNull()?.message)
+        assertEquals(1, api.processCalls.size)
     }
 
     // ---- note titles ----

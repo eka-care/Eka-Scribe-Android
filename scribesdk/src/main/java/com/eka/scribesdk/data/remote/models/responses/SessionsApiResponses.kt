@@ -71,6 +71,22 @@ internal data class SessionsApiError(
 internal fun SessionsErrorResponse?.readableMessage(fallback: String): String =
     this?.error?.message ?: this?.message ?: this?.error?.code ?: fallback
 
+/** 202 body of `POST /voice/v1/sessions/{session_id}/process/template/{template_id}`. */
+@Keep
+internal data class ProcessTemplateResponse(
+    @SerializedName("session_id")
+    val sessionId: String?,
+    @SerializedName("template_id")
+    val templateId: String?,
+    /** The document being generated; poll Get Session with `?document_id=` until it is done. */
+    @SerializedName("document_id")
+    val documentId: String?,
+    @SerializedName("status")
+    val status: String?,
+    @SerializedName("message")
+    val message: String?
+)
+
 /** `POST /voice/api/v1/documents` response: `{ "status", "data": Document }`. */
 @Keep
 internal data class DocumentEnvelopeResponse(

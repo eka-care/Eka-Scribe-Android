@@ -47,6 +47,7 @@ import com.eka.scribesdk.session.SessionManager
 import com.eka.scribesdk.session.SessionsApiFlow
 import com.eka.scribesdk.session.SessionsDocumentWriter
 import com.eka.scribesdk.session.SessionsResultFetcher
+import com.eka.scribesdk.session.SessionsTemplateProcessor
 import com.eka.scribesdk.session.TemplateNameResolver
 import com.eka.scribesdk.session.TransactionManager
 import com.eka.scribesdk.session.TransactionResult
@@ -277,7 +278,8 @@ object EkaScribe {
             logger = logger,
             sessionsResultFetcher = sessionsResultFetcher,
             usesSessionsApi = { sessionId -> dm.getSession(sessionId)?.apiFlow == ApiFlow.SESSIONS_V1 },
-            sessionsDocumentWriter = SessionsDocumentWriter(apiService = sessionsApiService, logger = logger)
+            sessionsDocumentWriter = SessionsDocumentWriter(apiService = sessionsApiService, logger = logger),
+            sessionsTemplateProcessor = SessionsTemplateProcessor(apiService = sessionsApiService, logger = logger)
         )
 
         sessionManager = SessionManager(
