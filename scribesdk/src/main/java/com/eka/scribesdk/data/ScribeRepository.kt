@@ -20,6 +20,7 @@ import com.eka.scribesdk.data.remote.services.ScribeApiService
 import com.eka.scribesdk.session.SessionFetchState
 import com.eka.scribesdk.session.SessionsDocumentWriter
 import com.eka.scribesdk.session.SessionsResultFetcher
+import com.eka.scribesdk.session.SessionsTemplateProcessor
 import com.haroldadmin.cnradapter.NetworkResponse
 import kotlinx.coroutines.delay
 
@@ -30,7 +31,9 @@ internal class ScribeRepository(
     private val sessionsResultFetcher: SessionsResultFetcher? = null,
     private val usesSessionsApi: suspend (sessionId: String) -> Boolean = { false },
     /** Saves edits for Sessions API sessions via the Documents API; legacy sessions use PATCH v3/status. */
-    private val sessionsDocumentWriter: SessionsDocumentWriter? = null
+    private val sessionsDocumentWriter: SessionsDocumentWriter? = null,
+    /** Convert-to-template for Sessions API sessions via Process Template; legacy keeps convert-to-template. */
+    private val sessionsTemplateProcessor: SessionsTemplateProcessor? = null
 ) {
     companion object {
         private const val TAG = "ScribeRepository"
@@ -76,6 +79,10 @@ internal class ScribeRepository(
         templateId: String
     ): Result<Boolean> {
         return try {
+            val processor = sessionsTemplateProcessor
+            if (processor != null && usesSessionsApi(sessionId)) {
+                return processor.process(sessionId, templateId)
+            }
             when (val response = apiService.convertTransactionResult(sessionId, templateId)) {
                 is NetworkResponse.Success -> {
                     if (response.body.status == "success") {

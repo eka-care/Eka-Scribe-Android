@@ -149,9 +149,14 @@ internal fun GetSessionResponse.toScribeResultResponse(
     )
 }
 
-/** (templateId, documentId) for each note in this result, in response order. */
-internal fun GetSessionResponse.documentRefs(): List<Pair<String, String?>> =
-    templateEntries().map { (templateId, entry) -> templateId to entry.stringOrNull("document_id") }
+/** One note in a Get Session result. */
+internal data class DocumentRef(val templateId: String, val documentId: String?, val status: String?)
+
+/** Every note in this result, in response order. */
+internal fun GetSessionResponse.documentRefs(): List<DocumentRef> =
+    templateEntries().map { (templateId, entry) ->
+        DocumentRef(templateId, entry.stringOrNull("document_id"), entry.stringOrNull("status"))
+    }
 
 /** Flattens `templates` (list of `{template_id: {...}}`, or a plain object) into (templateId, entry) pairs. */
 private fun GetSessionResponse.templateEntries(): List<Pair<String, JsonObject>> {
