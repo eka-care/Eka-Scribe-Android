@@ -29,6 +29,9 @@ class SquimModelProvider(
                 addCPU(false)
                 setIntraOpNumThreads(1)
                 setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
+                // KleidiAI SME kernels crash with SIGILL during createSession on some
+                // SME-capable devices (e.g. OnePlus 15R). Fall back to the NEON path.
+                addConfigEntry("mlas.disable_kleidiai", "1")
             }
 
             // Load from file path directly — avoids readBytes() which doubles memory usage
