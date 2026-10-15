@@ -34,6 +34,7 @@ import com.eka.scribesdk.data.local.db.entity.ApiFlow
 import com.eka.scribesdk.data.local.db.entity.toScribeSession
 import com.eka.scribesdk.data.remote.S3CredentialProvider
 import com.eka.scribesdk.data.remote.models.requests.InitTransactionRequest
+import com.eka.scribesdk.data.remote.models.responses.toTemplateItem
 import com.eka.scribesdk.data.remote.services.ScribeApiService
 import com.eka.scribesdk.data.remote.services.SessionsApiService
 import com.eka.scribesdk.data.remote.upload.ApiFlowChunkUploader
@@ -46,9 +47,11 @@ import com.eka.scribesdk.session.SessionManager
 import com.eka.scribesdk.session.SessionsApiFlow
 import com.eka.scribesdk.session.SessionsDocumentWriter
 import com.eka.scribesdk.session.SessionsResultFetcher
+import com.eka.scribesdk.session.TemplateNameResolver
 import com.eka.scribesdk.session.TransactionManager
 import com.eka.scribesdk.session.TransactionResult
 import com.google.gson.Gson
+import com.haroldadmin.cnradapter.NetworkResponse
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -231,10 +234,15 @@ object EkaScribe {
             logger = logger
         )
 
+        val templateNameResolver = TemplateNameResolver(
+            savedNames = { sessionId -> savedTemplateNames(dm.getSession(sessionId)?.sessionMetadata) },
+            fetchCatalog = { fetchTemplateCatalog(developerApiService) },
+            logger = logger
+        )
         val sessionsResultFetcher = SessionsResultFetcher(
             apiService = sessionsApiService,
             logger = logger,
-            templateNames = { sessionId -> savedTemplateNames(dm.getSession(sessionId)?.sessionMetadata) }
+            templateNames = templateNameResolver::namesFor
         )
 
         val txnManager = TransactionManager(
@@ -302,6 +310,17 @@ object EkaScribe {
         isInitialized.set(true)
         logger.info(TAG, "SDK initialized")
     }
+
+    /** templateId -> title from `GET voice/api/v1/template`, or null when it fails. */
+    private suspend fun fetchTemplateCatalog(service: ScribeApiService): Map<String, String>? =
+        when (val response = service.getTemplates()) {
+            is NetworkResponse.Success ->
+                response.body.items.orEmpty()
+                    .mapNotNull { it?.toTemplateItem() }
+                    .associate { it.id to it.title }
+
+            else -> null
+        }
 
     /** Template names saved with the session's init config (templateId -> name). */
     private fun savedTemplateNames(sessionMetadata: String?): Map<String, String> {

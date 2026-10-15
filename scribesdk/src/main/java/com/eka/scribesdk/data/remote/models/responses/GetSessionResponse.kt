@@ -146,6 +146,9 @@ internal fun GetSessionResponse.toScribeResultResponse(
     )
 }
 
+/** Template ids in this result, in response order. */
+internal fun GetSessionResponse.templateIds(): List<String> = templateEntries().map { it.first }
+
 /** Flattens `templates` (list of `{template_id: {...}}`, or a plain object) into (templateId, entry) pairs. */
 private fun GetSessionResponse.templateEntries(): List<Pair<String, JsonObject>> {
     val element = templates ?: return emptyList()
