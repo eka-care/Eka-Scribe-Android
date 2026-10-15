@@ -330,9 +330,6 @@ internal class SessionsApiFlowTest {
 
     // ---- recording download (Get Session Audio) ----
 
-    private val hourMs = 60 * 60 * 1000L
-    private val nowMs = 1_800_000_000_000L // 2027-01-15T08:00:00Z
-
     private fun audioOk() = netSuccess<SessionAudioResponse, SessionsErrorResponse>(
         SessionAudioResponse(SESSION_ID, "success", "https://s3.example/audio.mp3?sig", 86_400, 1_800_086_400)
     )
@@ -342,16 +339,11 @@ internal class SessionsApiFlowTest {
         Response.error<Any>(code, "{}".toResponseBody("application/json".toMediaType()))
     )
 
-    private fun dmWithSession(createdAt: Long?) = mockk<DataManager>(relaxed = true).also { dm ->
-        coEvery { dm.getSession(SESSION_ID) } returns createdAt?.let { sessionsEntity().copy(createdAt = it) }
-    }
-
     private fun downloader(
         api: FakeSessionsApi,
-        dm: DataManager,
         streamed: MutableList<String> = mutableListOf(),
         succeeds: Boolean = true
-    ) = SessionAudioDownloader(api, dm, NoOpLogger(), now = { nowMs }) { url, destination ->
+    ) = SessionAudioDownloader(api, NoOpLogger()) { url, destination ->
         streamed += url
         destination.write("mp3-bytes".toByteArray())
         succeeds
@@ -360,42 +352,15 @@ internal class SessionsApiFlowTest {
     private fun <T> Result<T>.reason() = (exceptionOrNull() as SessionAudioUnavailableException).reason
 
     @Test
-    fun `link is returned for a session under 24 hours`() = runTest {
+    fun `link comes straight from Get Session Audio`() = runTest {
         val api = FakeSessionsApi().apply { audioResponse = audioOk() }
 
-        val link = downloader(api, dmWithSession(nowMs - 2 * hourMs)).link(SESSION_ID).getOrThrow()
+        val link = downloader(api).link(SESSION_ID).getOrThrow()
 
         assertEquals("https://s3.example/audio.mp3?sig", link.url)
         assertEquals(1_800_086_400_000L, link.expiresAtMillis)
-    }
-
-    @Test
-    fun `session older than 24 hours has no link and makes no audio call`() = runTest {
-        val api = FakeSessionsApi()
-
-        val result = downloader(api, dmWithSession(nowMs - 25 * hourMs)).link(SESSION_ID)
-
-        assertEquals(SessionAudioUnavailableException.Reason.EXPIRED, result.reason())
-        assertEquals(0, api.audioCalls)
-    }
-
-    @Test
-    fun `session from another device uses the server created_at for the 24 hour check`() = runTest {
-        val old = FakeSessionsApi().apply {
-            getResponses.addLast(netSuccess(processingBody().copy(createdAt = "2027-01-14T07:59:00Z")))
-        }
-        assertEquals(
-            SessionAudioUnavailableException.Reason.EXPIRED,
-            downloader(old, dmWithSession(null)).link(SESSION_ID).reason()
-        )
-        assertEquals(0, old.audioCalls)
-
-        val recent = FakeSessionsApi().apply {
-            getResponses.addLast(netSuccess(processingBody().copy(createdAt = "2027-01-15T06:30:00.123456Z")))
-            audioResponse = audioOk()
-        }
-        assertTrue(downloader(recent, dmWithSession(null)).link(SESSION_ID).isSuccess)
-        assertEquals(1, recent.audioCalls)
+        assertEquals(1, api.audioCalls)
+        assertEquals(0, api.getCalls)
     }
 
     @Test
@@ -403,11 +368,12 @@ internal class SessionsApiFlowTest {
         val cases = listOf(
             audioError(403, "audio_not_enabled") to SessionAudioUnavailableException.Reason.NOT_ENABLED,
             audioError(404, "audio_not_available") to SessionAudioUnavailableException.Reason.NOT_READY,
-            audioError(404, "resource_not_found") to SessionAudioUnavailableException.Reason.NOT_FOUND
+            audioError(404, "resource_not_found") to SessionAudioUnavailableException.Reason.NOT_FOUND,
+            audioError(410, "expired") to SessionAudioUnavailableException.Reason.EXPIRED
         )
         for ((response, reason) in cases) {
             val api = FakeSessionsApi().apply { audioResponse = response }
-            assertEquals(reason, downloader(api, dmWithSession(nowMs - hourMs)).link(SESSION_ID).reason())
+            assertEquals(reason, downloader(api).link(SESSION_ID).reason())
         }
     }
 
@@ -417,7 +383,7 @@ internal class SessionsApiFlowTest {
         val streamed = mutableListOf<String>()
         val destination = java.io.ByteArrayOutputStream()
 
-        val result = downloader(api, dmWithSession(nowMs - hourMs), streamed).download(SESSION_ID, destination)
+        val result = downloader(api, streamed).download(SESSION_ID, destination)
 
         assertTrue(result.isSuccess)
         assertEquals(listOf("https://s3.example/audio.mp3?sig"), streamed)
@@ -425,27 +391,16 @@ internal class SessionsApiFlowTest {
     }
 
     @Test
-    fun `download fails cleanly when the transfer fails or the link is unavailable`() = runTest {
+    fun `download fails cleanly when the transfer fails or there is no recording`() = runTest {
         val failing = FakeSessionsApi().apply { audioResponse = audioOk() }
-        val failed = downloader(failing, dmWithSession(nowMs - hourMs), succeeds = false)
-            .download(SESSION_ID, java.io.ByteArrayOutputStream())
+        val failed = downloader(failing, succeeds = false).download(SESSION_ID, java.io.ByteArrayOutputStream())
         assertEquals(SessionAudioUnavailableException.Reason.FAILED, failed.reason())
 
-        val expired = FakeSessionsApi()
+        val missing = FakeSessionsApi().apply { audioResponse = audioError(404, "resource_not_found") }
         val streamed = mutableListOf<String>()
-        val result = downloader(expired, dmWithSession(nowMs - 30 * hourMs), streamed)
-            .download(SESSION_ID, java.io.ByteArrayOutputStream())
-        assertEquals(SessionAudioUnavailableException.Reason.EXPIRED, result.reason())
+        val result = downloader(missing, streamed).download(SESSION_ID, java.io.ByteArrayOutputStream())
+        assertEquals(SessionAudioUnavailableException.Reason.NOT_FOUND, result.reason())
         assertTrue(streamed.isEmpty())
-    }
-
-    @Test
-    fun `parses the API's ISO timestamps`() {
-        assertEquals(1_760_521_524_000L, parseIsoMillis("2025-10-15T09:45:24Z"))
-        assertEquals(1_760_521_524_123L, parseIsoMillis("2025-10-15T09:45:24.123456Z"))
-        assertEquals(1_760_521_524_000L, parseIsoMillis("2025-10-15T15:15:24+05:30"))
-        assertNull(parseIsoMillis("yesterday"))
-        assertNull(parseIsoMillis(null))
     }
 
     // ---- convert to another template (Process Template) ----

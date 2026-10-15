@@ -9,7 +9,7 @@ class SessionAudioUnavailableException(
     message: String
 ) : Exception(message) {
     enum class Reason {
-        /** Older than the 24-hour retention; no network call is made. */
+        /** The server reports the recording expired (410). */
         EXPIRED,
 
         /** The server is still combining the audio after End Session; retry shortly. */

@@ -242,7 +242,6 @@ object EkaScribe {
 
         sessionAudioDownloader = SessionAudioDownloader(
             apiService = sessionsApiService,
-            dataManager = dm,
             logger = logger
         )
 
@@ -425,10 +424,10 @@ object EkaScribe {
 
     /**
      * A fresh download link for the session's recording on the server (Get Session Audio), for
-     * recordings not on this device, e.g. sessions recorded on another phone. Sessions older than
-     * 24 hours fail with [SessionAudioUnavailableException] (EXPIRED) without a network call; other
-     * reasons: NOT_READY (still being combined), NOT_ENABLED (full audio off for the business),
-     * NOT_FOUND. Use it to decide whether to offer a download; links expire, so don't store them.
+     * recordings not on this device, e.g. sessions recorded on another phone. The server owns
+     * retention and only returns a link while the audio exists; otherwise this fails with
+     * [SessionAudioUnavailableException]: NOT_READY (still being combined), NOT_ENABLED (full audio
+     * off for the business), NOT_FOUND (gone or unknown). Links expire, so don't store them.
      */
     suspend fun getSessionAudioLink(sessionId: String): Result<SessionAudioLink> = withContext(Dispatchers.IO) {
         val downloader = sessionAudioDownloader
