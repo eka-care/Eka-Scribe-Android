@@ -6,6 +6,7 @@ import com.eka.scribesdk.data.remote.models.responses.EndSessionResponse
 import com.eka.scribesdk.data.remote.models.responses.GetSessionResponse
 import com.eka.scribesdk.data.remote.models.responses.PatchSessionResponse
 import com.eka.scribesdk.data.remote.models.responses.ProcessTemplateResponse
+import com.eka.scribesdk.data.remote.models.responses.SessionAudioResponse
 import com.eka.scribesdk.data.remote.models.responses.SessionsErrorResponse
 import com.eka.scribesdk.data.remote.models.responses.UploadAudioResponse
 import com.google.gson.JsonObject
@@ -80,6 +81,17 @@ internal interface SessionsApiService {
         @Path("session_id") sessionId: String,
         @Path("template_id") templateId: String
     ): NetworkResponse<ProcessTemplateResponse, SessionsErrorResponse>
+
+    /**
+     * Get Session Audio: a fresh presigned URL for the combined recording (MP3). 403
+     * `audio_not_enabled` when full-audio access is off for the business; 404 `audio_not_available`
+     * while it is still being combined (or after retention), `resource_not_found` for unknown sessions.
+     * Docs: developer.eka.care/ekascribe/api-reference/openapi.yaml
+     */
+    @GET("voice/v1/sessions/{session_id}/audio")
+    suspend fun getSessionAudio(
+        @Path("session_id") sessionId: String
+    ): NetworkResponse<SessionAudioResponse, SessionsErrorResponse>
 
     /** Get Session filtered to one document (documented `document_id` query parameter). */
     @GET("voice/v1/sessions/{session_id}")

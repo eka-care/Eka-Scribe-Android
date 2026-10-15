@@ -71,6 +71,21 @@ internal data class SessionsApiError(
 internal fun SessionsErrorResponse?.readableMessage(fallback: String): String =
     this?.error?.message ?: this?.message ?: this?.error?.code ?: fallback
 
+/** 200 body of `GET /voice/v1/sessions/{session_id}/audio`: one presigned URL for the combined MP3. */
+@Keep
+internal data class SessionAudioResponse(
+    @SerializedName("session_id")
+    val sessionId: String?,
+    @SerializedName("status")
+    val status: String?,
+    @SerializedName("audio_url")
+    val audioUrl: String?,
+    @SerializedName("expires_in")
+    val expiresIn: Long?,
+    @SerializedName("expires_at")
+    val expiresAt: Long?
+)
+
 /** 202 body of `POST /voice/v1/sessions/{session_id}/process/template/{template_id}`. */
 @Keep
 internal data class ProcessTemplateResponse(

@@ -3,6 +3,7 @@ package com.eka.scribesdk.session
 import com.eka.scribesdk.api.models.OutputTemplate
 import com.eka.scribesdk.api.models.PatientDetail
 import com.eka.scribesdk.api.models.SessionConfig
+import com.eka.scribesdk.api.models.SessionAudioUnavailableException
 import com.eka.scribesdk.api.models.SessionData
 import com.eka.scribesdk.common.logging.NoOpLogger
 import com.eka.scribesdk.data.DataManager
@@ -17,6 +18,7 @@ import com.eka.scribesdk.data.remote.models.responses.EndSessionResponse
 import com.eka.scribesdk.data.remote.models.responses.GetSessionResponse
 import com.eka.scribesdk.data.remote.models.responses.PatchSessionResponse
 import com.eka.scribesdk.data.remote.models.responses.ProcessTemplateResponse
+import com.eka.scribesdk.data.remote.models.responses.SessionAudioResponse
 import com.eka.scribesdk.data.remote.models.responses.SessionsApiError
 import com.eka.scribesdk.data.remote.models.responses.SessionsErrorResponse
 import com.eka.scribesdk.data.remote.models.responses.UploadAudioResponse
@@ -39,7 +41,9 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.File
 import java.io.IOException
+import java.nio.file.Files
 import retrofit2.Response
 
 internal class SessionsApiFlowTest {
@@ -86,6 +90,8 @@ internal class SessionsApiFlowTest {
         /** null = the call throws, like a network failure. */
         var documentsResponse: NetworkResponse<JsonObject, SessionsErrorResponse>? = null
         var processResponse: NetworkResponse<ProcessTemplateResponse, SessionsErrorResponse>? = null
+        var audioResponse: NetworkResponse<SessionAudioResponse, SessionsErrorResponse>? = null
+        var audioCalls = 0
         val processCalls = mutableListOf<Pair<String, String>>()
         val documentQueries = mutableListOf<String>()
 
@@ -103,6 +109,9 @@ internal class SessionsApiFlowTest {
 
         override suspend fun upsertDocument(request: JsonObject) =
             upsertResponse!!.also { upsertBodies += request }
+
+        override suspend fun getSessionAudio(sessionId: String) =
+            audioResponse!!.also { audioCalls++ }
 
         override suspend fun processTemplate(sessionId: String, templateId: String) =
             processResponse!!.also { processCalls += sessionId to templateId }
@@ -319,6 +328,130 @@ internal class SessionsApiFlowTest {
         assertEquals(2, api.getCalls)
         assertTrue(result is TransactionPollResult.Failed)
         coVerify { dm.updateUploadStage(SESSION_ID, TransactionStage.FAILURE.name) }
+    }
+
+    // ---- recording download (Get Session Audio) ----
+
+    private val hourMs = 60 * 60 * 1000L
+    private val nowMs = 1_800_000_000_000L
+
+    private fun audioDir(): File = Files.createTempDirectory("scribe-audio").toFile()
+
+    private fun audioOk() = netSuccess<SessionAudioResponse, SessionsErrorResponse>(
+        SessionAudioResponse(SESSION_ID, "success", "https://s3.example/audio.mp3?sig", 86_400, null)
+    )
+
+    private fun audioError(code: Int, errorCode: String) = NetworkResponse.ServerError<SessionAudioResponse, SessionsErrorResponse>(
+        SessionsErrorResponse(error = SessionsApiError(code = errorCode, message = errorCode), message = null),
+        Response.error<Any>(code, "{}".toResponseBody("application/json".toMediaType()))
+    )
+
+    private fun dmWithSession(createdAt: Long?) = mockk<DataManager>(relaxed = true).also { dm ->
+        coEvery { dm.getSession(SESSION_ID) } returns createdAt?.let { sessionsEntity().copy(createdAt = it) }
+    }
+
+    private fun downloader(api: FakeSessionsApi, dm: DataManager, dir: File, downloads: MutableList<String> = mutableListOf()) =
+        SessionAudioDownloader(api, dm, dir, NoOpLogger(), now = { nowMs }) { url, target ->
+            downloads += url
+            target.writeText("mp3-bytes")
+            true
+        }
+
+    private fun Result<File>.reason() = (exceptionOrNull() as SessionAudioUnavailableException).reason
+
+    @Test
+    fun `recording on this device is returned without any call`() = runTest {
+        val dir = audioDir()
+        val local = File(dir, "${SESSION_ID}_full_audio.m4a").apply { writeText("local") }
+        val api = FakeSessionsApi()
+
+        val result = downloader(api, dmWithSession(nowMs - 30 * hourMs), dir).download(SESSION_ID)
+
+        assertEquals(local, result.getOrNull())
+        assertEquals(0, api.audioCalls)
+    }
+
+    @Test
+    fun `missing recording under 24 hours is downloaded next to local recordings`() = runTest {
+        val dir = audioDir()
+        val api = FakeSessionsApi().apply { audioResponse = audioOk() }
+        val downloads = mutableListOf<String>()
+        val createdAt = nowMs - 2 * hourMs
+
+        val file = downloader(api, dmWithSession(createdAt), dir, downloads).download(SESSION_ID).getOrThrow()
+
+        assertEquals("${SESSION_ID}_full_audio.mp3", file.name)
+        assertEquals("mp3-bytes", file.readText())
+        assertEquals(listOf("https://s3.example/audio.mp3?sig"), downloads)
+        assertEquals(createdAt, file.lastModified())
+        assertTrue(dir.listFiles()!!.none { it.name.endsWith(".tmp") })
+    }
+
+    @Test
+    fun `recording older than 24 hours is expired without calling the audio API`() = runTest {
+        val api = FakeSessionsApi()
+
+        val result = downloader(api, dmWithSession(nowMs - 25 * hourMs), audioDir()).download(SESSION_ID)
+
+        assertEquals(SessionAudioUnavailableException.Reason.EXPIRED, result.reason())
+        assertEquals(0, api.audioCalls)
+    }
+
+    @Test
+    fun `session from another device uses the server created_at for the 24 hour check`() = runTest {
+        // nowMs is 2027-01-15T08:00:00Z
+        val old = FakeSessionsApi().apply {
+            getResponses.addLast(netSuccess(processingBody().copy(createdAt = "2027-01-14T07:59:00Z")))
+        }
+        val oldResult = downloader(old, dmWithSession(null), audioDir()).download(SESSION_ID)
+        assertEquals(SessionAudioUnavailableException.Reason.EXPIRED, oldResult.reason())
+        assertEquals(0, old.audioCalls)
+
+        val recent = FakeSessionsApi().apply {
+            getResponses.addLast(netSuccess(processingBody().copy(createdAt = "2027-01-15T06:30:00.123456Z")))
+            audioResponse = audioOk()
+        }
+        val recentResult = downloader(recent, dmWithSession(null), audioDir()).download(SESSION_ID)
+        assertTrue(recentResult.isSuccess)
+        assertEquals(1, recent.audioCalls)
+    }
+
+    @Test
+    fun `audio API errors map to clear reasons`() = runTest {
+        val cases = listOf(
+            audioError(403, "audio_not_enabled") to SessionAudioUnavailableException.Reason.NOT_ENABLED,
+            audioError(404, "audio_not_available") to SessionAudioUnavailableException.Reason.NOT_READY,
+            audioError(404, "resource_not_found") to SessionAudioUnavailableException.Reason.NOT_FOUND
+        )
+        for ((response, reason) in cases) {
+            val api = FakeSessionsApi().apply { audioResponse = response }
+            val result = downloader(api, dmWithSession(nowMs - hourMs), audioDir()).download(SESSION_ID)
+            assertEquals(reason, result.reason())
+        }
+    }
+
+    @Test
+    fun `a failed download leaves no partial file`() = runTest {
+        val dir = audioDir()
+        val api = FakeSessionsApi().apply { audioResponse = audioOk() }
+        val failing = SessionAudioDownloader(api, dmWithSession(nowMs - hourMs), dir, NoOpLogger(), now = { nowMs }) { _, target ->
+            target.writeText("half")
+            false
+        }
+
+        val result = failing.download(SESSION_ID)
+
+        assertEquals(SessionAudioUnavailableException.Reason.FAILED, result.reason())
+        assertTrue(dir.listFiles()!!.isEmpty())
+    }
+
+    @Test
+    fun `parses the API's ISO timestamps`() {
+        assertEquals(1_760_521_524_000L, parseIsoMillis("2025-10-15T09:45:24Z"))
+        assertEquals(1_760_521_524_123L, parseIsoMillis("2025-10-15T09:45:24.123456Z"))
+        assertEquals(1_760_521_524_000L, parseIsoMillis("2025-10-15T15:15:24+05:30"))
+        assertNull(parseIsoMillis("yesterday"))
+        assertNull(parseIsoMillis(null))
     }
 
     // ---- convert to another template (Process Template) ----

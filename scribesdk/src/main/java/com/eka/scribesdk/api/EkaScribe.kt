@@ -43,6 +43,7 @@ import com.eka.scribesdk.data.remote.upload.SessionsChunkUploader
 import com.eka.scribesdk.encoder.Mp3AudioEncoder
 import com.eka.scribesdk.pipeline.Pipeline
 import com.eka.scribesdk.session.AudioFileProcessor
+import com.eka.scribesdk.session.SessionAudioDownloader
 import com.eka.scribesdk.session.SessionManager
 import com.eka.scribesdk.session.SessionsApiFlow
 import com.eka.scribesdk.session.SessionsDocumentWriter
@@ -91,6 +92,7 @@ object EkaScribe {
     private var modelDownloader: ModelDownloader? = null
     private var config: EkaScribeConfig? = null
     private var audioFileProcessor: AudioFileProcessor? = null
+    private var sessionAudioDownloader: SessionAudioDownloader? = null
     private var logger: Logger = NoOpLogger()
 
     private var isInitialized = AtomicBoolean(false)
@@ -232,6 +234,13 @@ object EkaScribe {
             modelDownloader = downloader,
             outputDir = outputDir,
             timeProvider = timeProvider,
+            logger = logger
+        )
+
+        sessionAudioDownloader = SessionAudioDownloader(
+            apiService = sessionsApiService,
+            dataManager = dm,
+            outputDir = outputDir,
             logger = logger
         )
 
@@ -410,6 +419,19 @@ object EkaScribe {
      */
     suspend fun getSession(sessionId: String): ScribeSession? {
         return requireDataManager().getSession(sessionId)?.toScribeSession()
+    }
+
+    /**
+     * The session's full recording as a local MP3/M4A file. Returns the file on this device when
+     * present; otherwise, if the session is under 24 hours old, downloads it via Get Session Audio
+     * (`GET /voice/v1/sessions/{id}/audio`). Older sessions fail with
+     * [SessionAudioUnavailableException] (reason EXPIRED) without a network call; see its reasons
+     * for the other failures (not ready yet, full audio not enabled, not found, download failed).
+     */
+    suspend fun downloadSessionAudio(sessionId: String): Result<File> = withContext(Dispatchers.IO) {
+        val downloader = sessionAudioDownloader
+            ?: return@withContext Result.failure(IllegalStateException("EkaScribe is not initialized"))
+        downloader.download(sessionId)
     }
 
     /**
