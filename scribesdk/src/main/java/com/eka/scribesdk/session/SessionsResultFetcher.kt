@@ -3,10 +3,13 @@ package com.eka.scribesdk.session
 import com.eka.scribesdk.common.logging.Logger
 import com.eka.scribesdk.data.remote.models.responses.ScribeResultResponse
 import com.eka.scribesdk.data.remote.models.responses.readableMessage
-import com.eka.scribesdk.data.remote.models.responses.templateIds
+import com.eka.scribesdk.data.remote.models.responses.GetSessionResponse
+import com.eka.scribesdk.data.remote.models.responses.documentRefs
+import com.eka.scribesdk.data.remote.models.responses.toDocumentNames
 import com.eka.scribesdk.data.remote.models.responses.toScribeResultResponse
 import com.eka.scribesdk.data.remote.services.SessionsApiService
 import com.haroldadmin.cnradapter.NetworkResponse
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 
 /** Outcome of one `GET /voice/v1/sessions/{id}` call. */
@@ -50,9 +53,7 @@ internal class SessionsResultFetcher(
                     SessionFetchState.Error(response.body.message ?: "Processing failed", retryable = false)
 
                 else -> SessionFetchState.Done(
-                    result = response.body.toScribeResultResponse(
-                        templateNames = templateNames(sessionId, response.body.templateIds())
-                    ),
+                    result = toResult(sessionId, response.body),
                     partial = response.code == HTTP_PARTIAL
                 )
             }
@@ -72,6 +73,41 @@ internal class SessionsResultFetcher(
 
             is NetworkResponse.UnknownError ->
                 SessionFetchState.Error(response.error.message ?: "Unknown error", retryable = true)
+        }
+
+    /**
+     * Note titles: each note's own name (renames included) from "List Session Documents"; template
+     * names are looked up only for notes that call did not name, e.g. when it fails.
+     */
+    private suspend fun toResult(sessionId: String, body: GetSessionResponse): ScribeResultResponse {
+        val documentNames = documentNames(sessionId)
+        val unnamedTemplateIds = body.documentRefs()
+            .filter { (_, documentId) -> documentId == null || documentId !in documentNames }
+            .map { (templateId, _) -> templateId }
+            .distinct()
+        val templateNames = if (unnamedTemplateIds.isEmpty()) {
+            emptyMap()
+        } else {
+            templateNames(sessionId, unnamedTemplateIds)
+        }
+        return body.toScribeResultResponse(templateNames = templateNames, documentNames = documentNames)
+    }
+
+    /** document_id -> current note name; empty on any failure, so titles fall back to template names. */
+    private suspend fun documentNames(sessionId: String): Map<String, String> =
+        try {
+            when (val response = apiService.listSessionDocuments(sessionId)) {
+                is NetworkResponse.Success -> response.body.toDocumentNames()
+                else -> {
+                    logger.warn(TAG, "Note names unavailable for $sessionId; using template names")
+                    emptyMap()
+                }
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            logger.warn(TAG, "Note names unavailable for $sessionId; using template names", e)
+            emptyMap()
         }
 
     /**

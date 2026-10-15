@@ -80,6 +80,8 @@ internal class SessionsApiFlowTest {
         var getCalls = 0
         val upsertBodies = mutableListOf<JsonObject>()
         var upsertResponse: NetworkResponse<DocumentEnvelopeResponse, SessionsErrorResponse>? = null
+        /** null = the call throws, like a network failure. */
+        var documentsResponse: NetworkResponse<JsonObject, SessionsErrorResponse>? = null
 
         override suspend fun createSession(request: JsonObject) =
             createResponse!!.also { createBodies += request }
@@ -95,6 +97,9 @@ internal class SessionsApiFlowTest {
 
         override suspend fun upsertDocument(request: JsonObject) =
             upsertResponse!!.also { upsertBodies += request }
+
+        override suspend fun listSessionDocuments(sessionId: String) =
+            documentsResponse ?: error("documents call failed")
 
         override suspend fun getSession(sessionId: String): NetworkResponse<GetSessionResponse, SessionsErrorResponse> {
             getCalls++
@@ -302,6 +307,60 @@ internal class SessionsApiFlowTest {
         assertEquals(2, api.getCalls)
         assertTrue(result is TransactionPollResult.Failed)
         coVerify { dm.updateUploadStage(SESSION_ID, TransactionStage.FAILURE.name) }
+    }
+
+    // ---- note titles ----
+
+    private fun fetcher(api: FakeSessionsApi, templateNameCalls: MutableList<List<String>>) =
+        SessionsResultFetcher(api, NoOpLogger()) { _, ids ->
+            templateNameCalls += ids
+            mapOf("soap" to "SOAP Note")
+        }
+
+    private fun SessionFetchState?.noteName(): String? =
+        (this as SessionFetchState.Done).result.data!!.templateResults!!.custom!!.single()!!.name
+
+    @Test
+    fun `fetch titles notes with their own name and skips the template lookup`() = runTest {
+        val api = FakeSessionsApi().apply {
+            getResponses.addLast(netSuccess(failedOnlyBody()))
+            documentsResponse = netSuccess(
+                JsonParser.parseString(
+                    """{"status": "success", "data": {"documents": [{"document_id": "d1", "document_name": "Renamed note"}]}}"""
+                ).asJsonObject
+            )
+        }
+        val templateNameCalls = mutableListOf<List<String>>()
+
+        val name = fetcher(api, templateNameCalls).fetch(SESSION_ID).noteName()
+
+        assertEquals("Renamed note", name)
+        assertTrue(templateNameCalls.isEmpty())
+    }
+
+    @Test
+    fun `fetch falls back to template names when the documents call fails`() = runTest {
+        val api = FakeSessionsApi().apply { getResponses.addLast(netSuccess(failedOnlyBody())) }
+        val templateNameCalls = mutableListOf<List<String>>()
+
+        val name = fetcher(api, templateNameCalls).fetch(SESSION_ID).noteName()
+
+        assertEquals("SOAP Note", name)
+        assertEquals(listOf(listOf("soap")), templateNameCalls)
+    }
+
+    @Test
+    fun `fetch falls back to template names for notes the documents call does not name`() = runTest {
+        val api = FakeSessionsApi().apply {
+            getResponses.addLast(netSuccess(failedOnlyBody()))
+            documentsResponse = netSuccess(
+                JsonParser.parseString("""{"status": "success", "data": {"documents": []}}""").asJsonObject
+            )
+        }
+
+        val name = fetcher(api, mutableListOf()).fetch(SESSION_ID).noteName()
+
+        assertEquals("SOAP Note", name)
     }
 
     @Test

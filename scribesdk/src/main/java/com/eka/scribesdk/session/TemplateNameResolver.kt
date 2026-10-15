@@ -1,6 +1,7 @@
 package com.eka.scribesdk.session
 
 import com.eka.scribesdk.common.logging.Logger
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -36,6 +37,8 @@ internal class TemplateNameResolver(
         if (templateIds.any { it !in catalog }) {
             val fetched = try {
                 fetchCatalog()
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 null
             }
