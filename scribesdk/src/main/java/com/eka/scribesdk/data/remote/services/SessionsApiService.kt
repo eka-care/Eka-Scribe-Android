@@ -58,6 +58,16 @@ internal interface SessionsApiService {
         @Body request: JsonObject
     ): NetworkResponse<DocumentEnvelopeResponse, SessionsErrorResponse>
 
+    /**
+     * "List Session Documents": the session's notes with their current names (`document_name`,
+     * renames included), which [getSession] does not return. Used only for note titles; content
+     * still comes from [getSession]. Spec: developer.eka.care/ekascribe/api-reference/openapi.yaml
+     */
+    @GET("voice/api/v1/sessions/{session_id}")
+    suspend fun listSessionDocuments(
+        @Path("session_id") sessionId: String
+    ): NetworkResponse<JsonObject, SessionsErrorResponse>
+
     /** 202 = still processing, 200 = completed, 206 = partial; 410 (expired) arrives as ServerError. */
     @GET("voice/v1/sessions/{session_id}")
     suspend fun getSession(
