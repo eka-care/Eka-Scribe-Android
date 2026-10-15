@@ -43,8 +43,20 @@ internal data class SessionEntity(
     val folderName: String? = null,
 
     @ColumnInfo(name = "bid")
-    val bid: String? = null
+    val bid: String? = null,
+
+    /** Backend flow this session was created on: null = legacy transaction APIs, see [ApiFlow]. */
+    @ColumnInfo(name = "api_flow")
+    val apiFlow: String? = null
 )
+
+/** Values for [SessionEntity.apiFlow]. Legacy (transaction v2 + S3) sessions keep null. */
+internal object ApiFlow {
+    const val SESSIONS_V1 = "sessions_v1"
+
+    /** Value to store for a session created now. */
+    fun forNewSession(useSessionsApi: Boolean): String? = if (useSessionsApi) SESSIONS_V1 else null
+}
 
 internal fun SessionEntity.toScribeSession(): ScribeSession {
     val stage = try {

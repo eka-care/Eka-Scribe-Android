@@ -10,6 +10,7 @@ import com.eka.scribesdk.common.util.DefaultTimeProvider
 import com.eka.scribesdk.common.util.IdGenerator
 import com.eka.scribesdk.common.util.deleteFile
 import com.eka.scribesdk.data.DataManager
+import com.eka.scribesdk.data.local.db.entity.ApiFlow
 import com.eka.scribesdk.data.local.db.entity.AudioChunkEntity
 import com.eka.scribesdk.data.local.db.entity.SessionEntity
 import com.eka.scribesdk.data.local.db.entity.TransactionStage
@@ -54,7 +55,8 @@ internal class AudioFileProcessor(
                     return@withContext
                 }
 
-                val sessionId = IdGenerator.sessionId()
+                val usesSessionsApi = transactionManager.useSessionsApi
+                val sessionId = IdGenerator.sessionId(forSessionsApi = usesSessionsApi)
                 val folderName = SimpleDateFormat("yyMMdd", Locale.getDefault()).format(Date())
                 val timeProvider = DefaultTimeProvider()
 
@@ -69,7 +71,8 @@ internal class AudioFileProcessor(
                         updatedAt = timeProvider.nowMillis(),
                         state = SessionState.PROCESSING.name,
                         uploadStage = TransactionStage.INIT.name,
-                        folderName = folderName
+                        folderName = folderName,
+                        apiFlow = ApiFlow.forNewSession(usesSessionsApi)
                     )
                 )
 
@@ -82,9 +85,15 @@ internal class AudioFileProcessor(
                 }
                 val bid = (initResult as TransactionResult.Success).bid
 
-                // 3. Chunk the audio file into 25s segments
+                // 3. Chunk the audio file into fixed-length segments
                 val chunker = AudioFileChunker(encoder, outputDir, logger)
-                val chunks = chunker.chunkAudioFile(file, sessionId, CHUNK_DURATION_SEC)
+                // Sessions API recommends chunks of at most 20s
+                val chunkDurationSec = if (usesSessionsApi) {
+                    EkaScribeConfig.SESSIONS_API_MAX_CHUNK_DURATION_SEC
+                } else {
+                    CHUNK_DURATION_SEC
+                }
+                val chunks = chunker.chunkAudioFile(file, sessionId, chunkDurationSec)
                 if (chunks.isEmpty()) {
                     onError(ScribeError(ErrorCode.UNKNOWN, "Failed to chunk audio file"))
                     return@withContext
@@ -140,8 +149,10 @@ internal class AudioFileProcessor(
                     }
                 }
 
-                // 5. Upload full original recording
-                uploadFullRecording(file, sessionId, folderName, bid)
+                // 5. Upload full original recording (not part of the Sessions API)
+                if (!usesSessionsApi) {
+                    uploadFullRecording(file, sessionId, folderName, bid)
+                }
 
                 // 6. Stop transaction
                 val stopResult = transactionManager.stopTransaction(sessionId)
