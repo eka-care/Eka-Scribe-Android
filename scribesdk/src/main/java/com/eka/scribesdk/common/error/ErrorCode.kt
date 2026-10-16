@@ -16,7 +16,5 @@ enum class ErrorCode {
     POLL_TIMEOUT,
     TRANSCRIPTION_FAILED,
     RETRY_EXHAUSTED,
-    /** Create session refused: the business has used up its EkaScribe sessions (400 txn_limit_exceeded). */
-    TXN_LIMIT_EXCEEDED,
     UNKNOWN
 }

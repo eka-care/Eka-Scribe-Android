@@ -286,24 +286,6 @@ internal class SessionsApiFlowTest {
     }
 
     @Test
-    fun `createSession surfaces txn_limit_exceeded as its error code`() = runTest {
-        val api = FakeSessionsApi().apply {
-            createResponse = NetworkResponse.ServerError(
-                SessionsErrorResponse(
-                    error = SessionsApiError(code = "txn_limit_exceeded", message = "Transaction limit exceeded"),
-                    message = null
-                ),
-                Response.error<Any>(400, "{}".toResponseBody("application/json".toMediaType()))
-            )
-        }
-
-        val result = flow(api, mockk(relaxed = true)).createSession(SESSION_ID, config())
-
-        assertEquals("txn_limit_exceeded", (result as TransactionResult.Error).code)
-        assertTrue(api.patchBodies.isEmpty())
-    }
-
-    @Test
     fun `endSession sends uploaded count and moves to COMMIT`() = runTest {
         val api = FakeSessionsApi().apply {
             endResponse = netSuccess(EndSessionResponse(SESSION_ID, "processing", null, 2, null), code = 202)
