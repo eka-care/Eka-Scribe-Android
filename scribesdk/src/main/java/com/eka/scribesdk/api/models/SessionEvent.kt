@@ -25,6 +25,8 @@ enum class SessionEventName {
     SESSION_STOP_INITIATED,
     SESSION_COMPLETED,
     SESSION_FAILED,
+    /** Recorded time hit the model's max session duration; the session is being stopped. */
+    SESSION_DURATION_LIMIT_REACHED,
 
     // Audio
     AUDIO_FOCUS_CHANGED,

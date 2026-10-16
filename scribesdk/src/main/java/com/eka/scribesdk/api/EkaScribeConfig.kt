@@ -28,6 +28,14 @@ data class EkaScribeConfig(
         internal const val MAX_CHUNK_DURATION_SEC = 25
         /** Sessions API discovery advertises max_chunk_duration_seconds = 20. */
         internal const val SESSIONS_API_MAX_CHUNK_DURATION_SEC = 20
+
+        /** Max recorded seconds per session, from Sessions API discovery (`max_session_duration_seconds`). */
+        internal const val LITE_MAX_SESSION_SEC = 600
+        internal const val PRO_MAX_SESSION_SEC = 3600
+
+        /** Unknown or missing model -> the server default, pro. */
+        internal fun maxSessionSeconds(modelType: String?): Int =
+            if (modelType.equals("lite", ignoreCase = true)) LITE_MAX_SESSION_SEC else PRO_MAX_SESSION_SEC
         internal const val OVERLAP_DURATION_SEC = 0.5
         internal const val FULL_AUDIO_OUTPUT = false
         internal const val MAX_UPLOAD_RETRIES = 2

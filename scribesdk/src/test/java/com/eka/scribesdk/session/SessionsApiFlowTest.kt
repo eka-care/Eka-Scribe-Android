@@ -220,7 +220,8 @@ internal class SessionsApiFlowTest {
 
         val patch = api.patchBodies.single()
         assertEquals("consultation", patch["session_mode"].asString)
-        assertEquals(1, patch.size())
+        assertEquals("recording_started", patch["user_status"].asString)
+        assertEquals(2, patch.size())
         coVerify { dm.updateUploadStage(SESSION_ID, TransactionStage.STOP.name) }
     }
 
@@ -251,6 +252,56 @@ internal class SessionsApiFlowTest {
     }
 
     // ---- endSession ----
+
+    @Test
+    fun `endSession reports audio_duration in additional_data like the web`() = runTest {
+        val api = FakeSessionsApi().apply {
+            endResponse = netSuccess(EndSessionResponse(SESSION_ID, "processing", null, 2, null), code = 202)
+            patchResponse = patchOk()
+        }
+        val dm = mockk<DataManager>(relaxed = true)
+        coEvery { dm.getUploadedChunks(SESSION_ID) } returns listOf(uploadedChunk(0), uploadedChunk(1))
+        coEvery { dm.getAllChunks(SESSION_ID) } returns listOf(
+            uploadedChunk(0).copy(durationMs = 20_000L),
+            uploadedChunk(1).copy(durationMs = 12_600L)
+        )
+
+        val result = flow(api, dm).endSession(SESSION_ID)
+
+        assertTrue(result is TransactionResult.Success)
+        val additional = api.patchBodies.single()["additional_data"].asJsonObject
+        assertEquals(33, additional["audio_duration"].asInt)
+    }
+
+    @Test
+    fun `endSession still succeeds when audio_duration cannot be saved`() = runTest {
+        val api = FakeSessionsApi().apply {
+            endResponse = netSuccess(EndSessionResponse(SESSION_ID, "processing", null, 1, null), code = 202)
+            patchResponse = netServerError("nope", 500)
+        }
+        val dm = mockk<DataManager>(relaxed = true)
+        coEvery { dm.getAllChunks(SESSION_ID) } returns listOf(uploadedChunk(0).copy(durationMs = 5_000L))
+
+        assertTrue(flow(api, dm).endSession(SESSION_ID) is TransactionResult.Success)
+    }
+
+    @Test
+    fun `createSession surfaces txn_limit_exceeded as its error code`() = runTest {
+        val api = FakeSessionsApi().apply {
+            createResponse = NetworkResponse.ServerError(
+                SessionsErrorResponse(
+                    error = SessionsApiError(code = "txn_limit_exceeded", message = "Transaction limit exceeded"),
+                    message = null
+                ),
+                Response.error<Any>(400, "{}".toResponseBody("application/json".toMediaType()))
+            )
+        }
+
+        val result = flow(api, mockk(relaxed = true)).createSession(SESSION_ID, config())
+
+        assertEquals("txn_limit_exceeded", (result as TransactionResult.Error).code)
+        assertTrue(api.patchBodies.isEmpty())
+    }
 
     @Test
     fun `endSession sends uploaded count and moves to COMMIT`() = runTest {
