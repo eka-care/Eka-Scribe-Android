@@ -84,7 +84,7 @@ internal class SessionsApiFlow(
                 } else {
                     val message = response.body.readableMessage("Create session failed")
                     logger.error(TAG, "Create session server error ${response.code}: $sessionId - $message")
-                    return TransactionResult.Error(message, code = response.body?.error?.code)
+                    return TransactionResult.Error(message)
                 }
             }
 

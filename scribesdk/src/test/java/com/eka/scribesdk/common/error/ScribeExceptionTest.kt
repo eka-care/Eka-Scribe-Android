@@ -47,7 +47,7 @@ class ScribeExceptionTest {
             "NETWORK_UNAVAILABLE", "DB_ERROR", "INVALID_STATE_TRANSITION",
             "INIT_TRANSACTION_FAILED", "STOP_TRANSACTION_FAILED",
             "COMMIT_TRANSACTION_FAILED", "POLL_TIMEOUT",
-            "TRANSCRIPTION_FAILED", "RETRY_EXHAUSTED", "TXN_LIMIT_EXCEEDED", "UNKNOWN"
+            "TRANSCRIPTION_FAILED", "RETRY_EXHAUSTED", "UNKNOWN"
         )
         val actual = ErrorCode.entries.map { it.name }.toSet()
         assertEquals(expected, actual)
