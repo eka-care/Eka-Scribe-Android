@@ -2,6 +2,7 @@ package com.eka.scribesdk.data.remote.models.responses
 
 import androidx.annotation.Keep
 import com.google.gson.JsonElement
+import com.google.gson.JsonObject
 import com.google.gson.annotations.SerializedName
 
 @Keep
@@ -120,6 +121,9 @@ internal data class DocumentEnvelopeResponse(
         val status: String?,
         /** PUT URL for the document content (valid for a short time). */
         @SerializedName("presigned_url")
-        val presignedUrl: String?
+        val presignedUrl: String?,
+        /** Publish state, e.g. `{"emr_webhook": {"status": "success", ...}}` once pushed to the EMR. */
+        @SerializedName("publish")
+        val publish: JsonObject? = null
     )
 }

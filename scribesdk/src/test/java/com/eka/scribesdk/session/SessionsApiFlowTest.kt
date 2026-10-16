@@ -594,6 +594,43 @@ internal class SessionsApiFlowTest {
             DocumentEnvelopeResponse("success", DocumentEnvelopeResponse.DocumentData("doc-1", SESSION_ID, "success", url))
         )
 
+    private fun publishedDocOk() = netSuccess<DocumentEnvelopeResponse, SessionsErrorResponse>(
+        DocumentEnvelopeResponse(
+            "success",
+            DocumentEnvelopeResponse.DocumentData(
+                "doc-1", SESSION_ID, "success", "https://s3.example/put",
+                publish = JsonParser.parseString("""{"emr_webhook": {"status": "success"}}""").asJsonObject
+            )
+        )
+    )
+
+    @Test
+    fun `document writer unpublishes a note published to the EMR before saving`() = runTest {
+        val api = FakeSessionsApi().apply { upsertResponse = publishedDocOk() }
+        val puts = mutableListOf<String>()
+        val writer = SessionsDocumentWriter(api, NoOpLogger()) { url, _ -> puts += url; true }
+
+        val result = writer.save(SESSION_ID, listOf(SessionData(templateId = "t1", documentId = "doc-1", data = "SGVsbG8=")))
+
+        assertTrue(result.isSuccess)
+        assertEquals(2, api.upsertBodies.size)
+        assertNull(api.upsertBodies[0]["publish"])
+        val webhook = api.upsertBodies[1]["publish"].asJsonObject["emr_webhook"].asJsonObject
+        assertEquals("unpublished", webhook["status"].asString)
+        assertEquals("doc-1", api.upsertBodies[1]["document_id"].asString)
+        assertEquals(listOf("https://s3.example/put"), puts)
+    }
+
+    @Test
+    fun `document writer leaves unpublished notes alone`() = runTest {
+        val api = FakeSessionsApi().apply { upsertResponse = uploadUrlOk() }
+        val writer = SessionsDocumentWriter(api, NoOpLogger()) { _, _ -> true }
+
+        writer.save(SESSION_ID, listOf(SessionData(templateId = "t1", documentId = "doc-1", data = "SGVsbG8=")))
+
+        assertEquals(1, api.upsertBodies.size)
+    }
+
     @Test
     fun `document writer gets an upload url and PUTs the base64 content`() = runTest {
         val api = FakeSessionsApi().apply { upsertResponse = uploadUrlOk() }

@@ -1,6 +1,7 @@
 package com.eka.scribesdk.data.remote.models.requests
 
 import androidx.annotation.Keep
+import com.google.gson.JsonObject
 import com.google.gson.annotations.SerializedName
 
 /** Body for `POST /voice/v1/sessions`. Null fields are omitted. */
@@ -46,5 +47,8 @@ internal data class UpsertDocumentRequest(
     @SerializedName("session_id")
     val sessionId: String,
     @SerializedName("document_id")
-    val documentId: String? = null
+    val documentId: String? = null,
+    /** e.g. `{"emr_webhook": {"status": "unpublished", ...}}`; omitted when null. */
+    @SerializedName("publish")
+    val publish: JsonObject? = null
 )
