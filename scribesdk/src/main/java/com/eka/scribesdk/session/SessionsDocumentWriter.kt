@@ -3,9 +3,11 @@ package com.eka.scribesdk.session
 import com.eka.scribesdk.api.models.SessionData
 import com.eka.scribesdk.common.logging.Logger
 import com.eka.scribesdk.data.remote.models.requests.UpsertDocumentRequest
+import com.eka.scribesdk.data.remote.models.responses.DocumentEnvelopeResponse
 import com.eka.scribesdk.data.remote.models.responses.readableMessage
 import com.eka.scribesdk.data.remote.services.SessionsApiService
 import com.google.gson.Gson
+import com.google.gson.JsonObject
 import com.haroldadmin.cnradapter.NetworkResponse
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -22,6 +24,10 @@ import java.util.concurrent.TimeUnit
  * Mirrors the web client: the content is stored base64-encoded with `Content-Type: text/plain`
  * (that is how the web editor and GET /sessions read it back). [SessionData.data] is already base64.
  * On a failed PUT it fetches a fresh URL once and retries.
+ *
+ * Like the web editor, a note already published to the EMR (`publish.emr_webhook.status ==
+ * "success"`) is marked unpublished before its content changes, so the EMR is not left holding
+ * a version that no longer matches the note.
  */
 internal class SessionsDocumentWriter(
     private val apiService: SessionsApiService,
@@ -32,6 +38,8 @@ internal class SessionsDocumentWriter(
     companion object {
         private const val TAG = "SessionsDocumentWriter"
         private const val CONTENT_TYPE = "text/plain"
+        private const val STATUS_PUBLISHED = "success"
+        private const val STATUS_UNPUBLISHED = "unpublished"
 
         // Plain client: pre-signed URLs carry their own auth and reject an extra Authorization header
         private val plainClient by lazy {
@@ -69,7 +77,10 @@ internal class SessionsDocumentWriter(
 
     private suspend fun saveOne(sessionId: String, item: SessionData): Result<Boolean> {
         repeat(2) { attempt ->
-            val url = fetchUploadUrl(sessionId, item.documentId).getOrElse { return Result.failure(it) }
+            val document = fetchDocument(sessionId, item.documentId).getOrElse { return Result.failure(it) }
+            val url = document.presignedUrl
+            if (url.isNullOrBlank()) return Result.failure(Exception("No upload URL returned for ${item.documentId}"))
+            if (attempt == 0 && document.isPublishedToEmr()) unpublish(sessionId, item.documentId)
             val ok = try {
                 putContent(url, item.data)
             } catch (e: Exception) {
@@ -85,13 +96,42 @@ internal class SessionsDocumentWriter(
         return Result.failure(Exception("Failed to upload document content for ${item.documentId}"))
     }
 
-    private suspend fun fetchUploadUrl(sessionId: String, documentId: String): Result<String> {
+    private fun DocumentEnvelopeResponse.DocumentData.isPublishedToEmr(): Boolean {
+        val webhook = publish?.get("emr_webhook")?.takeIf { it.isJsonObject }?.asJsonObject ?: return false
+        val status = webhook.get("status")?.takeIf { it.isJsonPrimitive }?.asString
+        return status.equals(STATUS_PUBLISHED, ignoreCase = true)
+    }
+
+    /** Mirrors the web's unpublish; a failure is logged and the edit is still saved. */
+    private suspend fun unpublish(sessionId: String, documentId: String) {
+        val publish = JsonObject().apply {
+            add("emr_webhook", JsonObject().apply {
+                addProperty("status", STATUS_UNPUBLISHED)
+                addProperty("updated_at", System.currentTimeMillis() / 1000)
+            })
+        }
+        val request = UpsertDocumentRequest(sessionId = sessionId, documentId = documentId, publish = publish)
+        val body = gson.toJsonTree(request).asJsonObject
+        when (val response = apiService.upsertDocument(body)) {
+            is NetworkResponse.Success -> logger.info(TAG, "Unpublished $documentId before saving the edit")
+            is NetworkResponse.ServerError ->
+                logger.warn(TAG, "Unpublish failed for $documentId: ${response.body.readableMessage("HTTP ${response.code}")}")
+
+            is NetworkResponse.NetworkError -> logger.warn(TAG, "Unpublish failed for $documentId", response.error)
+            is NetworkResponse.UnknownError -> logger.warn(TAG, "Unpublish failed for $documentId", response.error)
+        }
+    }
+
+    private suspend fun fetchDocument(
+        sessionId: String,
+        documentId: String
+    ): Result<DocumentEnvelopeResponse.DocumentData> {
         val body = gson.toJsonTree(UpsertDocumentRequest(sessionId = sessionId, documentId = documentId)).asJsonObject
         return when (val response = apiService.upsertDocument(body)) {
             is NetworkResponse.Success -> {
-                val url = response.body.data?.presignedUrl
-                if (url.isNullOrBlank()) Result.failure(Exception("No upload URL returned for $documentId"))
-                else Result.success(url)
+                val data = response.body.data
+                if (data == null) Result.failure(Exception("No document returned for $documentId"))
+                else Result.success(data)
             }
 
             is NetworkResponse.ServerError ->
