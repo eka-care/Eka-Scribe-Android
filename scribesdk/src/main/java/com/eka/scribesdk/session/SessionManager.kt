@@ -62,6 +62,7 @@ internal class SessionManager(
     companion object {
         private const val TAG = "SessionManager"
         private val deferredUploadScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        private const val TXN_LIMIT_EXCEEDED_CODE = "txn_limit_exceeded"
     }
 
     private val _stateFlow = MutableStateFlow(SessionState.IDLE)
@@ -190,10 +191,13 @@ internal class SessionManager(
                         mapOf("error" to initResult.message)
                     )
                     transitionToErrorIfAllowed()
-                    callback?.onError(
-                        ScribeError(ErrorCode.INIT_TRANSACTION_FAILED, initResult.message)
-                    )
-                    onError(ScribeError(ErrorCode.INIT_TRANSACTION_FAILED, initResult.message))
+                    val initErrorCode = if (initResult.code == TXN_LIMIT_EXCEEDED_CODE) {
+                        ErrorCode.TXN_LIMIT_EXCEEDED
+                    } else {
+                        ErrorCode.INIT_TRANSACTION_FAILED
+                    }
+                    callback?.onError(ScribeError(initErrorCode, initResult.message))
+                    onError(ScribeError(initErrorCode, initResult.message))
                     return@withContext
                 }
 
@@ -219,6 +223,9 @@ internal class SessionManager(
                 startFlowCollection(newPipeline, emitter, scope)
 
                 transition(SessionState.RECORDING)
+                if (ekaScribeConfig.useSessionsApi) {
+                    startDurationLimit(sessionId, sessionConfig.modelType, scope)
+                }
                 callback?.onSessionStarted(sessionId)
                 emitter.emit(
                     SessionEventName.RECORDING_STARTED,
@@ -650,6 +657,40 @@ internal class SessionManager(
                 callback?.onAudioFocusChanged(hasFocus)
             }
         }
+    }
+
+    /**
+     * Sessions API sessions are capped by model (lite 10 min, pro 60 min of recorded audio).
+     * At the limit the host is told first, so it can stop through its own UI path, then the
+     * SDK stops the session itself if it is still recording.
+     */
+    private fun startDurationLimit(sessionId: String, modelType: String?, scope: CoroutineScope) {
+        val limitSeconds = EkaScribeConfig.maxSessionSeconds(modelType)
+        val limiter = SessionDurationLimiter(
+            limitMs = limitSeconds * 1_000L,
+            isRecording = { activeSessionId == sessionId && _stateFlow.value == SessionState.RECORDING },
+            isActive = {
+                activeSessionId == sessionId &&
+                    (_stateFlow.value == SessionState.RECORDING || _stateFlow.value == SessionState.PAUSED)
+            }
+        ) {
+            logger.warn(TAG, "Session duration limit reached ($limitSeconds s): $sessionId")
+            eventEmitter?.emit(
+                SessionEventName.SESSION_DURATION_LIMIT_REACHED, EventType.INFO,
+                "Recorded time reached the ${limitSeconds / 60}-minute limit",
+                mapOf("limitSeconds" to limitSeconds.toString(), "modelType" to (modelType ?: ""))
+            )
+            callback?.onSessionDurationLimitReached(sessionId, limitSeconds)
+            val state = _stateFlow.value
+            if (activeSessionId == sessionId && (state == SessionState.RECORDING || state == SessionState.PAUSED)) {
+                try {
+                    stop()
+                } catch (e: ScribeException) {
+                    logger.warn(TAG, "Auto-stop at duration limit failed: ${e.message}")
+                }
+            }
+        }
+        scope.launch { limiter.run() }
     }
 
     private fun cleanup() {

@@ -485,7 +485,7 @@ internal class TransactionManager(
 
 sealed class TransactionResult {
     data class Success(val folderName: String = "", val bid: String = "") : TransactionResult()
-    data class Error(val message: String) : TransactionResult()
+    data class Error(val message: String, val code: String? = null) : TransactionResult()
 }
 
 internal sealed class TransactionPollResult {

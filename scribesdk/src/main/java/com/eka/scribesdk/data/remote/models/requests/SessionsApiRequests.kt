@@ -31,7 +31,10 @@ internal data class PatchSessionRequest(
     @SerializedName("user_status")
     val userStatus: String? = null,
     @SerializedName("processing_status")
-    val processingStatus: String? = null
+    val processingStatus: String? = null,
+    /** Merged into the session's additional_data by the server. */
+    @SerializedName("additional_data")
+    val additionalData: Map<String, Any>? = null
 )
 
 /** Body for `POST /voice/v1/sessions/{session_id}/end`. */
