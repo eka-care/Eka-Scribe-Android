@@ -460,6 +460,8 @@ internal class ScribeSessionIntegrationTest {
             "onSessionPaused should be called on focus loss",
             callbackRecorder.pausedIds.contains(sessionId)
         )
+        // The callback fires right after pause() on the collector thread, so wait for it too
+        waitFor(1000) { callbackRecorder.focusChanges.contains(false) }
         assertTrue(
             "onAudioFocusChanged(false) should be called",
             callbackRecorder.focusChanges.contains(false)

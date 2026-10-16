@@ -125,6 +125,19 @@ internal class GetSessionResponseMapperTest {
     }
 
     @Test
+    fun `a note's own name wins over the template name`() {
+        val result = response(
+            """[{"t-1": {"status": "success", "document_id": "doc_7", "data": "Note"}}]"""
+        ).toScribeResultResponse(
+            JvmCodec,
+            templateNames = mapOf("t-1" to "SOAP Note"),
+            documentNames = mapOf("doc_7" to "Follow-up visit")
+        )
+
+        assertEquals("Follow-up visit", result.data!!.templateResults!!.custom!!.single()!!.name)
+    }
+
+    @Test
     fun `templates given as a plain object are also read`() {
         val result = response(
             """{"soap": {"status": "success", "document_id": "doc_6", "data": "Note"}}"""

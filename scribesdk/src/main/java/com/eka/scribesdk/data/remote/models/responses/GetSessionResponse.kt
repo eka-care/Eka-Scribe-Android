@@ -64,8 +64,10 @@ private val gson = Gson()
  */
 internal fun GetSessionResponse.toScribeResultResponse(
     codec: Base64Codec = AndroidBase64Codec,
-    /** templateId -> display name; the API returns no names, so they come from the local session config. */
-    templateNames: Map<String, String> = emptyMap()
+    /** templateId -> display name (session config, then template catalog); used when a note has no name. */
+    templateNames: Map<String, String> = emptyMap(),
+    /** document_id -> the note's own current name, from "List Session Documents"; wins over [templateNames]. */
+    documentNames: Map<String, String> = emptyMap()
 ): ScribeResultResponse {
     val custom = mutableListOf<ScribeResultResponse.Data.Output?>()
     val integration = mutableListOf<ScribeResultResponse.Data.Integration?>()
@@ -78,6 +80,7 @@ internal fun GetSessionResponse.toScribeResultResponse(
         val name = entry.stringOrNull("name")
             ?: entry.stringOrNull("document_name")
             ?: entry.stringOrNull("template_name")
+            ?: documentId?.let { documentNames[it] }
             ?: templateNames[templateId]?.takeIf { it.isNotBlank() }
             ?: templateId
 
@@ -145,6 +148,15 @@ internal fun GetSessionResponse.toScribeResultResponse(
         )
     )
 }
+
+/** One note in a Get Session result. */
+internal data class DocumentRef(val templateId: String, val documentId: String?, val status: String?)
+
+/** Every note in this result, in response order. */
+internal fun GetSessionResponse.documentRefs(): List<DocumentRef> =
+    templateEntries().map { (templateId, entry) ->
+        DocumentRef(templateId, entry.stringOrNull("document_id"), entry.stringOrNull("status"))
+    }
 
 /** Flattens `templates` (list of `{template_id: {...}}`, or a plain object) into (templateId, entry) pairs. */
 private fun GetSessionResponse.templateEntries(): List<Pair<String, JsonObject>> {

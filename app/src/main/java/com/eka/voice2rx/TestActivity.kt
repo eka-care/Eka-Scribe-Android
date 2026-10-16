@@ -61,6 +61,12 @@ import java.util.Locale
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalContext
 import com.eka.scribesdk.api.models.UploadStage
+import android.util.Base64
+import androidx.compose.runtime.remember
+import com.eka.scribesdk.api.models.SectionData
+import com.eka.scribesdk.api.models.SessionData
+import com.eka.scribesdk.api.models.TemplateType
+import com.google.gson.Gson
 
 class TestActivity : ComponentActivity() {
     companion object {
@@ -672,6 +678,55 @@ fun TestScreen(
                 enabled = !canStop
             ) {
                 Text("RETRY LAST UNFINISHED SESSION")
+            }
+
+            // SAVE TEST EDIT: appends a line to the first note, saves it, then re-reads the session
+            val editScope = rememberCoroutineScope()
+            val editStatus = remember { mutableStateOf("") }
+            OutlinedButton(
+                onClick = {
+                    editScope.launch {
+                        editStatus.value = "Saving edit…"
+                        val output = EkaScribe.getSessionOutput(sessionId).getOrNull()
+                        val note = output?.templates?.firstOrNull { it.templateId != "transcript" }
+                        if (note == null) {
+                            editStatus.value = "No note to edit (record with a template first)"
+                            return@launch
+                        }
+                        val marker = "Edited from Android at ${System.currentTimeMillis()}"
+                        val edited = if (note.type == TemplateType.JSON) {
+                            val sections = note.sections.toMutableList()
+                            val first = sections.firstOrNull() ?: SectionData(title = "Note", value = "")
+                            if (sections.isEmpty()) sections.add(first)
+                            sections[0] = first.copy(value = "${first.value.orEmpty()}\n\n$marker")
+                            Gson().toJson(sections)
+                        } else {
+                            "${note.sections.firstOrNull()?.value.orEmpty()}\n\n$marker"
+                        }
+                        val base64 = Base64.encodeToString(edited.toByteArray(), Base64.NO_WRAP)
+                        val saved = EkaScribe.updateSessionResult(
+                            sessionId = sessionId,
+                            updatedData = listOf(
+                                SessionData(templateId = note.templateId ?: "", documentId = note.documentId, data = base64)
+                            )
+                        )
+                        Log.i("TestActivity", "Save edit result for ${note.documentId}: $saved")
+                        val reread = EkaScribe.getSessionOutput(sessionId).getOrNull()
+                            ?.templates?.firstOrNull { it.documentId == note.documentId }
+                            ?.sections?.joinToString("\n") { it.value.orEmpty() }
+                        editStatus.value = "Save: $saved\nMarker: $marker\n" +
+                            "Marker in re-read output: ${reread?.contains(marker) == true}"
+                    }
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp),
+                enabled = !canStop && sessionId.isNotBlank()
+            ) {
+                Text("SAVE TEST EDIT")
+            }
+            if (editStatus.value.isNotEmpty()) {
+                Text(text = editStatus.value, style = MaterialTheme.typography.bodySmall)
             }
 
             Spacer(modifier = Modifier.height(16.dp))

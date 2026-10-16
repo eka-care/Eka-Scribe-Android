@@ -3,16 +3,22 @@ package com.eka.scribesdk.session
 import com.eka.scribesdk.api.models.OutputTemplate
 import com.eka.scribesdk.api.models.PatientDetail
 import com.eka.scribesdk.api.models.SessionConfig
+import com.eka.scribesdk.api.models.SessionAudioUnavailableException
+import com.eka.scribesdk.api.models.SessionData
 import com.eka.scribesdk.common.logging.NoOpLogger
 import com.eka.scribesdk.data.DataManager
+import com.eka.scribesdk.data.ScribeRepository
 import com.eka.scribesdk.data.local.db.entity.ApiFlow
 import com.eka.scribesdk.data.local.db.entity.AudioChunkEntity
 import com.eka.scribesdk.data.local.db.entity.SessionEntity
 import com.eka.scribesdk.data.local.db.entity.TransactionStage
 import com.eka.scribesdk.data.remote.models.responses.CreateSessionResponse
+import com.eka.scribesdk.data.remote.models.responses.DocumentEnvelopeResponse
 import com.eka.scribesdk.data.remote.models.responses.EndSessionResponse
 import com.eka.scribesdk.data.remote.models.responses.GetSessionResponse
 import com.eka.scribesdk.data.remote.models.responses.PatchSessionResponse
+import com.eka.scribesdk.data.remote.models.responses.ProcessTemplateResponse
+import com.eka.scribesdk.data.remote.models.responses.SessionAudioResponse
 import com.eka.scribesdk.data.remote.models.responses.SessionsApiError
 import com.eka.scribesdk.data.remote.models.responses.SessionsErrorResponse
 import com.eka.scribesdk.data.remote.models.responses.UploadAudioResponse
@@ -35,6 +41,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.IOException
 import retrofit2.Response
 
 internal class SessionsApiFlowTest {
@@ -76,6 +83,15 @@ internal class SessionsApiFlowTest {
         var endResponse: NetworkResponse<EndSessionResponse, SessionsErrorResponse>? = null
         val getResponses = ArrayDeque<NetworkResponse<GetSessionResponse, SessionsErrorResponse>>()
         var getCalls = 0
+        val upsertBodies = mutableListOf<JsonObject>()
+        var upsertResponse: NetworkResponse<DocumentEnvelopeResponse, SessionsErrorResponse>? = null
+        /** null = the call throws, like a network failure. */
+        var documentsResponse: NetworkResponse<JsonObject, SessionsErrorResponse>? = null
+        var processResponse: NetworkResponse<ProcessTemplateResponse, SessionsErrorResponse>? = null
+        var audioResponse: NetworkResponse<SessionAudioResponse, SessionsErrorResponse>? = null
+        var audioCalls = 0
+        val processCalls = mutableListOf<Pair<String, String>>()
+        val documentQueries = mutableListOf<String>()
 
         override suspend fun createSession(request: JsonObject) =
             createResponse!!.also { createBodies += request }
@@ -88,6 +104,21 @@ internal class SessionsApiFlowTest {
 
         override suspend fun endSession(sessionId: String, request: JsonObject) =
             endResponse!!.also { endBodies += request }
+
+        override suspend fun upsertDocument(request: JsonObject) =
+            upsertResponse!!.also { upsertBodies += request }
+
+        override suspend fun getSessionAudio(sessionId: String) =
+            audioResponse!!.also { audioCalls++ }
+
+        override suspend fun processTemplate(sessionId: String, templateId: String) =
+            processResponse!!.also { processCalls += sessionId to templateId }
+
+        override suspend fun getSessionDocument(sessionId: String, documentId: String) =
+            getSession(sessionId).also { documentQueries += documentId }
+
+        override suspend fun listSessionDocuments(sessionId: String) =
+            documentsResponse ?: error("documents call failed")
 
         override suspend fun getSession(sessionId: String): NetworkResponse<GetSessionResponse, SessionsErrorResponse> {
             getCalls++
@@ -189,7 +220,8 @@ internal class SessionsApiFlowTest {
 
         val patch = api.patchBodies.single()
         assertEquals("consultation", patch["session_mode"].asString)
-        assertEquals(1, patch.size())
+        assertEquals("recording_started", patch["user_status"].asString)
+        assertEquals(2, patch.size())
         coVerify { dm.updateUploadStage(SESSION_ID, TransactionStage.STOP.name) }
     }
 
@@ -220,6 +252,38 @@ internal class SessionsApiFlowTest {
     }
 
     // ---- endSession ----
+
+    @Test
+    fun `endSession reports audio_duration in additional_data like the web`() = runTest {
+        val api = FakeSessionsApi().apply {
+            endResponse = netSuccess(EndSessionResponse(SESSION_ID, "processing", null, 2, null), code = 202)
+            patchResponse = patchOk()
+        }
+        val dm = mockk<DataManager>(relaxed = true)
+        coEvery { dm.getUploadedChunks(SESSION_ID) } returns listOf(uploadedChunk(0), uploadedChunk(1))
+        coEvery { dm.getAllChunks(SESSION_ID) } returns listOf(
+            uploadedChunk(0).copy(durationMs = 20_000L),
+            uploadedChunk(1).copy(durationMs = 12_600L)
+        )
+
+        val result = flow(api, dm).endSession(SESSION_ID)
+
+        assertTrue(result is TransactionResult.Success)
+        val additional = api.patchBodies.single()["additional_data"].asJsonObject
+        assertEquals(33, additional["audio_duration"].asInt)
+    }
+
+    @Test
+    fun `endSession still succeeds when audio_duration cannot be saved`() = runTest {
+        val api = FakeSessionsApi().apply {
+            endResponse = netSuccess(EndSessionResponse(SESSION_ID, "processing", null, 1, null), code = 202)
+            patchResponse = netServerError("nope", 500)
+        }
+        val dm = mockk<DataManager>(relaxed = true)
+        coEvery { dm.getAllChunks(SESSION_ID) } returns listOf(uploadedChunk(0).copy(durationMs = 5_000L))
+
+        assertTrue(flow(api, dm).endSession(SESSION_ID) is TransactionResult.Success)
+    }
 
     @Test
     fun `endSession sends uploaded count and moves to COMMIT`() = runTest {
@@ -297,6 +361,242 @@ internal class SessionsApiFlowTest {
         coVerify { dm.updateUploadStage(SESSION_ID, TransactionStage.FAILURE.name) }
     }
 
+    // ---- recording download (Get Session Audio) ----
+
+    private fun audioOk() = netSuccess<SessionAudioResponse, SessionsErrorResponse>(
+        SessionAudioResponse(SESSION_ID, "success", "https://s3.example/audio.mp3?sig", 86_400, 1_800_086_400)
+    )
+
+    private fun audioError(code: Int, errorCode: String) = NetworkResponse.ServerError<SessionAudioResponse, SessionsErrorResponse>(
+        SessionsErrorResponse(error = SessionsApiError(code = errorCode, message = errorCode), message = null),
+        Response.error<Any>(code, "{}".toResponseBody("application/json".toMediaType()))
+    )
+
+    private fun downloader(
+        api: FakeSessionsApi,
+        streamed: MutableList<String> = mutableListOf(),
+        succeeds: Boolean = true
+    ) = SessionAudioDownloader(api, NoOpLogger()) { url, destination ->
+        streamed += url
+        destination.write("mp3-bytes".toByteArray())
+        succeeds
+    }
+
+    private fun <T> Result<T>.reason() = (exceptionOrNull() as SessionAudioUnavailableException).reason
+
+    @Test
+    fun `link comes straight from Get Session Audio`() = runTest {
+        val api = FakeSessionsApi().apply { audioResponse = audioOk() }
+
+        val link = downloader(api).link(SESSION_ID).getOrThrow()
+
+        assertEquals("https://s3.example/audio.mp3?sig", link.url)
+        assertEquals(1_800_086_400_000L, link.expiresAtMillis)
+        assertEquals(1, api.audioCalls)
+        assertEquals(0, api.getCalls)
+    }
+
+    @Test
+    fun `audio API errors map to clear reasons`() = runTest {
+        val cases = listOf(
+            audioError(403, "audio_not_enabled") to SessionAudioUnavailableException.Reason.NOT_ENABLED,
+            audioError(404, "audio_not_available") to SessionAudioUnavailableException.Reason.NOT_READY,
+            audioError(404, "resource_not_found") to SessionAudioUnavailableException.Reason.NOT_FOUND,
+            audioError(410, "expired") to SessionAudioUnavailableException.Reason.EXPIRED
+        )
+        for ((response, reason) in cases) {
+            val api = FakeSessionsApi().apply { audioResponse = response }
+            assertEquals(reason, downloader(api).link(SESSION_ID).reason())
+        }
+    }
+
+    @Test
+    fun `download streams the recording into the destination`() = runTest {
+        val api = FakeSessionsApi().apply { audioResponse = audioOk() }
+        val streamed = mutableListOf<String>()
+        val destination = java.io.ByteArrayOutputStream()
+
+        val result = downloader(api, streamed).download(SESSION_ID, destination)
+
+        assertTrue(result.isSuccess)
+        assertEquals(listOf("https://s3.example/audio.mp3?sig"), streamed)
+        assertEquals("mp3-bytes", destination.toString())
+    }
+
+    @Test
+    fun `download fails cleanly when the transfer fails or there is no recording`() = runTest {
+        val failing = FakeSessionsApi().apply { audioResponse = audioOk() }
+        val failed = downloader(failing, succeeds = false).download(SESSION_ID, java.io.ByteArrayOutputStream())
+        assertEquals(SessionAudioUnavailableException.Reason.FAILED, failed.reason())
+
+        val missing = FakeSessionsApi().apply { audioResponse = audioError(404, "resource_not_found") }
+        val streamed = mutableListOf<String>()
+        val result = downloader(missing, streamed).download(SESSION_ID, java.io.ByteArrayOutputStream())
+        assertEquals(SessionAudioUnavailableException.Reason.NOT_FOUND, result.reason())
+        assertTrue(streamed.isEmpty())
+    }
+
+    // ---- convert to another template (Process Template) ----
+
+    private fun processStarted(documentId: String? = "d9") = netSuccess<ProcessTemplateResponse, SessionsErrorResponse>(
+        ProcessTemplateResponse(SESSION_ID, "t-9", documentId, "in-progress", "Template generation in progress"),
+        code = 202
+    )
+
+    private fun documentBody(status: String, documentId: String = "d9") = GetSessionResponse(
+        sessionId = SESSION_ID, status = "completed", createdAt = null, languageDetected = null,
+        transcript = null, message = null,
+        templates = JsonParser.parseString("""[{"t-9": {"status": "$status", "document_id": "$documentId"}}]""")
+    )
+
+    private fun processor(api: FakeSessionsApi, maxAttempts: Int = 5) =
+        SessionsTemplateProcessor(api, NoOpLogger(), maxAttempts = maxAttempts, intervalMs = 10)
+
+    @Test
+    fun `convert starts Process Template and waits for the new note`() = runTest {
+        val api = FakeSessionsApi().apply {
+            processResponse = processStarted()
+            getResponses.addLast(netSuccess(processingBody(), code = 202))
+            getResponses.addLast(netSuccess(documentBody("in-progress")))
+            getResponses.addLast(netSuccess(documentBody("success")))
+        }
+
+        val result = processor(api).process(SESSION_ID, "t-9")
+
+        assertTrue(result.isSuccess)
+        assertEquals(listOf(SESSION_ID to "t-9"), api.processCalls)
+        assertEquals(listOf("d9", "d9", "d9"), api.documentQueries)
+    }
+
+    @Test
+    fun `convert polls the whole session when no document id comes back`() = runTest {
+        val api = FakeSessionsApi().apply {
+            processResponse = processStarted(documentId = null)
+            getResponses.addLast(netSuccess(documentBody("success")))
+        }
+
+        val result = processor(api).process(SESSION_ID, "t-9")
+
+        assertTrue(result.isSuccess)
+        assertTrue(api.documentQueries.isEmpty())
+        assertEquals(1, api.getCalls)
+    }
+
+    @Test
+    fun `convert fails when the new note fails`() = runTest {
+        val api = FakeSessionsApi().apply {
+            processResponse = processStarted()
+            getResponses.addLast(netSuccess(documentBody("failure")))
+        }
+
+        val result = processor(api).process(SESSION_ID, "t-9")
+
+        assertTrue(result.isFailure)
+        assertEquals(1, api.getCalls)
+    }
+
+    @Test
+    fun `convert fails without polling when Process Template is refused`() = runTest {
+        val api = FakeSessionsApi().apply { processResponse = netServerError("Session not found", 404) }
+
+        val result = processor(api).process(SESSION_ID, "t-9")
+
+        assertEquals("Session not found", result.exceptionOrNull()?.message)
+        assertEquals(0, api.getCalls)
+    }
+
+    @Test
+    fun `convert keeps polling through server errors and gives up after the budget`() = runTest {
+        val api = FakeSessionsApi().apply {
+            processResponse = processStarted()
+            getResponses.addLast(netServerError("busy", 503))
+            getResponses.addLast(netSuccess(documentBody("in-progress")))
+        }
+
+        val result = processor(api, maxAttempts = 3).process(SESSION_ID, "t-9")
+
+        assertTrue(result.isFailure)
+        assertEquals(3, api.getCalls)
+    }
+
+    @Test
+    fun `repository converts Sessions API sessions with Process Template, legacy with convert-to-template`() = runTest {
+        val api = FakeSessionsApi().apply {
+            processResponse = processStarted()
+            getResponses.addLast(netSuccess(documentBody("success")))
+        }
+        val legacyApi = mockk<ScribeApiService>()
+        coEvery { legacyApi.convertTransactionResult("legacy-session", "t-9") } returns
+            NetworkResponse.NetworkError(IOException("legacy endpoint called"))
+        val repository = ScribeRepository(
+            apiService = legacyApi,
+            logger = NoOpLogger(),
+            usesSessionsApi = { sessionId -> sessionId == SESSION_ID },
+            sessionsTemplateProcessor = processor(api)
+        )
+
+        assertTrue(repository.convertTransactionResult(SESSION_ID, "t-9").isSuccess)
+        assertEquals(listOf(SESSION_ID to "t-9"), api.processCalls)
+
+        val legacy = repository.convertTransactionResult("legacy-session", "t-9")
+        assertEquals("legacy endpoint called", legacy.exceptionOrNull()?.message)
+        assertEquals(1, api.processCalls.size)
+    }
+
+    // ---- note titles ----
+
+    private fun fetcher(api: FakeSessionsApi, templateNameCalls: MutableList<List<String>>) =
+        SessionsResultFetcher(api, NoOpLogger()) { _, ids ->
+            templateNameCalls += ids
+            mapOf("soap" to "SOAP Note")
+        }
+
+    private fun SessionFetchState?.noteName(): String? =
+        (this as SessionFetchState.Done).result.data!!.templateResults!!.custom!!.single()!!.name
+
+    @Test
+    fun `fetch titles notes with their own name and skips the template lookup`() = runTest {
+        val api = FakeSessionsApi().apply {
+            getResponses.addLast(netSuccess(failedOnlyBody()))
+            documentsResponse = netSuccess(
+                JsonParser.parseString(
+                    """{"status": "success", "data": {"documents": [{"document_id": "d1", "document_name": "Renamed note"}]}}"""
+                ).asJsonObject
+            )
+        }
+        val templateNameCalls = mutableListOf<List<String>>()
+
+        val name = fetcher(api, templateNameCalls).fetch(SESSION_ID).noteName()
+
+        assertEquals("Renamed note", name)
+        assertTrue(templateNameCalls.isEmpty())
+    }
+
+    @Test
+    fun `fetch falls back to template names when the documents call fails`() = runTest {
+        val api = FakeSessionsApi().apply { getResponses.addLast(netSuccess(failedOnlyBody())) }
+        val templateNameCalls = mutableListOf<List<String>>()
+
+        val name = fetcher(api, templateNameCalls).fetch(SESSION_ID).noteName()
+
+        assertEquals("SOAP Note", name)
+        assertEquals(listOf(listOf("soap")), templateNameCalls)
+    }
+
+    @Test
+    fun `fetch falls back to template names for notes the documents call does not name`() = runTest {
+        val api = FakeSessionsApi().apply {
+            getResponses.addLast(netSuccess(failedOnlyBody()))
+            documentsResponse = netSuccess(
+                JsonParser.parseString("""{"status": "success", "data": {"documents": []}}""").asJsonObject
+            )
+        }
+
+        val name = fetcher(api, mutableListOf()).fetch(SESSION_ID).noteName()
+
+        assertEquals("SOAP Note", name)
+    }
+
     @Test
     fun `pollResult maps 410 to an expired failure`() = runTest {
         val api = FakeSessionsApi().apply { getResponses.addLast(netServerError("expired", 410)) }
@@ -318,6 +618,88 @@ internal class SessionsApiFlowTest {
 
         assertTrue(result is TransactionPollResult.Failed)
         assertEquals(1, api.getCalls)
+    }
+
+    // ---- SessionsDocumentWriter ----
+
+    private fun uploadUrlOk(url: String = "https://s3.example/put") =
+        netSuccess<DocumentEnvelopeResponse, SessionsErrorResponse>(
+            DocumentEnvelopeResponse("success", DocumentEnvelopeResponse.DocumentData("doc-1", SESSION_ID, "success", url))
+        )
+
+    private fun publishedDocOk() = netSuccess<DocumentEnvelopeResponse, SessionsErrorResponse>(
+        DocumentEnvelopeResponse(
+            "success",
+            DocumentEnvelopeResponse.DocumentData(
+                "doc-1", SESSION_ID, "success", "https://s3.example/put",
+                publish = JsonParser.parseString("""{"emr_webhook": {"status": "success"}}""").asJsonObject
+            )
+        )
+    )
+
+    @Test
+    fun `document writer unpublishes a note published to the EMR before saving`() = runTest {
+        val api = FakeSessionsApi().apply { upsertResponse = publishedDocOk() }
+        val puts = mutableListOf<String>()
+        val writer = SessionsDocumentWriter(api, NoOpLogger()) { url, _ -> puts += url; true }
+
+        val result = writer.save(SESSION_ID, listOf(SessionData(templateId = "t1", documentId = "doc-1", data = "SGVsbG8=")))
+
+        assertTrue(result.isSuccess)
+        assertEquals(2, api.upsertBodies.size)
+        assertNull(api.upsertBodies[0]["publish"])
+        val webhook = api.upsertBodies[1]["publish"].asJsonObject["emr_webhook"].asJsonObject
+        assertEquals("unpublished", webhook["status"].asString)
+        assertEquals("doc-1", api.upsertBodies[1]["document_id"].asString)
+        assertEquals(listOf("https://s3.example/put"), puts)
+    }
+
+    @Test
+    fun `document writer leaves unpublished notes alone`() = runTest {
+        val api = FakeSessionsApi().apply { upsertResponse = uploadUrlOk() }
+        val writer = SessionsDocumentWriter(api, NoOpLogger()) { _, _ -> true }
+
+        writer.save(SESSION_ID, listOf(SessionData(templateId = "t1", documentId = "doc-1", data = "SGVsbG8=")))
+
+        assertEquals(1, api.upsertBodies.size)
+    }
+
+    @Test
+    fun `document writer gets an upload url and PUTs the base64 content`() = runTest {
+        val api = FakeSessionsApi().apply { upsertResponse = uploadUrlOk() }
+        val puts = mutableListOf<Pair<String, String>>()
+        val writer = SessionsDocumentWriter(api, NoOpLogger()) { url, body -> puts += url to body; true }
+
+        val result = writer.save(SESSION_ID, listOf(SessionData(templateId = "t1", documentId = "doc-1", data = "SGVsbG8=")))
+
+        assertTrue(result.isSuccess)
+        val body = api.upsertBodies.single()
+        assertEquals(SESSION_ID, body["session_id"].asString)
+        assertEquals("doc-1", body["document_id"].asString)
+        assertEquals(listOf("https://s3.example/put" to "SGVsbG8="), puts)
+    }
+
+    @Test
+    fun `document writer refreshes the url once when the PUT fails`() = runTest {
+        val api = FakeSessionsApi().apply { upsertResponse = uploadUrlOk() }
+        var attempts = 0
+        val writer = SessionsDocumentWriter(api, NoOpLogger()) { _, _ -> ++attempts == 2 }
+
+        val result = writer.save(SESSION_ID, listOf(SessionData("t1", "doc-1", "SGVsbG8=")))
+
+        assertTrue(result.isSuccess)
+        assertEquals(2, api.upsertBodies.size)
+    }
+
+    @Test
+    fun `document writer fails when the server refuses the update`() = runTest {
+        val api = FakeSessionsApi().apply { upsertResponse = netServerError("Document not found", 404) }
+        val writer = SessionsDocumentWriter(api, NoOpLogger()) { _, _ -> true }
+
+        val result = writer.save(SESSION_ID, listOf(SessionData("t1", "doc-1", "SGVsbG8=")))
+
+        assertTrue(result.isFailure)
+        assertEquals("Document not found", result.exceptionOrNull()?.message)
     }
 
     @Test

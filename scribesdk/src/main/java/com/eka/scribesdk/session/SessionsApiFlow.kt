@@ -16,6 +16,7 @@ import com.eka.scribesdk.data.remote.services.SessionsApiService
 import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.haroldadmin.cnradapter.NetworkResponse
+import kotlinx.coroutines.CancellationException
 
 /**
  * Session lifecycle on the EkaScribe Sessions API (`/voice/v1/sessions`):
@@ -37,6 +38,8 @@ internal class SessionsApiFlow(
         private const val MAX_TEMPLATES = 2
         private const val AUTO_DETECT = "auto_detect"
         private const val STATUS_CANCELLED = "cancelled"
+        private const val USER_STATUS_RECORDING_STARTED = "recording_started"
+        private const val AUDIO_DURATION = "audio_duration"
 
         // Same cadence as the web client: every 2s; give up after 2 minutes
         private const val POLL_INTERVAL_MS = 2_000L
@@ -96,12 +99,40 @@ internal class SessionsApiFlow(
             }
         }
 
-        // session_mode is not part of the create body; it can only be set by PATCH before end
-        val modeResult = patchSession(sessionId, PatchSessionRequest(sessionMode = sessionConfig.mode))
+        // session_mode is not part of the create body; it can only be set by PATCH before end.
+        // user_status = recording_started as the web sends it, so a session that never reaches
+        // End shows on web as "recording started" (recommit offered), not as a fresh session
+        val modeResult = patchSession(
+            sessionId,
+            PatchSessionRequest(sessionMode = sessionConfig.mode, userStatus = USER_STATUS_RECORDING_STARTED)
+        )
         if (modeResult is TransactionResult.Error) return modeResult
 
         dataManager.updateUploadStage(sessionId, TransactionStage.STOP.name)
         return TransactionResult.Success()
+    }
+
+    /**
+     * `additional_data.audio_duration` (seconds), as the web sends after End, so web can show the
+     * recording length. Best effort: failures are only logged.
+     */
+    private suspend fun reportAudioDuration(sessionId: String) {
+        try {
+            val durationMs = dataManager.getAllChunks(sessionId).sumOf { it.durationMs }
+            if (durationMs <= 0) return
+            val seconds = (durationMs + 500) / 1000
+            val result = patchSession(
+                sessionId,
+                PatchSessionRequest(additionalData = mapOf(AUDIO_DURATION to seconds))
+            )
+            if (result is TransactionResult.Error) {
+                logger.warn(TAG, "audio_duration not saved for $sessionId: ${result.message}")
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            logger.warn(TAG, "audio_duration not saved for $sessionId", e)
+        }
     }
 
     /** `POST /sessions/{id}/end`. Starts server-side processing; the stage moves to COMMIT. */
@@ -116,6 +147,7 @@ internal class SessionsApiFlow(
                     TAG,
                     "Session ended: $sessionId, sent=$uploadedCount, received=${response.body.audioFilesReceived}"
                 )
+                reportAudioDuration(sessionId)
                 TransactionResult.Success()
             }
 
