@@ -183,14 +183,10 @@ internal class SessionManagerTest {
     // =====================================================================
 
     @Test
-    fun `pause from IDLE throws`() {
+    fun `pause from IDLE is a no-op`() {
         val manager = createManager()
-        try {
-            manager.pause()
-            fail("Should throw from IDLE")
-        } catch (e: ScribeException) {
-            assertEquals(ErrorCode.INVALID_STATE_TRANSITION, e.code)
-        }
+        manager.pause()
+        assertEquals(SessionState.IDLE, manager.currentState)
     }
 
     @Test
@@ -212,14 +208,10 @@ internal class SessionManagerTest {
     // =====================================================================
 
     @Test
-    fun `resume from IDLE throws`() {
+    fun `resume from IDLE is a no-op`() {
         val manager = createManager()
-        try {
-            manager.resume()
-            fail("Should throw from IDLE")
-        } catch (e: ScribeException) {
-            assertEquals(ErrorCode.INVALID_STATE_TRANSITION, e.code)
-        }
+        manager.resume()
+        assertEquals(SessionState.IDLE, manager.currentState)
     }
 
     @Test
@@ -240,14 +232,10 @@ internal class SessionManagerTest {
     // =====================================================================
 
     @Test
-    fun `stop from IDLE throws`() {
+    fun `stop from IDLE is a no-op`() {
         val manager = createManager()
-        try {
-            manager.stop()
-            fail("Should throw from IDLE")
-        } catch (e: ScribeException) {
-            assertEquals(ErrorCode.INVALID_STATE_TRANSITION, e.code)
-        }
+        manager.stop()
+        assertEquals(SessionState.IDLE, manager.currentState)
     }
 
     @Test
