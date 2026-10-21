@@ -23,7 +23,15 @@ internal sealed class SessionFetchState {
     /** 410: the session expired before processing; create a new one. */
     data object Expired : SessionFetchState()
 
-    data class Error(val message: String, val retryable: Boolean) : SessionFetchState()
+    /**
+     * [notOnSessionsApi]: the Sessions API does not know this session id: 404, or 400/422 for an id
+     * it cannot accept (old legacy ids are longer than its 32-char limit).
+     */
+    data class Error(
+        val message: String,
+        val retryable: Boolean,
+        val notOnSessionsApi: Boolean = false
+    ) : SessionFetchState()
 }
 
 /**
@@ -42,6 +50,7 @@ internal class SessionsResultFetcher(
         private const val HTTP_PARTIAL = 206
         private const val HTTP_PROCESSING = 202
         private const val HTTP_GONE = 410
+        private val HTTP_UNKNOWN_SESSION = setOf(400, 404, 422)
         private const val MAX_BACKOFF_MS = 10_000L
     }
 
@@ -64,7 +73,11 @@ internal class SessionsResultFetcher(
                     SessionFetchState.Expired
                 } else {
                     val message = response.body.readableMessage("Get session failed (HTTP $code)")
-                    SessionFetchState.Error(message, retryable = code == null || code >= 500 || code == 429)
+                    SessionFetchState.Error(
+                        message,
+                        retryable = code == null || code >= 500 || code == 429,
+                        notOnSessionsApi = code in HTTP_UNKNOWN_SESSION
+                    )
                 }
             }
 
