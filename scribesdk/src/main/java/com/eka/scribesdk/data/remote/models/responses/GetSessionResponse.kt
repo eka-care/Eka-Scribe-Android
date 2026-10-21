@@ -89,7 +89,9 @@ internal fun GetSessionResponse.toScribeResultResponse(
      * could not be read; empty and editable ([contextPlaceholderId]) when the session has none.
      * When false, a context is shown only if its text is in [contextTexts].
      */
-    alwaysShowContext: Boolean = false
+    alwaysShowContext: Boolean = false,
+    /** Overall audio quality (0..1); Get Session lacks it, so it comes from "List Session Documents". */
+    audioQuality: Double? = null
 ): ScribeResultResponse {
     val custom = mutableListOf<ScribeResultResponse.Data.Output?>()
     val contexts = mutableListOf<ScribeResultResponse.Data.Output?>()
@@ -194,7 +196,7 @@ internal fun GetSessionResponse.toScribeResultResponse(
 
     return ScribeResultResponse(
         data = ScribeResultResponse.Data(
-            audioMatrix = null,
+            audioMatrix = audioQuality?.let { ScribeResultResponse.Data.AudioMatrix(quality = it) },
             createdAt = createdAt,
             output = null,
             templateResults = ScribeResultResponse.Data.TemplateResults(

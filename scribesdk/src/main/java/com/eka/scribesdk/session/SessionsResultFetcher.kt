@@ -8,9 +8,11 @@ import com.eka.scribesdk.data.remote.models.responses.AndroidBase64Codec
 import com.eka.scribesdk.data.remote.models.responses.Base64Codec
 import com.eka.scribesdk.data.remote.models.responses.CONTEXT
 import com.eka.scribesdk.data.remote.models.responses.documentRefs
+import com.eka.scribesdk.data.remote.models.responses.toAudioQuality
 import com.eka.scribesdk.data.remote.models.responses.toDocumentNames
 import com.eka.scribesdk.data.remote.models.responses.toScribeResultResponse
 import com.eka.scribesdk.data.remote.services.SessionsApiService
+import com.google.gson.JsonObject
 import com.haroldadmin.cnradapter.NetworkResponse
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
@@ -99,7 +101,8 @@ internal class SessionsResultFetcher(
      * names are looked up only for notes that call did not name, e.g. when it fails.
      */
     private suspend fun toResult(sessionId: String, body: GetSessionResponse): ScribeResultResponse {
-        val documentNames = documentNames(sessionId)
+        val sessionDocuments = sessionDocuments(sessionId)
+        val documentNames = sessionDocuments?.toDocumentNames().orEmpty()
         val unnamedTemplateIds = body.documentRefs()
             .filter { (_, documentId) -> documentId == null || documentId !in documentNames }
             .map { (templateId, _) -> templateId }
@@ -114,7 +117,8 @@ internal class SessionsResultFetcher(
             templateNames = templateNames,
             documentNames = documentNames,
             contextTexts = contextTexts(body),
-            alwaysShowContext = contextReader != null
+            alwaysShowContext = contextReader != null,
+            audioQuality = sessionDocuments?.toAudioQuality()
         )
     }
 
@@ -127,21 +131,24 @@ internal class SessionsResultFetcher(
             .toMap()
     }
 
-    /** document_id -> current note name; empty on any failure, so titles fall back to template names. */
-    private suspend fun documentNames(sessionId: String): Map<String, String> =
+    /**
+     * "List Session Documents" (note names, audio quality); null on any failure, so titles fall
+     * back to template names and no quality is shown.
+     */
+    private suspend fun sessionDocuments(sessionId: String): JsonObject? =
         try {
             when (val response = apiService.listSessionDocuments(sessionId)) {
-                is NetworkResponse.Success -> response.body.toDocumentNames()
+                is NetworkResponse.Success -> response.body
                 else -> {
-                    logger.warn(TAG, "Note names unavailable for $sessionId; using template names")
-                    emptyMap()
+                    logger.warn(TAG, "Session documents unavailable for $sessionId; using template names")
+                    null
                 }
             }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            logger.warn(TAG, "Note names unavailable for $sessionId; using template names", e)
-            emptyMap()
+            logger.warn(TAG, "Session documents unavailable for $sessionId; using template names", e)
+            null
         }
 
     /**

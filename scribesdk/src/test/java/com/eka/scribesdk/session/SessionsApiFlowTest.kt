@@ -641,6 +641,21 @@ internal class SessionsApiFlowTest {
     }
 
     @Test
+    fun `fetch takes the audio quality from the session documents call`() = runTest {
+        val api = FakeSessionsApi().apply {
+            getResponses.addLast(netSuccess(failedOnlyBody()))
+            documentsResponse = netSuccess(
+                JsonParser.parseString("""{"status": "success", "data": {"audio_matrix": {"quality": 0.85}, "documents": []}}""")
+                    .asJsonObject
+            )
+        }
+
+        val state = fetcher(api, mutableListOf()).fetch(SESSION_ID)
+
+        assertEquals(0.85, (state as SessionFetchState.Done).result.data!!.audioMatrix!!.quality!!, 0.0)
+    }
+
+    @Test
     fun `fetch falls back to template names when the documents call fails`() = runTest {
         val api = FakeSessionsApi().apply { getResponses.addLast(netSuccess(failedOnlyBody())) }
         val templateNameCalls = mutableListOf<List<String>>()

@@ -3,6 +3,7 @@ package com.eka.scribesdk.data.remote.models.responses
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 internal class SessionDocumentsResponseTest {
@@ -18,6 +19,18 @@ internal class SessionDocumentsResponseTest {
         ).toDocumentNames()
 
         assertEquals(mapOf("d1" to "SOAP Note", "d2" to "Eka EMR"), names)
+    }
+
+    @Test
+    fun `reads the audio quality score`() {
+        assertEquals(
+            0.85,
+            json("""{"status": "success", "data": {"audio_matrix": {"quality": 0.85}, "documents": []}}""")
+                .toAudioQuality()!!,
+            0.0
+        )
+        assertNull(json("""{"data": {"audio_matrix": {}}}""").toAudioQuality())
+        assertNull(json("""{"data": {"audio_matrix": {"quality": "n/a"}}}""").toAudioQuality())
     }
 
     @Test
