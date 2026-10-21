@@ -531,7 +531,10 @@ internal class SessionsApiFlowTest {
         val repository = ScribeRepository(
             apiService = legacyApi,
             logger = NoOpLogger(),
-            usesSessionsApi = { sessionId -> sessionId == SESSION_ID },
+            sessionApiRouter = SessionApiRouter(
+                sessionsApiEnabled = false,
+                recordedOnSessionsApi = { sessionId -> if (sessionId == SESSION_ID) true else null }
+            ),
             sessionsTemplateProcessor = processor(api)
         )
 
@@ -541,6 +544,65 @@ internal class SessionsApiFlowTest {
         val legacy = repository.convertTransactionResult("legacy-session", "t-9")
         assertEquals("legacy endpoint called", legacy.exceptionOrNull()?.message)
         assertEquals(1, api.processCalls.size)
+    }
+
+    // ---- sessions recorded on another client (web, extension, another phone) ----
+
+    @Test
+    fun `repository reads a session from another client on the Sessions API when enabled`() = runTest {
+        val api = FakeSessionsApi().apply { getResponses.addLast(netSuccess(documentBody("success"))) }
+        val repository = ScribeRepository(
+            apiService = mockk(),
+            logger = NoOpLogger(),
+            sessionsResultFetcher = SessionsResultFetcher(api, NoOpLogger()),
+            sessionApiRouter = SessionApiRouter(sessionsApiEnabled = true, recordedOnSessionsApi = { null })
+        )
+
+        assertTrue(repository.getSessionOutput("sc-web0123456789abcdef0123456789").isSuccess)
+        assertEquals(1, api.getCalls)
+    }
+
+    @Test
+    fun `repository falls back to legacy when the Sessions API does not know a remote session`() = runTest {
+        val api = FakeSessionsApi().apply {
+            getResponses.addLast(netServerError("not found", 404))
+            processResponse = processStarted()
+        }
+        val legacyApi = mockk<ScribeApiService>()
+        coEvery { legacyApi.getTransactionResult("old-session", null) } returns
+            NetworkResponse.NetworkError(IOException("legacy read called"))
+        coEvery { legacyApi.convertTransactionResult("old-session", "t-9") } returns
+            NetworkResponse.NetworkError(IOException("legacy convert called"))
+        val repository = ScribeRepository(
+            apiService = legacyApi,
+            logger = NoOpLogger(),
+            sessionsResultFetcher = SessionsResultFetcher(api, NoOpLogger()),
+            sessionApiRouter = SessionApiRouter(sessionsApiEnabled = true, recordedOnSessionsApi = { null }),
+            sessionsTemplateProcessor = processor(api)
+        )
+
+        val read = repository.getSessionOutput("old-session")
+        assertEquals("legacy read called", read.exceptionOrNull()?.message)
+
+        // Remembered: convert for the same session goes to legacy without asking the Sessions API again
+        val convert = repository.convertTransactionResult("old-session", "t-9")
+        assertEquals("legacy convert called", convert.exceptionOrNull()?.message)
+        assertTrue(api.processCalls.isEmpty())
+        assertEquals(1, api.getCalls)
+    }
+
+    @Test
+    fun `repository does not fall back to legacy for a Sessions API session recorded on this device`() = runTest {
+        val api = FakeSessionsApi().apply { getResponses.addLast(netServerError("not found", 404)) }
+        val repository = ScribeRepository(
+            apiService = mockk(),
+            logger = NoOpLogger(),
+            sessionsResultFetcher = SessionsResultFetcher(api, NoOpLogger()),
+            sessionApiRouter = SessionApiRouter(sessionsApiEnabled = true, recordedOnSessionsApi = { true })
+        )
+
+        val read = repository.getSessionOutput(SESSION_ID)
+        assertEquals("not found", read.exceptionOrNull()?.message)
     }
 
     // ---- note titles ----
