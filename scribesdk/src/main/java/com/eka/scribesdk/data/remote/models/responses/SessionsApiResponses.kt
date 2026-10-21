@@ -119,9 +119,12 @@ internal data class DocumentEnvelopeResponse(
         val sessionId: String?,
         @SerializedName("status")
         val status: String?,
-        /** PUT URL for the document content (valid for a short time). */
+        /** Content URL, valid for a short time: PUT after create/update, GET from Get Document. */
         @SerializedName("presigned_url")
         val presignedUrl: String?,
+        /** `custom`, `context`, `transcript`, `integration`. */
+        @SerializedName("document_type")
+        val documentType: String? = null,
         /** Publish state, e.g. `{"emr_webhook": {"status": "success", ...}}` once pushed to the EMR. */
         @SerializedName("publish")
         val publish: JsonObject? = null

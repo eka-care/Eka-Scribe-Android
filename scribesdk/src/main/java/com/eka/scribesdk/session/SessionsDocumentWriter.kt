@@ -3,6 +3,9 @@ package com.eka.scribesdk.session
 import com.eka.scribesdk.api.models.SessionData
 import com.eka.scribesdk.common.logging.Logger
 import com.eka.scribesdk.data.remote.models.requests.UpsertDocumentRequest
+import com.eka.scribesdk.data.remote.models.responses.AndroidBase64Codec
+import com.eka.scribesdk.data.remote.models.responses.Base64Codec
+import com.eka.scribesdk.data.remote.models.responses.CONTEXT
 import com.eka.scribesdk.data.remote.models.responses.DocumentEnvelopeResponse
 import com.eka.scribesdk.data.remote.models.responses.readableMessage
 import com.eka.scribesdk.data.remote.services.SessionsApiService
@@ -28,15 +31,22 @@ import java.util.concurrent.TimeUnit
  * Like the web editor, a note already published to the EMR (`publish.emr_webhook.status ==
  * "success"`) is marked unpublished before its content changes, so the EMR is not left holding
  * a version that no longer matches the note.
+ *
+ * For the context document, the web editor's JSON is saved too (the web shows that JSON in
+ * preference to the markdown), so Android edits to the context show up on the web.
  */
 internal class SessionsDocumentWriter(
     private val apiService: SessionsApiService,
     private val logger: Logger,
+    private val codec: Base64Codec = AndroidBase64Codec,
     /** PUTs [body] to a pre-signed URL; returns true on 2xx. Replaceable in tests. */
     private val putContent: suspend (url: String, body: String) -> Boolean = { url, body -> defaultPut(url, body) }
 ) {
     companion object {
         private const val TAG = "SessionsDocumentWriter"
+
+        /** template_id the API gives context documents; a fallback when document_type is missing. */
+        private const val CONTEXT_TEMPLATE_ID = "__non_tmp_doc"
         private const val CONTENT_TYPE = "text/plain"
         private const val STATUS_PUBLISHED = "success"
         private const val STATUS_UNPUBLISHED = "unpublished"
@@ -89,11 +99,36 @@ internal class SessionsDocumentWriter(
             }
             if (ok) {
                 logger.info(TAG, "Document saved: ${item.documentId} (session $sessionId)")
-                return Result.success(true)
+                val isContext = document.documentType.equals(CONTEXT, ignoreCase = true) ||
+                        item.templateId == CONTEXT_TEMPLATE_ID
+                return if (isContext) saveEditorJson(sessionId, item) else Result.success(true)
             }
             logger.warn(TAG, "PUT rejected for ${item.documentId}, attempt ${attempt + 1}/2")
         }
         return Result.failure(Exception("Failed to upload document content for ${item.documentId}"))
+    }
+
+    /** Saves the web editor JSON for [item]'s text, as the web does after saving the markdown. */
+    private suspend fun saveEditorJson(sessionId: String, item: SessionData): Result<Boolean> {
+        val text = codec.decode(item.data)?.toString(Charsets.UTF_8)
+            ?: return Result.failure(Exception("Could not read the edited text for ${item.documentId}"))
+        val body = JsonObject().apply {
+            addProperty("session_id", sessionId)
+            addProperty("document_id", item.documentId)
+            add("tiptap_json", MarkdownToTiptap.convert(text))
+        }
+        val message = when (val response = apiService.saveDocumentEditorJson(body)) {
+            is NetworkResponse.Success -> {
+                logger.info(TAG, "Editor JSON saved: ${item.documentId}")
+                return Result.success(true)
+            }
+
+            is NetworkResponse.ServerError -> response.body.readableMessage("HTTP ${response.code}")
+            is NetworkResponse.NetworkError -> response.error.message ?: "Network error"
+            is NetworkResponse.UnknownError -> response.error.message ?: "Unknown error"
+        }
+        logger.warn(TAG, "Editor JSON not saved for ${item.documentId}: $message")
+        return Result.failure(Exception("Saved, but the web may still show the old text: $message"))
     }
 
     private fun DocumentEnvelopeResponse.DocumentData.isPublishedToEmr(): Boolean {
