@@ -21,5 +21,16 @@ internal fun JsonObject.toDocumentNames(): Map<String, String> {
         .toMap()
 }
 
+/**
+ * `data.audio_matrix.quality` (0..1) from "List Session Documents"; Get Session does not return it.
+ * Null when absent or not a number.
+ */
+internal fun JsonObject.toAudioQuality(): Double? {
+    val data = get("data")?.takeIf { it.isJsonObject }?.asJsonObject ?: this
+    val quality = data.get("audio_matrix")?.takeIf { it.isJsonObject }?.asJsonObject?.get("quality")
+        ?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isNumber } ?: return null
+    return quality.asDouble
+}
+
 private fun JsonObject.primitiveString(key: String): String? =
     get(key)?.takeIf { it.isJsonPrimitive }?.asString
