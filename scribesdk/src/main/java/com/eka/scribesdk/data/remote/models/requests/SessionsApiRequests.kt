@@ -53,5 +53,10 @@ internal data class UpsertDocumentRequest(
     val documentId: String? = null,
     /** e.g. `{"emr_webhook": {"status": "unpublished", ...}}`; omitted when null. */
     @SerializedName("publish")
-    val publish: JsonObject? = null
+    val publish: JsonObject? = null,
+    /** Document category when creating, e.g. `context`; omitted when null. */
+    @SerializedName("type")
+    val type: String? = null,
+    @SerializedName("document_name")
+    val documentName: String? = null
 )
