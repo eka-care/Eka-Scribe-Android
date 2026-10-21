@@ -7,6 +7,7 @@ import com.google.gson.Gson
 import com.google.gson.JsonArray
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
+import com.google.gson.JsonPrimitive
 import com.google.gson.annotations.SerializedName
 import java.nio.ByteBuffer
 import java.nio.charset.CharacterCodingException
@@ -54,6 +55,8 @@ internal object AndroidBase64Codec : Base64Codec {
 }
 
 private const val TRANSCRIPT = "transcript"
+internal const val CONTEXT = "context"
+private const val CONTEXT_NAME = "Context"
 private val BASE64_PATTERN = Regex("^[A-Za-z0-9+/\\r\\n]+={0,2}$")
 private val gson = Gson()
 
@@ -67,9 +70,15 @@ internal fun GetSessionResponse.toScribeResultResponse(
     /** templateId -> display name (session config, then template catalog); used when a note has no name. */
     templateNames: Map<String, String> = emptyMap(),
     /** document_id -> the note's own current name, from "List Session Documents"; wins over [templateNames]. */
-    documentNames: Map<String, String> = emptyMap()
+    documentNames: Map<String, String> = emptyMap(),
+    /**
+     * document_id -> text of the session's context document. Get Session lists that document
+     * without its text, so it is downloaded separately; without an entry here it is not shown.
+     */
+    contextTexts: Map<String, String> = emptyMap()
 ): ScribeResultResponse {
     val custom = mutableListOf<ScribeResultResponse.Data.Output?>()
+    val contexts = mutableListOf<ScribeResultResponse.Data.Output?>()
     val integration = mutableListOf<ScribeResultResponse.Data.Integration?>()
     var transcriptDocumentId: String? = null
 
@@ -86,7 +95,20 @@ internal fun GetSessionResponse.toScribeResultResponse(
 
         when {
             documentType == TRANSCRIPT || templateId == TRANSCRIPT -> transcriptDocumentId = documentId
-            documentType == "context" -> Unit
+            documentType == CONTEXT -> {
+                val text = documentId?.let { contextTexts[it] } ?: continue
+                contexts += ScribeResultResponse.Data.Output(
+                    documentId = documentId,
+                    documentType = "custom",
+                    errors = null,
+                    name = documentId.let { documentNames[it] } ?: CONTEXT_NAME,
+                    status = ResultStatus.SUCCESS,
+                    templateId = templateId,
+                    type = OutputType.MARKDOWN,
+                    value = codec.encode(text),
+                    warnings = null
+                )
+            }
             documentType != null && (documentType.contains("integration") || documentType.contains("eka_emr")) -> {
                 // System documents often come back empty (null, {}, {"prescription": {}}); those are not notes
                 val text = entry.get("data")?.takeIf { it.hasContent() }?.toPlainText(codec)
@@ -142,7 +164,8 @@ internal fun GetSessionResponse.toScribeResultResponse(
             createdAt = createdAt,
             output = null,
             templateResults = ScribeResultResponse.Data.TemplateResults(
-                custom = custom,
+                // Context after the notes, so a note (not the context) is what opens first
+                custom = custom + contexts,
                 integration = integration,
                 transcript = transcripts
             )
@@ -151,12 +174,22 @@ internal fun GetSessionResponse.toScribeResultResponse(
 }
 
 /** One note in a Get Session result. */
-internal data class DocumentRef(val templateId: String, val documentId: String?, val status: String?)
+internal data class DocumentRef(
+    val templateId: String,
+    val documentId: String?,
+    val status: String?,
+    val documentType: String? = null
+)
 
 /** Every note in this result, in response order. */
 internal fun GetSessionResponse.documentRefs(): List<DocumentRef> =
     templateEntries().map { (templateId, entry) ->
-        DocumentRef(templateId, entry.stringOrNull("document_id"), entry.stringOrNull("status"))
+        DocumentRef(
+            templateId,
+            entry.stringOrNull("document_id"),
+            entry.stringOrNull("status"),
+            entry.stringOrNull("document_type")?.lowercase()
+        )
     }
 
 /** Flattens `templates` (list of `{template_id: {...}}`, or a plain object) into (templateId, entry) pairs. */
@@ -237,6 +270,10 @@ private fun String.parsesAsSections(): Boolean =
     } catch (e: Exception) {
         false
     }
+
+/** A stored document's text (as downloaded from its presigned URL): base64 UTF-8 is decoded, plain text kept. */
+internal fun decodeStoredText(raw: String, codec: Base64Codec = AndroidBase64Codec): String =
+    JsonPrimitive(raw).toPlainText(codec)
 
 /** String content as plain text; decodes it first if it is base64-encoded UTF-8. */
 private fun JsonElement.toPlainText(codec: Base64Codec): String {

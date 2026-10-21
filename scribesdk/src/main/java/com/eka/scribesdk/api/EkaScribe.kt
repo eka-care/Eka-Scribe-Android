@@ -48,6 +48,7 @@ import com.eka.scribesdk.session.AudioFileProcessor
 import com.eka.scribesdk.session.SessionAudioDownloader
 import com.eka.scribesdk.session.SessionManager
 import com.eka.scribesdk.session.SessionApiRouter
+import com.eka.scribesdk.session.SessionContextReader
 import com.eka.scribesdk.session.SessionsApiFlow
 import com.eka.scribesdk.session.SessionsDocumentWriter
 import com.eka.scribesdk.session.SessionsResultFetcher
@@ -254,7 +255,8 @@ object EkaScribe {
         val sessionsResultFetcher = SessionsResultFetcher(
             apiService = sessionsApiService,
             logger = logger,
-            templateNames = templateNameResolver::namesFor
+            templateNames = templateNameResolver::namesFor,
+            contextReader = SessionContextReader(apiService = sessionsApiService, logger = logger)
         )
 
         val txnManager = TransactionManager(

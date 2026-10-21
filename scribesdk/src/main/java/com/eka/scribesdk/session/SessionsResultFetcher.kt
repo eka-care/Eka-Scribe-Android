@@ -4,6 +4,9 @@ import com.eka.scribesdk.common.logging.Logger
 import com.eka.scribesdk.data.remote.models.responses.ScribeResultResponse
 import com.eka.scribesdk.data.remote.models.responses.readableMessage
 import com.eka.scribesdk.data.remote.models.responses.GetSessionResponse
+import com.eka.scribesdk.data.remote.models.responses.AndroidBase64Codec
+import com.eka.scribesdk.data.remote.models.responses.Base64Codec
+import com.eka.scribesdk.data.remote.models.responses.CONTEXT
 import com.eka.scribesdk.data.remote.models.responses.documentRefs
 import com.eka.scribesdk.data.remote.models.responses.toDocumentNames
 import com.eka.scribesdk.data.remote.models.responses.toScribeResultResponse
@@ -41,6 +44,9 @@ internal sealed class SessionFetchState {
 internal class SessionsResultFetcher(
     private val apiService: SessionsApiService,
     private val logger: Logger,
+    /** Downloads the context text (Get Session lists the context document without it); null = not shown. */
+    private val contextReader: SessionContextReader? = null,
+    private val codec: Base64Codec = AndroidBase64Codec,
     /** templateId -> name for a session's templates; used as note titles. */
     private val templateNames: suspend (sessionId: String, templateIds: List<String>) -> Map<String, String> =
         { _, _ -> emptyMap() }
@@ -103,7 +109,21 @@ internal class SessionsResultFetcher(
         } else {
             templateNames(sessionId, unnamedTemplateIds)
         }
-        return body.toScribeResultResponse(templateNames = templateNames, documentNames = documentNames)
+        return body.toScribeResultResponse(
+            codec = codec,
+            templateNames = templateNames,
+            documentNames = documentNames,
+            contextTexts = contextTexts(body)
+        )
+    }
+
+    /** document_id -> text for the session's context documents that could be read. */
+    private suspend fun contextTexts(body: GetSessionResponse): Map<String, String> {
+        val reader = contextReader ?: return emptyMap()
+        return body.documentRefs()
+            .filter { it.documentType == CONTEXT }
+            .mapNotNull { ref -> ref.documentId?.let { id -> reader.read(id)?.let { id to it } } }
+            .toMap()
     }
 
     /** document_id -> current note name; empty on any failure, so titles fall back to template names. */

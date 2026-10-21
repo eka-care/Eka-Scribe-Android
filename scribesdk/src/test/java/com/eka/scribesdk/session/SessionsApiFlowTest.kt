@@ -117,6 +117,17 @@ internal class SessionsApiFlowTest {
         override suspend fun getSessionDocument(sessionId: String, documentId: String) =
             getSession(sessionId).also { documentQueries += documentId }
 
+        var getDocumentResponse: NetworkResponse<DocumentEnvelopeResponse, SessionsErrorResponse>? = null
+        val getDocumentCalls = mutableListOf<String>()
+        var editorJsonResponse: NetworkResponse<DocumentEnvelopeResponse, SessionsErrorResponse>? = null
+        val editorJsonBodies = mutableListOf<JsonObject>()
+
+        override suspend fun getDocument(documentId: String) =
+            getDocumentResponse!!.also { getDocumentCalls += documentId }
+
+        override suspend fun saveDocumentEditorJson(request: JsonObject, tiptapJson: Boolean) =
+            editorJsonResponse!!.also { editorJsonBodies += request }
+
         override suspend fun listSessionDocuments(sessionId: String) =
             documentsResponse ?: error("documents call failed")
 
@@ -698,6 +709,114 @@ internal class SessionsApiFlowTest {
             )
         )
     )
+
+    // ---- context (typed on the web's Context tab) ----
+
+    private object JvmCodec : com.eka.scribesdk.data.remote.models.responses.Base64Codec {
+        override fun encode(text: String): String =
+            java.util.Base64.getEncoder().encodeToString(text.toByteArray(Charsets.UTF_8))
+
+        override fun decode(base64: String): ByteArray? =
+            try {
+                java.util.Base64.getMimeDecoder().decode(base64)
+            } catch (e: IllegalArgumentException) {
+                null
+            }
+    }
+
+    private fun contextDocOk(url: String = "https://s3.example/context") =
+        netSuccess<DocumentEnvelopeResponse, SessionsErrorResponse>(
+            DocumentEnvelopeResponse(
+                "success",
+                DocumentEnvelopeResponse.DocumentData("ctx-1", SESSION_ID, "success", url, documentType = "context")
+            )
+        )
+
+    private fun sessionWithContextBody() = GetSessionResponse(
+        sessionId = SESSION_ID,
+        status = "completed",
+        createdAt = null,
+        languageDetected = null,
+        transcript = null,
+        templates = JsonParser.parseString(
+            """[{"soap": {"status": "success", "document_id": "d1", "document_type": "custom", "data": "Fever 3 days"}},
+                {"__non_tmp_doc": {"status": "success", "document_id": "ctx-1", "document_type": "context"}}]"""
+        ),
+        message = null
+    )
+
+    @Test
+    fun `fetch shows the context after the notes, read from its download link`() = runTest {
+        val api = FakeSessionsApi().apply {
+            getResponses.addLast(netSuccess(sessionWithContextBody()))
+            getDocumentResponse = contextDocOk()
+        }
+        val downloads = mutableListOf<String>()
+        val reader = SessionContextReader(api, NoOpLogger()) { url -> downloads += url; "Known diabetic, on metformin" }
+
+        val state = SessionsResultFetcher(api, NoOpLogger(), contextReader = reader, codec = JvmCodec).fetch(SESSION_ID)
+
+        val notes = (state as SessionFetchState.Done).result.data!!.templateResults!!.custom!!
+        assertEquals(listOf("d1", "ctx-1"), notes.map { it!!.documentId })
+        val context = notes[1]!!
+        assertEquals("Context", context.name)
+        assertEquals("__non_tmp_doc", context.templateId)
+        assertEquals(listOf("ctx-1"), api.getDocumentCalls)
+        assertEquals(listOf("https://s3.example/context"), downloads)
+    }
+
+    @Test
+    fun `fetch leaves the context out when it cannot be downloaded`() = runTest {
+        val api = FakeSessionsApi().apply {
+            getResponses.addLast(netSuccess(sessionWithContextBody()))
+            getDocumentResponse = contextDocOk()
+        }
+        val reader = SessionContextReader(api, NoOpLogger()) { null }
+
+        val state = SessionsResultFetcher(api, NoOpLogger(), contextReader = reader, codec = JvmCodec).fetch(SESSION_ID)
+
+        val notes = (state as SessionFetchState.Done).result.data!!.templateResults!!.custom!!
+        assertEquals(listOf("d1"), notes.map { it!!.documentId })
+    }
+
+    @Test
+    fun `document writer also saves the web editor JSON for the context`() = runTest {
+        val api = FakeSessionsApi().apply {
+            upsertResponse = contextDocOk("https://s3.example/put")
+            editorJsonResponse = contextDocOk()
+        }
+        val puts = mutableListOf<String>()
+        val writer = SessionsDocumentWriter(api, NoOpLogger(), JvmCodec) { _, body -> puts += body; true }
+        val text = "Known diabetic\non metformin"
+
+        val result = writer.save(SESSION_ID, listOf(SessionData("__non_tmp_doc", "ctx-1", JvmCodec.encode(text))))
+
+        assertTrue(result.isSuccess)
+        assertEquals(listOf(JvmCodec.encode(text)), puts)
+        val body = api.editorJsonBodies.single()
+        assertEquals(SESSION_ID, body["session_id"].asString)
+        assertEquals("ctx-1", body["document_id"].asString)
+        val paragraph = body["tiptap_json"].asJsonObject["content"].asJsonArray.single().asJsonObject
+        assertEquals(
+            listOf("Known diabetic", "hardBreak", "on metformin"),
+            paragraph["content"].asJsonArray.map { node ->
+                node.asJsonObject["text"]?.asString ?: node.asJsonObject["type"].asString
+            }
+        )
+    }
+
+    @Test
+    fun `document writer reports when the context text saved but the web JSON did not`() = runTest {
+        val api = FakeSessionsApi().apply {
+            upsertResponse = contextDocOk("https://s3.example/put")
+            editorJsonResponse = netServerError("bad request", 400)
+        }
+        val writer = SessionsDocumentWriter(api, NoOpLogger(), JvmCodec) { _, _ -> true }
+
+        val result = writer.save(SESSION_ID, listOf(SessionData("__non_tmp_doc", "ctx-1", JvmCodec.encode("x"))))
+
+        assertTrue(result.isFailure)
+    }
 
     @Test
     fun `document writer unpublishes a note published to the EMR before saving`() = runTest {
