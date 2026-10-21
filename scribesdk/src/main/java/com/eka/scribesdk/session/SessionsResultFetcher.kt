@@ -113,7 +113,8 @@ internal class SessionsResultFetcher(
             codec = codec,
             templateNames = templateNames,
             documentNames = documentNames,
-            contextTexts = contextTexts(body)
+            contextTexts = contextTexts(body),
+            alwaysShowContext = contextReader != null
         )
     }
 

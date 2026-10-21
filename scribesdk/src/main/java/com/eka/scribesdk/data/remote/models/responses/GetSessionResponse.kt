@@ -56,7 +56,15 @@ internal object AndroidBase64Codec : Base64Codec {
 
 private const val TRANSCRIPT = "transcript"
 internal const val CONTEXT = "context"
-private const val CONTEXT_NAME = "Context"
+internal const val CONTEXT_NAME = "Context"
+private const val CONTEXT_TEMPLATE_ID = "__non_tmp_doc"
+
+// Mobile sessions get this system document; it is always shown as the one "Clinical Notes"
+private const val CLINICAL_NOTES_TEMPLATE = "clinical_notes_template"
+private const val CLINICAL_NOTES_NAME = "Clinical Notes"
+
+/** Id of the empty Context note shown when a session has no context yet; saving it creates one. */
+internal fun contextPlaceholderId(sessionId: String): String = "${sessionId}_$CONTEXT"
 private val BASE64_PATTERN = Regex("^[A-Za-z0-9+/\\r\\n]+={0,2}$")
 private val gson = Gson()
 
@@ -73,14 +81,21 @@ internal fun GetSessionResponse.toScribeResultResponse(
     documentNames: Map<String, String> = emptyMap(),
     /**
      * document_id -> text of the session's context document. Get Session lists that document
-     * without its text, so it is downloaded separately; without an entry here it is not shown.
+     * without its text, so it is downloaded separately.
      */
-    contextTexts: Map<String, String> = emptyMap()
+    contextTexts: Map<String, String> = emptyMap(),
+    /**
+     * Always show a Context note: editable with its text; read-only and empty when its text
+     * could not be read; empty and editable ([contextPlaceholderId]) when the session has none.
+     * When false, a context is shown only if its text is in [contextTexts].
+     */
+    alwaysShowContext: Boolean = false
 ): ScribeResultResponse {
     val custom = mutableListOf<ScribeResultResponse.Data.Output?>()
     val contexts = mutableListOf<ScribeResultResponse.Data.Output?>()
     val integration = mutableListOf<ScribeResultResponse.Data.Integration?>()
     var transcriptDocumentId: String? = null
+    var hasContextDocument = false
 
     for ((templateId, entry) in templateEntries()) {
         val documentType = entry.stringOrNull("document_type")?.lowercase()
@@ -96,31 +111,41 @@ internal fun GetSessionResponse.toScribeResultResponse(
         when {
             documentType == TRANSCRIPT || templateId == TRANSCRIPT -> transcriptDocumentId = documentId
             documentType == CONTEXT -> {
-                val text = documentId?.let { contextTexts[it] } ?: continue
-                contexts += ScribeResultResponse.Data.Output(
-                    documentId = documentId,
-                    documentType = "custom",
-                    errors = null,
-                    name = documentId.let { documentNames[it] } ?: CONTEXT_NAME,
-                    status = ResultStatus.SUCCESS,
-                    templateId = templateId,
-                    type = OutputType.MARKDOWN,
-                    value = codec.encode(text),
-                    warnings = null
-                )
+                if (documentId == null) continue
+                hasContextDocument = true
+                val contextName = documentNames[documentId] ?: CONTEXT_NAME
+                val text = contextTexts[documentId]
+                if (text != null) {
+                    contexts += contextNote(documentId, templateId, contextName, text, codec)
+                } else if (alwaysShowContext) {
+                    // Text could not be read: shown, but read-only so an edit can't overwrite it
+                    integration += ScribeResultResponse.Data.Integration(
+                        documentId = documentId,
+                        documentType = CONTEXT,
+                        errors = null,
+                        name = contextName,
+                        status = ResultStatus.SUCCESS,
+                        templateId = templateId,
+                        type = OutputType.TEXT,
+                        value = codec.encode(""),
+                        warnings = null
+                    )
+                }
             }
             documentType != null && (documentType.contains("integration") || documentType.contains("eka_emr")) -> {
-                // System documents often come back empty (null, {}, {"prescription": {}}); those are not notes
+                // System documents often come back empty (null, {}, {"prescription": {}}); those are
+                // not notes, except Clinical Notes, which is always shown (blank when empty)
                 val text = entry.get("data")?.takeIf { it.hasContent() }?.toPlainText(codec)
+                val isClinicalNotes = templateId == CLINICAL_NOTES_TEMPLATE
                 integration += ScribeResultResponse.Data.Integration(
                     documentId = documentId,
                     documentType = documentType,
                     errors = null,
-                    name = name,
-                    status = status,
+                    name = if (isClinicalNotes && name == templateId) CLINICAL_NOTES_NAME else name,
+                    status = if (isClinicalNotes) ResultStatus.SUCCESS else status,
                     templateId = templateId,
                     type = OutputType.EKA_EMR,
-                    value = text?.let(codec::encode),
+                    value = (if (isClinicalNotes) text.orEmpty() else text)?.let(codec::encode),
                     warnings = null
                 )
             }
@@ -141,6 +166,15 @@ internal fun GetSessionResponse.toScribeResultResponse(
                 )
             }
         }
+    }
+
+    // One "Clinical Notes": a generated note with that name replaces the system document
+    if (custom.any { it?.name?.trim().equals(CLINICAL_NOTES_NAME, ignoreCase = true) }) {
+        integration.removeAll { it?.templateId == CLINICAL_NOTES_TEMPLATE }
+    }
+
+    if (alwaysShowContext && !hasContextDocument && !sessionId.isNullOrBlank()) {
+        contexts += contextNote(contextPlaceholderId(sessionId), CONTEXT_TEMPLATE_ID, CONTEXT_NAME, "", codec)
     }
 
     val transcripts = transcript?.takeIf { it.isNotBlank() }?.let { text ->
@@ -172,6 +206,24 @@ internal fun GetSessionResponse.toScribeResultResponse(
         )
     )
 }
+
+private fun contextNote(
+    documentId: String,
+    templateId: String,
+    name: String,
+    text: String,
+    codec: Base64Codec
+) = ScribeResultResponse.Data.Output(
+    documentId = documentId,
+    documentType = "custom",
+    errors = null,
+    name = name,
+    status = ResultStatus.SUCCESS,
+    templateId = templateId,
+    type = OutputType.MARKDOWN,
+    value = codec.encode(text),
+    warnings = null
+)
 
 /** One note in a Get Session result. */
 internal data class DocumentRef(

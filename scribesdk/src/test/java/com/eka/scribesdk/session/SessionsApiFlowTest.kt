@@ -119,14 +119,9 @@ internal class SessionsApiFlowTest {
 
         var getDocumentResponse: NetworkResponse<DocumentEnvelopeResponse, SessionsErrorResponse>? = null
         val getDocumentCalls = mutableListOf<String>()
-        var editorJsonResponse: NetworkResponse<DocumentEnvelopeResponse, SessionsErrorResponse>? = null
-        val editorJsonBodies = mutableListOf<JsonObject>()
 
         override suspend fun getDocument(documentId: String) =
             getDocumentResponse!!.also { getDocumentCalls += documentId }
-
-        override suspend fun saveDocumentEditorJson(request: JsonObject, tiptapJson: Boolean) =
-            editorJsonResponse!!.also { editorJsonBodies += request }
 
         override suspend fun listSessionDocuments(sessionId: String) =
             documentsResponse ?: error("documents call failed")
@@ -766,7 +761,7 @@ internal class SessionsApiFlowTest {
     }
 
     @Test
-    fun `fetch leaves the context out when it cannot be downloaded`() = runTest {
+    fun `fetch shows the context read-only and empty when it cannot be downloaded`() = runTest {
         val api = FakeSessionsApi().apply {
             getResponses.addLast(netSuccess(sessionWithContextBody()))
             getDocumentResponse = contextDocOk()
@@ -775,47 +770,58 @@ internal class SessionsApiFlowTest {
 
         val state = SessionsResultFetcher(api, NoOpLogger(), contextReader = reader, codec = JvmCodec).fetch(SESSION_ID)
 
-        val notes = (state as SessionFetchState.Done).result.data!!.templateResults!!.custom!!
-        assertEquals(listOf("d1"), notes.map { it!!.documentId })
+        val results = (state as SessionFetchState.Done).result.data!!.templateResults!!
+        assertEquals(listOf("d1"), results.custom!!.map { it!!.documentId })
+        assertEquals(listOf("ctx-1"), results.integration!!.map { it!!.documentId })
     }
 
     @Test
-    fun `document writer also saves the web editor JSON for the context`() = runTest {
+    fun `fetch shows an empty editable Context when the session has none`() = runTest {
         val api = FakeSessionsApi().apply {
-            upsertResponse = contextDocOk("https://s3.example/put")
-            editorJsonResponse = contextDocOk()
+            getResponses.addLast(
+                netSuccess(
+                    sessionWithContextBody().copy(
+                        templates = JsonParser.parseString(
+                            """[{"soap": {"status": "success", "document_id": "d1", "data": "Fever"}}]"""
+                        )
+                    )
+                )
+            )
+        }
+        val reader = SessionContextReader(api, NoOpLogger()) { error("nothing to download") }
+
+        val state = SessionsResultFetcher(api, NoOpLogger(), contextReader = reader, codec = JvmCodec).fetch(SESSION_ID)
+
+        val notes = (state as SessionFetchState.Done).result.data!!.templateResults!!.custom!!
+        assertEquals(listOf("d1", "${SESSION_ID}_context"), notes.map { it!!.documentId })
+        assertEquals("Context", notes[1]!!.name)
+        assertTrue(api.getDocumentCalls.isEmpty())
+    }
+
+    @Test
+    fun `saving the empty Context creates the context document once, then saves the text`() = runTest {
+        val api = FakeSessionsApi().apply {
+            upsertResponse = netSuccess(
+                DocumentEnvelopeResponse(
+                    "success",
+                    DocumentEnvelopeResponse.DocumentData("ctx-new", SESSION_ID, "success", "https://s3.example/put")
+                )
+            )
         }
         val puts = mutableListOf<String>()
-        val writer = SessionsDocumentWriter(api, NoOpLogger(), JvmCodec) { _, body -> puts += body; true }
-        val text = "Known diabetic\non metformin"
+        val writer = SessionsDocumentWriter(api, NoOpLogger()) { _, body -> puts += body; true }
+        val placeholder = SessionData("__non_tmp_doc", "${SESSION_ID}_context", "S25vd24gZGlhYmV0aWM=")
 
-        val result = writer.save(SESSION_ID, listOf(SessionData("__non_tmp_doc", "ctx-1", JvmCodec.encode(text))))
+        assertTrue(writer.save(SESSION_ID, listOf(placeholder)).isSuccess)
+        assertTrue(writer.save(SESSION_ID, listOf(placeholder)).isSuccess)
 
-        assertTrue(result.isSuccess)
-        assertEquals(listOf(JvmCodec.encode(text)), puts)
-        val body = api.editorJsonBodies.single()
-        assertEquals(SESSION_ID, body["session_id"].asString)
-        assertEquals("ctx-1", body["document_id"].asString)
-        val paragraph = body["tiptap_json"].asJsonObject["content"].asJsonArray.single().asJsonObject
-        assertEquals(
-            listOf("Known diabetic", "hardBreak", "on metformin"),
-            paragraph["content"].asJsonArray.map { node ->
-                node.asJsonObject["text"]?.asString ?: node.asJsonObject["type"].asString
-            }
-        )
-    }
-
-    @Test
-    fun `document writer reports when the context text saved but the web JSON did not`() = runTest {
-        val api = FakeSessionsApi().apply {
-            upsertResponse = contextDocOk("https://s3.example/put")
-            editorJsonResponse = netServerError("bad request", 400)
-        }
-        val writer = SessionsDocumentWriter(api, NoOpLogger(), JvmCodec) { _, _ -> true }
-
-        val result = writer.save(SESSION_ID, listOf(SessionData("__non_tmp_doc", "ctx-1", JvmCodec.encode("x"))))
-
-        assertTrue(result.isFailure)
+        val creates = api.upsertBodies.filter { it.has("type") }
+        assertEquals(1, creates.size)
+        assertEquals("context", creates.single()["type"].asString)
+        assertEquals("Context", creates.single()["document_name"].asString)
+        assertNull(creates.single()["document_id"])
+        assertTrue(api.upsertBodies.filterNot { it.has("type") }.all { it["document_id"].asString == "ctx-new" })
+        assertEquals(listOf("S25vd24gZGlhYmV0aWM=", "S25vd24gZGlhYmV0aWM="), puts)
     }
 
     @Test

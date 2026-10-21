@@ -71,17 +71,6 @@ internal interface SessionsApiService {
     ): NetworkResponse<DocumentEnvelopeResponse, SessionsErrorResponse>
 
     /**
-     * Saves a document's web-editor (Tiptap) JSON: `POST documents?tiptap_json=true` with
-     * `{session_id, document_id, tiptap_json}`, as the web editor does. Not in the public docs;
-     * the web shows this JSON in preference to the markdown, so it must follow edits.
-     */
-    @POST("voice/api/v1/documents")
-    suspend fun saveDocumentEditorJson(
-        @Body request: JsonObject,
-        @Query("tiptap_json") tiptapJson: Boolean = true
-    ): NetworkResponse<DocumentEnvelopeResponse, SessionsErrorResponse>
-
-    /**
      * "List Session Documents": the session's notes with their current names (`document_name`,
      * renames included), which [getSession] does not return. Used only for note titles; content
      * still comes from [getSession]. Spec: developer.eka.care/ekascribe/api-reference/openapi.yaml
