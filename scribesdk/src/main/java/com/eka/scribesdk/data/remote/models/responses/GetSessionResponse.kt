@@ -88,7 +88,8 @@ internal fun GetSessionResponse.toScribeResultResponse(
             documentType == TRANSCRIPT || templateId == TRANSCRIPT -> transcriptDocumentId = documentId
             documentType == "context" -> Unit
             documentType != null && (documentType.contains("integration") || documentType.contains("eka_emr")) -> {
-                val text = entry.get("data")?.toPlainText(codec)
+                // System documents often come back empty (null, {}, {"prescription": {}}); those are not notes
+                val text = entry.get("data")?.takeIf { it.hasContent() }?.toPlainText(codec)
                 integration += ScribeResultResponse.Data.Integration(
                     documentId = documentId,
                     documentType = documentType,
@@ -217,6 +218,15 @@ private fun JsonArray.toSections(): List<SectionData> =
         val obj = item.asJsonObject
         SectionData(title = obj.stringOrNull("title"), value = obj.get("value")?.displayText())
     }
+
+/** False for null, blank text, and objects/arrays that hold nothing but such values. */
+private fun JsonElement.hasContent(): Boolean = when {
+    isJsonNull -> false
+    isJsonPrimitive -> !asJsonPrimitive.isString || asString.isNotBlank()
+    isJsonObject -> asJsonObject.entrySet().any { (_, value) -> value.hasContent() }
+    isJsonArray -> asJsonArray.any { it.hasContent() }
+    else -> false
+}
 
 private fun JsonElement.displayText(): String =
     if (isJsonPrimitive) asString else if (isJsonNull) "" else toString()

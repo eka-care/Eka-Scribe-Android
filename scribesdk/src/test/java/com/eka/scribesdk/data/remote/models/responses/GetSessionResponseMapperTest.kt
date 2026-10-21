@@ -116,6 +116,25 @@ internal class GetSessionResponseMapperTest {
     }
 
     @Test
+    fun `empty system documents from mobile sessions are not shown as notes`() {
+        // Real mobile session: integration docs requested at create come back with no content
+        val result = response(
+            """[
+                {"eka_emr_template": {"status": "success", "document_id": "d1", "document_type": "integration",
+                    "data": {"prescription": {}}}},
+                {"nic_template": {"status": "success", "document_id": "d2", "document_type": "integration", "data": {}}},
+                {"clinical_notes_template": {"status": "success", "document_id": "d3",
+                    "document_type": "integration", "data": null}},
+                {"9d9675c6": {"status": "success", "document_id": "d4", "document_type": "custom",
+                    "data": "No medical information is available in this conversation."}}
+            ]"""
+        ).toScribeResultResponse(JvmCodec)
+
+        assertTrue(result.toSessionResult("a-1").templates.none { it.documentId in setOf("d1", "d2", "d3") })
+        assertEquals(listOf("d4", "a-1_transcript"), result.toSessionResult("a-1").templates.map { it.documentId })
+    }
+
+    @Test
     fun `template name comes from the saved config when the API has none`() {
         val result = response(
             """[{"t-1": {"status": "success", "document_id": "doc_7", "data": "Note"}}]"""
