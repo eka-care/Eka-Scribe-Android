@@ -21,6 +21,19 @@ internal fun JsonObject.toDocumentNames(): Map<String, String> {
         .toMap()
 }
 
+/** document_id -> `created_at` (epoch seconds) from "List Session Documents"; documents without one are left out. */
+internal fun JsonObject.toDocumentCreatedAt(): Map<String, Long> {
+    val data = get("data")?.takeIf { it.isJsonObject }?.asJsonObject ?: this
+    val documents = data.get("documents")?.takeIf { it.isJsonArray }?.asJsonArray ?: return emptyMap()
+    return documents.mapNotNull { element ->
+        val document = element.takeIf { it.isJsonObject }?.asJsonObject ?: return@mapNotNull null
+        val id = document.primitiveString("document_id") ?: return@mapNotNull null
+        val createdAt = document.get("created_at")
+            ?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isNumber }?.asLong ?: return@mapNotNull null
+        id to createdAt
+    }.toMap()
+}
+
 /**
  * `data.audio_matrix.quality` (0..1) from "List Session Documents"; Get Session does not return it.
  * Null when absent or not a number.

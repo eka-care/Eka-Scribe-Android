@@ -9,6 +9,7 @@ import com.eka.scribesdk.data.remote.models.responses.Base64Codec
 import com.eka.scribesdk.data.remote.models.responses.CONTEXT
 import com.eka.scribesdk.data.remote.models.responses.documentRefs
 import com.eka.scribesdk.data.remote.models.responses.toAudioQuality
+import com.eka.scribesdk.data.remote.models.responses.toDocumentCreatedAt
 import com.eka.scribesdk.data.remote.models.responses.toDocumentNames
 import com.eka.scribesdk.data.remote.models.responses.toScribeResultResponse
 import com.eka.scribesdk.data.remote.services.SessionsApiService
@@ -118,7 +119,8 @@ internal class SessionsResultFetcher(
             documentNames = documentNames,
             contextTexts = contextTexts(body),
             alwaysShowContext = contextReader != null,
-            audioQuality = sessionDocuments?.toAudioQuality()
+            audioQuality = sessionDocuments?.toAudioQuality(),
+            documentCreatedAt = sessionDocuments?.toDocumentCreatedAt().orEmpty()
         )
     }
 
