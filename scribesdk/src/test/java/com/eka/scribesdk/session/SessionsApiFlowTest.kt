@@ -909,4 +909,31 @@ internal class SessionsApiFlowTest {
         assertEquals(ApiFlow.SESSIONS_V1, ApiFlow.forNewSession(true))
         assertNull(ApiFlow.forNewSession(false))
     }
+
+    // ---- cancelSession ----
+
+    @Test
+    fun `cancelSession patches user_status and processing_status to cancelled`() = runTest {
+        val api = FakeSessionsApi().apply { patchResponse = patchOk() }
+        val dm = mockk<DataManager>(relaxed = true)
+
+        flow(api, dm).cancelSession(SESSION_ID)
+
+        val patch = api.patchBodies.single()
+        assertEquals("cancelled", patch["user_status"].asString)
+        assertEquals("cancelled", patch["processing_status"].asString)
+        assertEquals(2, patch.size())
+    }
+
+    @Test
+    fun `cancelSession ignores a failed patch`() = runTest {
+        val api = FakeSessionsApi().apply { patchResponse = netServerError("gone", 404) }
+        val dm = mockk<DataManager>(relaxed = true)
+
+        flow(api, dm).cancelSession(SESSION_ID)
+
+        val patch = api.patchBodies.single()
+        assertEquals("cancelled", patch["user_status"].asString)
+        assertEquals("cancelled", patch["processing_status"].asString)
+    }
 }
