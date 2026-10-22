@@ -22,6 +22,18 @@ internal class SessionDocumentsResponseTest {
     }
 
     @Test
+    fun `reads each document's created_at`() {
+        val createdAt = json(
+            """{"data": {"documents": [
+                 {"document_id": "d1", "created_at": 1792574331},
+                 {"document_id": "d2", "created_at": null},
+                 {"document_id": "d3"}]}}"""
+        ).toDocumentCreatedAt()
+
+        assertEquals(mapOf("d1" to 1792574331L), createdAt)
+    }
+
+    @Test
     fun `reads the audio quality score`() {
         assertEquals(
             0.85,

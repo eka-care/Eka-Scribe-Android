@@ -146,6 +146,25 @@ internal class GetSessionResponseMapperTest {
     }
 
     @Test
+    fun `only the newest Clinical Notes that can be shown is kept`() {
+        val templates = response(
+            """[
+                {"clinical_notes_template": {"status": "success", "document_id": "sys", "document_type": "integration", "data": null}},
+                {"9d96": {"status": "success", "document_id": "old", "document_type": "custom", "data": "First"}},
+                {"9d96": {"status": "success", "document_id": "new", "document_type": "custom", "data": "Second"}},
+                {"9d96": {"status": "failure", "document_id": "failed", "document_type": "custom", "data": null}},
+                {"soap": {"status": "success", "document_id": "soap", "document_type": "custom", "data": "Other note"}}
+            ]"""
+        ).toScribeResultResponse(
+            JvmCodec,
+            documentNames = mapOf("old" to "Clinical Notes", "new" to "Clinical Notes", "failed" to "Clinical Notes"),
+            documentCreatedAt = mapOf("sys" to 100L, "old" to 200L, "new" to 300L, "failed" to 400L)
+        ).toSessionResult("a-1").templates
+
+        assertEquals(listOf("new", "soap", "a-1_transcript"), templates.map { it.documentId })
+    }
+
+    @Test
     fun `template name comes from the saved config when the API has none`() {
         val result = response(
             """[{"t-1": {"status": "success", "document_id": "doc_7", "data": "Note"}}]"""

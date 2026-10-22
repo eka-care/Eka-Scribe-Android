@@ -91,7 +91,9 @@ internal fun GetSessionResponse.toScribeResultResponse(
      */
     alwaysShowContext: Boolean = false,
     /** Overall audio quality (0..1); Get Session lacks it, so it comes from "List Session Documents". */
-    audioQuality: Double? = null
+    audioQuality: Double? = null,
+    /** document_id -> created_at (epoch seconds), from "List Session Documents"; picks the newest Clinical Notes. */
+    documentCreatedAt: Map<String, Long> = emptyMap()
 ): ScribeResultResponse {
     val custom = mutableListOf<ScribeResultResponse.Data.Output?>()
     val contexts = mutableListOf<ScribeResultResponse.Data.Output?>()
@@ -170,10 +172,7 @@ internal fun GetSessionResponse.toScribeResultResponse(
         }
     }
 
-    // One "Clinical Notes": a generated note with that name replaces the system document
-    if (custom.any { it?.name?.trim().equals(CLINICAL_NOTES_NAME, ignoreCase = true) }) {
-        integration.removeAll { it?.templateId == CLINICAL_NOTES_TEMPLATE }
-    }
+    keepNewestClinicalNotes(custom, integration, documentCreatedAt)
 
     if (alwaysShowContext && !hasContextDocument && !sessionId.isNullOrBlank()) {
         contexts += contextNote(contextPlaceholderId(sessionId), CONTEXT_TEMPLATE_ID, CONTEXT_NAME, "", codec)
@@ -207,6 +206,34 @@ internal fun GetSessionResponse.toScribeResultResponse(
             )
         )
     )
+}
+
+private fun isClinicalNotes(name: String?, templateId: String?): Boolean =
+    templateId == CLINICAL_NOTES_TEMPLATE || name?.trim().equals(CLINICAL_NOTES_NAME, ignoreCase = true)
+
+/**
+ * One "Clinical Notes": the system document, notes generated with "+" and every regeneration from
+ * the Clinical Notes chip are separate documents, so only the newest one that can be shown is kept
+ * (without timestamps, a generated note wins over the system document). A failed or unfinished
+ * regeneration therefore never hides the note that is already there.
+ */
+private fun keepNewestClinicalNotes(
+    custom: MutableList<ScribeResultResponse.Data.Output?>,
+    integration: MutableList<ScribeResultResponse.Data.Integration?>,
+    createdAt: Map<String, Long>
+) {
+    val shownStatuses = setOf(ResultStatus.SUCCESS, ResultStatus.PARTIAL_COMPLETED)
+    val generated = custom.filterNotNull()
+        .filter { isClinicalNotes(it.name, it.templateId) && it.value != null && it.status in shownStatuses }
+        .map { Triple(it.documentId, createdAt[it.documentId] ?: -1L, 1) }
+    val system = integration.filterNotNull()
+        .filter { isClinicalNotes(it.name, it.templateId) && it.value != null && it.status in shownStatuses }
+        .map { Triple(it.documentId, createdAt[it.documentId] ?: -1L, 0) }
+    val candidates = generated + system
+    if (candidates.size < 2) return
+    val keep = candidates.maxWith(compareBy({ it.second }, { it.third })).first
+    custom.removeAll { it != null && isClinicalNotes(it.name, it.templateId) && it.documentId != keep }
+    integration.removeAll { it != null && isClinicalNotes(it.name, it.templateId) && it.documentId != keep }
 }
 
 private fun contextNote(
