@@ -121,7 +121,8 @@ NetworkConfig(
 EkaScribeConfig(
     clientId = "your-client-id",
     networkConfig = networkConfig,
-    debugMode = true  // Enable for detailed SDK logs
+    debugMode = true,  // Enable for detailed SDK logs
+    useSessionsApi = true  // New sessions use the Sessions API (default false = legacy transaction APIs + S3)
 )
 ```
 

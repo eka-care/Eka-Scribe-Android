@@ -17,6 +17,7 @@
     - 4.7 [Upload Pipeline](#47-upload-pipeline)
     - 4.8 [Backpressure & Degradation](#48-backpressure--degradation)
     - 4.9 [Configuration & Error Handling](#49-configuration--error-handling)
+    - 4.10 [Server Protocol: Sessions API & Legacy Routing](#410-server-protocol-sessions-api--legacy-routing)
 5. [Full Class Diagram (Mermaid)](#5-full-class-diagram-mermaid)
 6. [Sequence of Construction (Object Graph)](#6-sequence-of-construction-object-graph)
 7. [Data Models & Entities](#7-data-models--entities)
@@ -62,8 +63,16 @@ com.eka.scribesdk/
 +-- session/                          # Session lifecycle management
 |   +-- SessionManager                # Single active session orchestrator
 |   +-- SessionEventEmitter           # Typed event emitter for session lifecycle
-|   +-- TransactionManager            # API lifecycle (init → stop → commit → poll)
-|   +-- TransactionStage              # Enum: INIT, RECORDING, STOP, COMMIT, POLL, DONE
+|   +-- TransactionManager            # Lifecycle facade; Sessions API sessions delegate to SessionsApiFlow (legacy: init → stop → commit → poll)
+|   +-- SessionsApiFlow               # Sessions API lifecycle: create → PATCH → end → poll
+|   +-- SessionApiRouter              # Sessions API vs legacy per session (local api_flow, else the flag; 400/404/422 → legacy)
+|   +-- SessionsResultFetcher         # Get Session (+ List Session Documents for names and quality) → ScribeResultResponse
+|   +-- SessionsDocumentWriter        # Create/Update Document → pre-signed PUT (note edits, Context)
+|   +-- SessionsTemplateProcessor     # Process Template → poll Get Session?document_id=
+|   +-- SessionContextReader          # Get Document → pre-signed GET → Context text
+|   +-- SessionAudioDownloader        # Get Session Audio → pre-signed MP3 URL
+|   +-- TemplateNameResolver          # Template titles used as note names
+|   +-- AudioFileProcessor            # Pre-recorded file → chunks → same upload path
 |
 +-- recorder/                         # Raw audio capture
 |   +-- AudioRecorder                 # Interface
@@ -114,16 +123,19 @@ com.eka.scribesdk/
 |   |   |   |   +-- SessionDao        # Session CRUD
 |   |   |   |   +-- AudioChunkDao     # Chunk CRUD
 |   |   |   +-- entity/
-|   |   |       +-- SessionEntity     # DB entity (with upload_stage, folder_name, bid)
+|   |   |       +-- SessionEntity     # DB entity (with upload_stage, folder_name, bid, api_flow)
 |   |   |       +-- AudioChunkEntity  # DB entity (with retry_count, quality_score)
 |   |   |       +-- UploadState       # Enum: PENDING, IN_PROGRESS, SUCCESS, FAILED
-|   |   |       +-- TransactionStage  # Enum: INIT, RECORDING, STOP, COMMIT, POLL, DONE
+|   |   |       +-- TransactionStage  # Enum: INIT, STOP, COMMIT, ANALYZING, COMPLETED, FAILURE, ERROR (the next step to run)
 |   +-- remote/
-|       +-- api/
-|       |   +-- ScribeApiService      # REST API interface (Retrofit)
+|       +-- services/
+|       |   +-- SessionsApiService    # Sessions API: /voice/v1/sessions, /voice/api/v1/documents (Retrofit)
+|       |   +-- ScribeApiService      # Legacy transaction API (v2 init/stop/commit, v3/status), templates, config, history
 |       +-- upload/
 |       |   +-- ChunkUploader         # Interface
-|       |   +-- S3ChunkUploader       # AWS S3 upload (network check, in-flight dedup)
+|       |   +-- ApiFlowChunkUploader  # Routes each chunk by the session's stored api_flow
+|       |   +-- SessionsChunkUploader # POST /voice/v1/sessions/{id}/audio/audio_{n}.mp3 (raw bytes)
+|       |   +-- S3ChunkUploader       # Legacy: AWS S3 upload (network check, in-flight dedup)
 |       |   +-- UploadMetadata        # Upload context (chunkId, sessionId, folderName, bid)
 |       |   +-- UploadResult          # Sealed: Success(url), Failure(error, isRetryable)
 |       +-- S3CredentialProvider      # Interface for obtaining S3 credentials
@@ -219,7 +231,7 @@ Multiple interchangeable implementations behind stable interfaces:
 | `AudioRecorder`   | `AndroidAudioRecorder`, (future: `FileAudioRecorder` for testing) |
 | `AudioAnalyser`   | `SquimAudioAnalyser`, `NoOpAudioAnalyser`                         |
 | `AudioChunker`    | `VadAudioChunker`, `FixedDurationChunker`                         |
-| `ChunkUploader`   | `S3ChunkUploader`, (future: `ApiGatewayUploader`)                 |
+| `ChunkUploader`   | `SessionsChunkUploader`, `S3ChunkUploader` (legacy), picked per session by `ApiFlowChunkUploader` |
 | `AudioEncoder`    | `M4aAudioEncoder`, (future: `OpusAudioEncoder`)                   |
 | `UploadScheduler` | `WorkManagerUploadScheduler`                                      |
 | `FileStorage`     | `LocalFileStorage`                                                |
@@ -742,6 +754,8 @@ ELSE IF accumulatedSamples >= maxLengthSamples:
 +-------------------------------+
 ```
 
+`S3ChunkUploader` is the legacy implementation. Sessions created on the Sessions API upload through `SessionsChunkUploader`, which posts the raw MP3 bytes to `POST /voice/v1/sessions/{id}/audio/audio_{n}.mp3` (no S3 credentials, no bucket). `ApiFlowChunkUploader` is the `ChunkUploader` the rest of the SDK sees: it reads the session's `api_flow` and forwards each chunk to the matching uploader, so a legacy session recovered after the flag changes still uploads to S3. Full-recording uploads (chunk index -1) are not supported by the Sessions API. See [4.10](#410-server-protocol-sessions-api--legacy-routing).
+
 ### 4.8 Backpressure & Degradation
 
 ```
@@ -824,6 +838,78 @@ ELSE IF accumulatedSamples >= maxLengthSamples:
 | + nowFormatted(): String      |
 +-------------------------------+
 ```
+
+### 4.10 Server Protocol: Sessions API & Legacy Routing
+
+`TransactionManager` keeps its legacy method names (`initTransaction`, `stopTransaction`, `commitTransaction`, `pollResult`) so `SessionManager` and recovery are unchanged. For a Sessions API session each method delegates to `SessionsApiFlow`:
+
+```
+initTransaction    --> SessionsApiFlow.createSession   POST  /voice/v1/sessions
+                                                       PATCH /voice/v1/sessions/{id}   (session_mode)
+stopTransaction    --> SessionsApiFlow.endSession      POST  /voice/v1/sessions/{id}/end
+                                                       PATCH /voice/v1/sessions/{id}   (additional_data.audio_duration, best effort)
+commitTransaction  --> no call                         stage moves to ANALYZING
+pollResult         --> SessionsApiFlow.pollResult      GET   /voice/v1/sessions/{id}   (via SessionsResultFetcher)
+```
+
+```mermaid
+sequenceDiagram
+    participant App as Host app
+    participant SM as SessionManager
+    participant TM as TransactionManager
+    participant SF as SessionsApiFlow
+    participant UP as SessionsChunkUploader
+    participant API as Sessions API
+
+    App->>SM: startSession(config)
+    SM->>TM: initTransaction
+    TM->>SF: createSession
+    SF->>API: POST /voice/v1/sessions
+    SF->>API: PATCH /voice/v1/sessions/{id} (session_mode)
+    loop each sealed chunk
+        UP->>API: POST /voice/v1/sessions/{id}/audio/audio_{n}.mp3
+    end
+    App->>SM: stopSession()
+    SM->>TM: stopTransaction
+    TM->>SF: endSession
+    SF->>API: POST /voice/v1/sessions/{id}/end (audio_files_sent)
+    SF->>API: PATCH additional_data.audio_duration (best effort)
+    TM->>TM: commitTransaction (no call, stage = ANALYZING)
+    loop every 2 s, up to 2 min
+        TM->>SF: pollResult
+        SF->>API: GET /voice/v1/sessions/{id}
+        API-->>SF: 202 processing / 200 done / 206 partial / 410 expired
+    end
+    SM-->>App: onSessionCompleted(result)
+```
+
+**Stage mapping.** `TransactionStage` holds the next step to run: `INIT` (create) → `STOP` (end) → `COMMIT` (skipped on the Sessions API) → `ANALYZING` (poll) → `COMPLETED` / `FAILURE`. Recovery (`checkAndProgress`) resumes from whatever is stored, and the create (409) and end (400 "already ended") calls treat "already done" as success.
+
+**Routing.** Two small classes keep a session on the backend it started on:
+
+```
+                   +-----------------------+
+ any read/edit --> |   SessionApiRouter    |
+ convert/audio     |-----------------------|
+                   | 1. local DB row?      |--yes--> its api_flow (sessions_v1 / null = legacy)
+                   | 2. otherwise          |--------> useSessionsApi flag (web / other-device sessions)
+                   | 3. Sessions API said  |
+                   |    400 / 404 / 422?   |--------> fallBackToLegacy(): legacy for this session from now on
+                   +-----------------------+
+
+ each chunk -----> ApiFlowChunkUploader --> api_flow == sessions_v1 ? SessionsChunkUploader : S3ChunkUploader
+```
+
+**Other Sessions API operations**, all reached through `ScribeRepository` / `EkaScribe` and routed by `SessionApiRouter`:
+
+| Class | Public API | Calls |
+|---|---|---|
+| `SessionsResultFetcher` | `getSessionOutput`, `pollSessionResult` | Get Session; List Session Documents (note names, `audio_matrix.quality`); Get Document via `SessionContextReader` for Context text |
+| `SessionsTemplateProcessor` | `convertTransactionResult` | Process Template, then Get Session with `document_id` until that note finishes (60 x 2 s) |
+| `SessionsDocumentWriter` | `updateSessionResult` | Create/Update Document, then PUT the base64 text to the pre-signed URL (one retry with a fresh URL) |
+| `SessionAudioDownloader` | `getSessionAudioLink`, `downloadSessionAudio` | Get Session Audio, then GET the pre-signed MP3 URL |
+
+**Result shaping.** `GetSessionResponse` is converted into the legacy `ScribeResultResponse` shape so the existing mappers keep working. Each note keeps its `documentId`; Context (`__non_tmp_doc`) and Clinical Notes (`clinical_notes_template`) are always present (blank when empty); other empty integration documents are skipped. Edits are stored as plain text only.
 
 ---
 
@@ -1249,27 +1335,30 @@ When `EkaScribe.init()` is called, the object graph is constructed in this order
 4. ScribeDatabase           (Room, lazy singleton)
 5. SessionDao, AudioChunkDao (from database)
 6. DefaultDataManager       (sessionDao, chunkDao)
-7. S3CredentialProvider      (from config)
-8. S3ChunkUploader           (context, credentialProvider, bucketName)
-9. ScribeApiService          (Retrofit)
-10. TransactionManager       (apiService, dataManager, chunkUploader, ...)
-11. Pipeline.Factory         (context, pipelineConfig, modelDownloader, ...)
-12. SessionManager           (pipelineFactory, transactionManager, dataManager, ...)
+7. S3CredentialProvider      (legacy flow)
+8. S3ChunkUploader, SessionsChunkUploader
+                             wrapped in ApiFlowChunkUploader (routes by the session's api_flow)
+9. ScribeApiService, SessionsApiService (Retrofit)
+10. SessionsResultFetcher, SessionAudioDownloader, TemplateNameResolver
+11. TransactionManager       (apiService, dataManager, chunkUploader, SessionsApiFlow, ...)
+12. ScribeRepository         (+ SessionApiRouter, SessionsDocumentWriter, SessionsTemplateProcessor)
+13. Pipeline.Factory         (context, pipelineConfig, modelDownloader, ...)
+14. SessionManager           (pipelineFactory, transactionManager, dataManager, ...)
 
 --- On start(sessionConfig) ---   (suspend function)
 
-13. Init API call             (TransactionManager.initTransaction → bid, folderName)
-14. AndroidAudioRecorder      (context, sampleRate, frameSize)
-15. PreBuffer                 (capacity: 2000 frames)
-16. FrameProducer             (preBuffer, frameChannel)
-17. SileroVadProvider.load()  (synchronous — required for chunking)
-18. VadAudioChunker           (vadProvider, chunkConfig, sessionId)
-19. SquimModelProvider        (modelPath) — NOT loaded yet
-20. SquimAudioAnalyser        (modelProvider, scope)
+15. Start API call            (TransactionManager.initTransaction → Create Session; legacy: init → bid, folderName)
+16. AndroidAudioRecorder      (context, sampleRate, frameSize)
+17. PreBuffer                 (capacity: 2000 frames)
+18. FrameProducer             (preBuffer, frameChannel)
+19. SileroVadProvider.load()  (synchronous — required for chunking)
+20. VadAudioChunker           (vadProvider, chunkConfig, sessionId)
+21. SquimModelProvider        (modelPath) — NOT loaded yet
+22. SquimAudioAnalyser        (modelProvider, scope)
     └─ init {} launches background model loading on inferenceDispatcher
-21. Pipeline                  (all of the above wired together)
-22. Pipeline.start()          (starts recorder + coroutines)
-23. startFlowCollection()     (non-blocking flow collectors launched in scope)
+23. Pipeline                  (all of the above wired together)
+24. Pipeline.start()          (starts recorder + coroutines)
+25. startFlowCollection()     (non-blocking flow collectors launched in scope)
 ```
 
 ---
@@ -1333,7 +1422,7 @@ EncodedChunk { filePath, format, sizeBytes, durationMs }
     v  (DataManager)
 AudioChunkEntity { chunkId, sessionId, filePath, uploadState=PENDING, ... }
     |
-    v  (S3ChunkUploader — with network check + in-flight dedup)
+    v  (ChunkUploader: SessionsChunkUploader, or S3ChunkUploader for legacy sessions — with network check + in-flight dedup)
 UploadResult.Success { url }  -->  AudioChunkEntity { uploadState=SUCCESS }
 ```
 
@@ -1430,7 +1519,7 @@ UploadResult.Success { url }  -->  AudioChunkEntity { uploadState=SUCCESS }
   Receives from ChunkChannel
   Encodes to WAV
   Persists AudioChunkEntity to Room DB
-  Immediately uploads via S3ChunkUploader
+  Immediately uploads via ChunkUploader (Sessions API, or S3 for legacy sessions)
 
 +=====================================================+
 |            CHANNEL CAPACITIES                        |
@@ -1459,6 +1548,10 @@ ChunkChannel:        80 chunks    (~800-2000s of audio)
 | **SI-SDR**            | Scale-Invariant Signal-to-Distortion Ratio (dB)                                             |
 | **Degradation**       | Graceful performance reduction by disabling optional stages (analyser) under load           |
 | **Idempotent Upload** | Chunk IDs are deterministic, making re-uploads safe without duplication                     |
+| **Sessions API**      | EkaScribe server API (`/voice/v1/sessions`) used for new sessions when `useSessionsApi` is on |
+| **Legacy flow**       | The older transaction APIs (v2 init/stop/commit, `v3/status`) with S3 chunk upload           |
+| **api_flow**          | `SessionEntity` column: `sessions_v1` for Sessions API sessions, null for legacy ones        |
+| **Document**          | One note of a Sessions API session, identified by `documentId`; Process Template adds a new one each call |
 | **WAV**               | Waveform Audio File Format; uncompressed audio format used for uploads                      |
 
 ---
@@ -1488,7 +1581,7 @@ ChunkChannel:        80 chunks    (~800-2000s of audio)
 | `AudioEncoder`    | `M4aAudioEncoder`            | `WavAudioEncoder` (test)          |
 | `DataManager`     | `DefaultDataManager`         | `InMemoryDataManager` (test)      |
 | `FileStorage`     | `LocalFileStorage`           | `InMemoryFileStorage` (test)      |
-| `ChunkUploader`   | `S3ChunkUploader`            | `MockChunkUploader` (test)        |
+| `ChunkUploader`   | `ApiFlowChunkUploader` (→ `SessionsChunkUploader`, or `S3ChunkUploader` for legacy sessions) | `MockChunkUploader` (test)        |
 | `UploadScheduler` | `WorkManagerUploadScheduler` | `ImmediateUploadScheduler` (test) |
 | `ModelProvider`   | `SquimModelProvider`         | `FakeModelProvider` (test)        |
 | `VadProvider`     | `SileroVadProvider`          | `FakeVadProvider` (test)          |
