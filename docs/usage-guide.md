@@ -378,6 +378,7 @@ val config = EkaScribeConfig(
     flavour       = "android",          // Optional, default "android"
     enableAnalyser = true,              // Optional, default true
     debugMode     = BuildConfig.DEBUG,  // Optional, default false
+    useSessionsApi = true,              // Optional, default false: new sessions use the Sessions API
     networkConfig = networkConfig       // Required
 )
 
@@ -410,7 +411,8 @@ EkaScribeConfig config = new EkaScribeConfig(
     "android",        // flavour
     true,             // enableAnalyser
     true,             // debugMode
-    networkConfig     // networkConfig
+    networkConfig,    // networkConfig
+    true              // useSessionsApi
 );
 
 EkaScribe.INSTANCE.init(config, this, new MyScribeCallback());
@@ -544,6 +546,9 @@ CoroutineHelper.startSession(
 | `enableAnalyser` | `Boolean` | `true` | Enable SQUIM audio quality analysis |
 | `debugMode` | `Boolean` | `false` | Enable detailed SDK logging |
 | `networkConfig` | `NetworkConfig` | — | **Required.** Network and auth configuration |
+| `useSessionsApi` | `Boolean` | `false` | Create new sessions on the EkaScribe Sessions API (`/voice/v1/sessions`) instead of the legacy transaction APIs + S3 |
+
+> New sessions use the Sessions API only when `useSessionsApi = true`; sessions already started keep the backend they were created on. See [getting-started.md § 8](getting-started.md#8-server-protocol-sessions-api) for what each backend calls.
 
 ### NetworkConfig
 
@@ -856,6 +861,7 @@ lifecycleScope.launch {
 }
 
 // Re-process a session with a different template
+// (Sessions API sessions: this generates a new note on every call, it does not replace one)
 lifecycleScope.launch {
     EkaScribe.convertTransactionResult(sessionId, newTemplateId)
         .onSuccess { Log.d("Scribe", "Converted successfully") }
@@ -1009,12 +1015,12 @@ lifecycleScope.launch {
 
 | Stage | Meaning |
 |---|---|
-| `INIT` | `initTransaction` API call succeeded |
-| `STOP` | `stopTransaction` API call succeeded |
-| `COMMIT` | All chunks uploaded and committed |
-| `ANALYZING` | Server is processing the audio |
+| `INIT` | Session not created on the server yet |
+| `STOP` | Session created; recording and uploading chunks, End Session still to come |
+| `COMMIT` | Session ended; the legacy flow still has to commit (the Sessions API skips this) |
+| `ANALYZING` | Server is processing the audio; the SDK is polling |
 | `COMPLETED` | Transcription result is ready |
-| `FAILURE` | All retry attempts failed |
+| `FAILURE` | Processing finished without usable output, the session expired (410), or all retry attempts failed |
 | `ERROR` | Unexpected error |
 
 ---
@@ -1111,14 +1117,14 @@ data class ScribeError(
 | `SESSION_ALREADY_ACTIVE` | Another session is already running | Yes | Call `stopSession()` or `cancelSession()` first |
 | `INVALID_CONFIG` | SDK not initialized or called after `destroy()` | No | Call `EkaScribe.init()` before any other method |
 | `ENCODER_FAILED` | MP3 encoding failure | No | Check device storage; report if persistent |
-| `UPLOAD_FAILED` | S3 chunk upload failed after retries | Yes | Call `retrySession(sessionId)` |
+| `UPLOAD_FAILED` | Chunk upload failed after retries | Yes | Call `retrySession(sessionId)` |
 | `MODEL_LOAD_FAILED` | Silero VAD or SQUIM model failed to load | No | VAD failure is fatal; SQUIM failure is non-fatal |
 | `NETWORK_UNAVAILABLE` | No internet connectivity | Yes | Retry when connected; call `retrySession()` |
 | `DB_ERROR` | Room database operation failed | No | Report as a bug |
 | `INVALID_STATE_TRANSITION` | Illegal state change attempted | No | Check session state before calling controls |
-| `INIT_TRANSACTION_FAILED` | Server rejected session init | Yes | Call `retrySession(sessionId)` |
-| `STOP_TRANSACTION_FAILED` | Server rejected stop call | Yes | Call `retrySession(sessionId)` |
-| `COMMIT_TRANSACTION_FAILED` | Server rejected commit | Yes | Call `retrySession(sessionId, forceCommit = true)` |
+| `INIT_TRANSACTION_FAILED` | Server rejected session init (Create Session; legacy: `initTransaction`) | Yes | Call `retrySession(sessionId)` |
+| `STOP_TRANSACTION_FAILED` | Server rejected stop call (End Session; legacy: `stopTransaction`) | Yes | Call `retrySession(sessionId)` |
+| `COMMIT_TRANSACTION_FAILED` | Server rejected commit (legacy flow only; the Sessions API has no commit step) | Yes | Call `retrySession(sessionId, forceCommit = true)` |
 | `POLL_TIMEOUT` | Result polling timed out | Yes | Call `pollSessionResult(sessionId)` manually |
 | `TRANSCRIPTION_FAILED` | Server-side transcription failed | No | Contact support with `sessionId` |
 | `RETRY_EXHAUSTED` | Max retry attempts reached | No | Call `retrySession(sessionId, forceCommit = true)` |
@@ -1149,7 +1155,7 @@ Kotlin data classes with default values require **all parameters** to be passed 
 
 | Class | Total params | Required | Optional (have defaults in Kotlin) |
 |---|---|---|---|
-| `EkaScribeConfig` | 5 | 2 (`clientId`, `networkConfig`) | 3 (`flavour`, `enableAnalyser`, `debugMode`) |
+| `EkaScribeConfig` | 6 | 2 (`clientId`, `networkConfig`) | 4 (`flavour`, `enableAnalyser`, `debugMode`, `useSessionsApi`) |
 | `NetworkConfig` | 8 | all 8 | none |
 | `SessionConfig` | 7 | 0 (all have defaults) | 7 |
 | `OutputTemplate` | 3 | 1 (`templateId`) | 2 (`templateType`, `templateName`) |
