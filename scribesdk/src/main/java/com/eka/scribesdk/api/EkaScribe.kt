@@ -272,6 +272,7 @@ object EkaScribe {
                 apiService = sessionsApiService,
                 dataManager = dm,
                 flavour = config.flavour,
+                appVersion = config.networkConfig.appVersionName,
                 logger = logger,
                 resultFetcher = sessionsResultFetcher
             ),

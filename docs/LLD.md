@@ -845,7 +845,7 @@ ELSE IF accumulatedSamples >= maxLengthSamples:
 
 ```
 initTransaction    --> SessionsApiFlow.createSession   POST  /voice/v1/sessions
-                                                       PATCH /voice/v1/sessions/{id}   (session_mode)
+                                                       PATCH /voice/v1/sessions/{id}   (session_mode, in the background; End waits for it)
 stopTransaction    --> SessionsApiFlow.endSession      POST  /voice/v1/sessions/{id}/end
                                                        PATCH /voice/v1/sessions/{id}   (additional_data.audio_duration, best effort)
 commitTransaction  --> no call                         stage moves to ANALYZING
@@ -865,7 +865,7 @@ sequenceDiagram
     SM->>TM: initTransaction
     TM->>SF: createSession
     SF->>API: POST /voice/v1/sessions
-    SF->>API: PATCH /voice/v1/sessions/{id} (session_mode)
+    SF->>API: PATCH /voice/v1/sessions/{id} (session_mode, in the background)
     loop each sealed chunk
         UP->>API: POST /voice/v1/sessions/{id}/audio/audio_{n}.mp3
     end
