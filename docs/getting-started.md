@@ -160,7 +160,7 @@ The entire pipeline is built from bounded Kotlin Channels connecting independent
                │
                ▼  (session lifecycle: TransactionManager → SessionsApiFlow)
      startSession : POST  /voice/v1/sessions             create
-                    PATCH /voice/v1/sessions/{id}        session_mode
+                    PATCH /voice/v1/sessions/{id}        session_mode (in the background)
      stopSession  : POST  /voice/v1/sessions/{id}/end    starts server processing
      result       : GET   /voice/v1/sessions/{id}        poll every 2 s: 202 → 200 / 206
                │
@@ -265,7 +265,7 @@ Both backend flows share the same stages:
 
 | Stage (next step to run) | Sessions API | Legacy |
 |---|---|---|
-| `INIT` | Create Session, then PATCH `session_mode` | `initTransaction` |
+| `INIT` | Create Session (PATCH `session_mode` runs in the background) | `initTransaction` |
 | `STOP` | Upload any pending chunks, then End Session | Upload any pending chunks, then `stopTransaction` |
 | `COMMIT` | No call. End Session already started processing, so the stage moves straight on | `commitTransaction` |
 | `ANALYZING` | Poll Get Session until 200 / 206 | Poll `v3/status` |
@@ -299,7 +299,7 @@ New sessions run on the EkaScribe Sessions API (`/voice/v1/sessions`, [docs](htt
 
 | Step | Sessions API | Legacy |
 |---|---|---|
-| Start | `POST /voice/v1/sessions` (create), then `PATCH /voice/v1/sessions/{id}` (`session_mode`, `user_status = recording_started`) | `POST voice/api/v2/transaction/init/{id}` |
+| Start | `POST /voice/v1/sessions` (create), then `PATCH /voice/v1/sessions/{id}` (`session_mode`, `user_status = recording_started`) in the background; End waits for it | `POST voice/api/v2/transaction/init/{id}` |
 | Upload each chunk | `POST /voice/v1/sessions/{id}/audio/audio_{n}.mp3`, raw bytes | PUT to S3 with credentials from `getS3Config` |
 | Stop | `POST /voice/v1/sessions/{id}/end` with `audio_files_sent`, then a best-effort `PATCH` of `additional_data.audio_duration` | `POST voice/api/v2/transaction/stop/{id}` |
 | Commit | None. End Session starts processing | `POST voice/api/v2/transaction/commit/{id}` |
@@ -307,7 +307,7 @@ New sessions run on the EkaScribe Sessions API (`/voice/v1/sessions`, [docs](htt
 
 Details worth knowing:
 
-- **Create body:** up to 2 `templates` (extras are dropped), `language_hint` as ISO 639-1 codes (`en-IN` becomes `en`; `auto_detect` is kept), `patient_details` (`oid`, `name`, `age`, `gender`) and `additional_data` (`_flavour`, `sdk_version`, `speciality`, `section`, `visit_id`).
+- **Create body:** up to 2 `templates` (extras are dropped), `language_hint` as ISO 639-1 codes (`en-IN` becomes `en`; `auto_detect` is kept), `patient_details` (`oid`, `name`, `age`, `gender`) and `additional_data` (`_flavour`, `sdk_version`, `app_version`, `speciality`, `section`, `visit_id`).
 - **Recovery is idempotent:** a 409 on create means an earlier attempt already created the session, and a 400 "already ended" on End Session means an earlier end succeeded. Both continue instead of failing.
 - **No full-audio upload.** The Sessions API only takes chunks, so a full-recording upload fails with a non-retryable error.
 

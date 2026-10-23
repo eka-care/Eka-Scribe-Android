@@ -31,6 +31,8 @@ import com.haroldadmin.cnradapter.NetworkResponse
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.runTest
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Protocol
@@ -77,6 +79,7 @@ internal class SessionsApiFlowTest {
         val createBodies = mutableListOf<JsonObject>()
         val patchBodies = mutableListOf<JsonObject>()
         val endBodies = mutableListOf<JsonObject>()
+        val calls = mutableListOf<String>()
 
         var createResponse: NetworkResponse<CreateSessionResponse, SessionsErrorResponse>? = null
         var patchResponse: NetworkResponse<PatchSessionResponse, SessionsErrorResponse>? = null
@@ -94,16 +97,16 @@ internal class SessionsApiFlowTest {
         val documentQueries = mutableListOf<String>()
 
         override suspend fun createSession(request: JsonObject) =
-            createResponse!!.also { createBodies += request }
+            createResponse!!.also { createBodies += request; calls += "create" }
 
         override suspend fun patchSession(sessionId: String, request: JsonObject) =
-            patchResponse!!.also { patchBodies += request }
+            patchResponse!!.also { patchBodies += request; calls += "patch" }
 
         override suspend fun uploadAudio(sessionId: String, fileSequence: String, audio: RequestBody):
             NetworkResponse<UploadAudioResponse, SessionsErrorResponse> = error("not used")
 
         override suspend fun endSession(sessionId: String, request: JsonObject) =
-            endResponse!!.also { endBodies += request }
+            endResponse!!.also { endBodies += request; calls += "end" }
 
         override suspend fun upsertDocument(request: JsonObject) =
             upsertResponse!!.also { upsertBodies += request }
@@ -175,8 +178,19 @@ internal class SessionsApiFlowTest {
         speciality = "cardiology"
     )
 
-    private fun flow(api: FakeSessionsApi, dm: DataManager) =
-        SessionsApiFlow(apiService = api, dataManager = dm, flavour = "android", logger = NoOpLogger())
+    // Unconfined by default: the background session_mode PATCH has run when createSession returns
+    private fun flow(
+        api: FakeSessionsApi,
+        dm: DataManager,
+        scope: CoroutineScope = CoroutineScope(Dispatchers.Unconfined)
+    ) = SessionsApiFlow(
+        apiService = api,
+        dataManager = dm,
+        flavour = "android",
+        logger = NoOpLogger(),
+        appVersion = "4.9.0",
+        backgroundScope = scope
+    )
 
     private fun flowWithResults(api: FakeSessionsApi, dm: DataManager) = SessionsApiFlow(
         apiService = api,
@@ -220,6 +234,7 @@ internal class SessionsApiFlowTest {
         assertEquals("F", patient["gender"].asString)
         val additional = body["additional_data"].asJsonObject
         assertEquals("android", additional["_flavour"].asString)
+        assertEquals("4.9.0", additional["app_version"].asString)
         assertEquals("cardiology", additional["speciality"].asString)
         assertEquals("v-9", additional["visit_id"].asString)
         assertTrue("null section must be omitted", !additional.has("section"))
@@ -255,6 +270,59 @@ internal class SessionsApiFlowTest {
 
         assertTrue(result is TransactionResult.Success)
         assertEquals(1, api.patchBodies.size)
+    }
+
+    @Test
+    fun `createSession does not wait for session_mode and endSession sends it first`() = runTest {
+        val api = FakeSessionsApi().apply {
+            createResponse = createdOk()
+            patchResponse = patchOk()
+            endResponse = netSuccess(EndSessionResponse(SESSION_ID, "processing", null, 0, null), code = 202)
+        }
+        val dm = mockk<DataManager>(relaxed = true)
+        val flow = flow(api, dm, scope = this)
+
+        assertTrue(flow.createSession(SESSION_ID, config()) is TransactionResult.Success)
+        assertEquals(listOf("create"), api.calls)
+
+        assertTrue(flow.endSession(SESSION_ID) is TransactionResult.Success)
+        assertEquals(listOf("create", "patch", "end"), api.calls)
+    }
+
+    @Test
+    fun `a failed session_mode PATCH is resent before End`() = runTest {
+        val api = FakeSessionsApi().apply {
+            createResponse = createdOk()
+            patchResponse = netServerError("busy", 503)
+            endResponse = netSuccess(EndSessionResponse(SESSION_ID, "processing", null, 0, null), code = 202)
+        }
+        val dm = mockk<DataManager>(relaxed = true)
+        val flow = flow(api, dm)
+
+        assertTrue(flow.createSession(SESSION_ID, config()) is TransactionResult.Success)
+        api.patchResponse = patchOk()
+
+        assertTrue(flow.endSession(SESSION_ID) is TransactionResult.Success)
+        assertEquals(listOf("create", "patch", "patch", "end"), api.calls)
+    }
+
+    @Test
+    fun `End is held back while session_mode keeps failing, and the next End resends it`() = runTest {
+        val api = FakeSessionsApi().apply {
+            createResponse = createdOk()
+            patchResponse = netServerError("busy", 503)
+            endResponse = netSuccess(EndSessionResponse(SESSION_ID, "processing", null, 0, null), code = 202)
+        }
+        val dm = mockk<DataManager>(relaxed = true)
+        val flow = flow(api, dm)
+        flow.createSession(SESSION_ID, config())
+
+        assertTrue(flow.endSession(SESSION_ID) is TransactionResult.Error)
+        assertTrue(api.endBodies.isEmpty())
+
+        api.patchResponse = patchOk()
+        assertTrue(flow.endSession(SESSION_ID) is TransactionResult.Success)
+        assertEquals(listOf("create", "patch", "patch", "patch", "end"), api.calls)
     }
 
     // ---- endSession ----
