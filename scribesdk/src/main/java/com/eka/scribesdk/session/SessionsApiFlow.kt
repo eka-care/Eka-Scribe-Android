@@ -16,10 +16,17 @@ import com.eka.scribesdk.data.remote.services.SessionsApiService
 import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.haroldadmin.cnradapter.NetworkResponse
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Session lifecycle on the EkaScribe Sessions API (`/voice/v1/sessions`):
- * create -> PATCH session_mode -> (chunks via SessionsChunkUploader) -> end.
+ * create -> (chunks via SessionsChunkUploader; PATCH session_mode in the background) -> end.
  *
  * Maps onto the existing [TransactionStage] machine so recovery works unchanged:
  * INIT --create--> STOP --end--> COMMIT --(no API)--> ANALYZING --GET /sessions--> COMPLETED.
@@ -29,7 +36,11 @@ internal class SessionsApiFlow(
     private val dataManager: DataManager,
     private val flavour: String,
     private val logger: Logger,
-    private val resultFetcher: SessionsResultFetcher? = null
+    private val resultFetcher: SessionsResultFetcher? = null,
+    /** Host app version, saved on the session so we know which app build recorded it. */
+    private val appVersion: String? = null,
+    /** Runs the session_mode PATCH, so recording doesn't wait for it. */
+    private val backgroundScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 ) {
     companion object {
         private const val TAG = "SessionsApiFlow"
@@ -37,6 +48,8 @@ internal class SessionsApiFlow(
         private const val MAX_TEMPLATES = 2
         private const val AUTO_DETECT = "auto_detect"
         private const val STATUS_CANCELLED = "cancelled"
+        private const val USER_STATUS_RECORDING_STARTED = "recording_started"
+        private const val AUDIO_DURATION = "audio_duration"
 
         // Same cadence as the web client: every 2s; give up after 2 minutes
         private const val POLL_INTERVAL_MS = 2_000L
@@ -48,7 +61,12 @@ internal class SessionsApiFlow(
     // Default Gson drops null fields, so optional values are omitted from request bodies
     private val gson = Gson()
 
-    /** `POST /sessions` then `PATCH session_mode`. On success the stage moves to STOP. */
+    /** The session_mode PATCH sent at create; End waits for it. */
+    private class ModePatch(val request: PatchSessionRequest, val result: Deferred<TransactionResult>)
+
+    private val modePatches = ConcurrentHashMap<String, ModePatch>()
+
+    /** `POST /sessions`; `PATCH session_mode` follows in the background. On success the stage moves to STOP. */
     suspend fun createSession(sessionId: String, sessionConfig: SessionConfig): TransactionResult {
         val request = CreateSessionRequest(
             uploadType = UPLOAD_TYPE_CHUNKED,
@@ -96,16 +114,51 @@ internal class SessionsApiFlow(
             }
         }
 
-        // session_mode is not part of the create body; it can only be set by PATCH before end
-        val modeResult = patchSession(sessionId, PatchSessionRequest(sessionMode = sessionConfig.mode))
-        if (modeResult is TransactionResult.Error) return modeResult
-
         dataManager.updateUploadStage(sessionId, TransactionStage.STOP.name)
+
+        // session_mode is not part of the create body; it can only be set by PATCH before end.
+        // Sent in the background so recording starts after one call; endSession waits for it.
+        // user_status = recording_started as the web sends it, so a session that never reaches
+        // End shows on web as "recording started" (recommit offered), not as a fresh session
+        val modeRequest = PatchSessionRequest(sessionMode = sessionConfig.mode, userStatus = USER_STATUS_RECORDING_STARTED)
+        modePatches[sessionId] = ModePatch(modeRequest, backgroundScope.async { patchSession(sessionId, modeRequest) })
         return TransactionResult.Success()
+    }
+
+    /**
+     * `additional_data.audio_duration` (seconds), as the web sends after End, so web can show the
+     * recording length. Best effort: failures are only logged.
+     */
+    private suspend fun reportAudioDuration(sessionId: String) {
+        try {
+            val durationMs = dataManager.getAllChunks(sessionId).sumOf { it.durationMs }
+            if (durationMs <= 0) return
+            val seconds = (durationMs + 500) / 1000
+            val result = patchSession(
+                sessionId,
+                PatchSessionRequest(additionalData = mapOf(AUDIO_DURATION to seconds))
+            )
+            if (result is TransactionResult.Error) {
+                logger.warn(TAG, "audio_duration not saved for $sessionId: ${result.message}")
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            logger.warn(TAG, "audio_duration not saved for $sessionId", e)
+        }
     }
 
     /** `POST /sessions/{id}/end`. Starts server-side processing; the stage moves to COMMIT. */
     suspend fun endSession(sessionId: String): TransactionResult {
+        // session_mode must be set before End: wait for the PATCH, resend once if it failed
+        modePatches[sessionId]?.let { pending ->
+            if (pending.result.await() is TransactionResult.Error) {
+                val retry = patchSession(sessionId, pending.request)
+                if (retry is TransactionResult.Error) return retry // End is retried later, mode first
+            }
+            modePatches.remove(sessionId)
+        }
+
         val uploadedCount = dataManager.getUploadedChunks(sessionId).size
         val request = EndSessionRequest(audioFilesSent = uploadedCount)
 
@@ -116,6 +169,7 @@ internal class SessionsApiFlow(
                     TAG,
                     "Session ended: $sessionId, sent=$uploadedCount, received=${response.body.audioFilesReceived}"
                 )
+                reportAudioDuration(sessionId)
                 TransactionResult.Success()
             }
 
@@ -266,6 +320,7 @@ internal class SessionsApiFlow(
         buildMap<String, String> {
             put("_flavour", flavour)
             put("sdk_version", BuildConfig.SDK_VERSION_NAME)
+            appVersion?.takeIf { it.isNotBlank() }?.let { put("app_version", it) }
             sessionConfig.speciality?.takeIf { it.isNotBlank() }?.let { put("speciality", it) }
             sessionConfig.section?.takeIf { it.isNotBlank() }?.let { put("section", it) }
             sessionConfig.patientDetails?.visitId?.takeIf { it.isNotBlank() }?.let { put("visit_id", it) }

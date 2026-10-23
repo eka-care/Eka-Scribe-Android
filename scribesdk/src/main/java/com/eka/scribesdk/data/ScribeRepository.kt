@@ -17,8 +17,11 @@ import com.eka.scribesdk.data.remote.models.responses.toTemplateItem
 import com.eka.scribesdk.data.remote.models.responses.toTranscriptResult
 import com.eka.scribesdk.data.remote.models.responses.toUserConfigs
 import com.eka.scribesdk.data.remote.services.ScribeApiService
+import com.eka.scribesdk.session.SessionApiRouter
 import com.eka.scribesdk.session.SessionFetchState
+import com.eka.scribesdk.session.SessionsDocumentWriter
 import com.eka.scribesdk.session.SessionsResultFetcher
+import com.eka.scribesdk.session.SessionsTemplateProcessor
 import com.haroldadmin.cnradapter.NetworkResponse
 import kotlinx.coroutines.delay
 
@@ -27,7 +30,12 @@ internal class ScribeRepository(
     private val logger: Logger,
     /** Reads results for Sessions API sessions; legacy sessions keep using v3/status. */
     private val sessionsResultFetcher: SessionsResultFetcher? = null,
-    private val usesSessionsApi: suspend (sessionId: String) -> Boolean = { false }
+    /** Which backend each session uses; null = legacy for every session. */
+    private val sessionApiRouter: SessionApiRouter? = null,
+    /** Saves edits for Sessions API sessions via the Documents API; legacy sessions use PATCH v3/status. */
+    private val sessionsDocumentWriter: SessionsDocumentWriter? = null,
+    /** Convert-to-template for Sessions API sessions via Process Template; legacy keeps convert-to-template. */
+    private val sessionsTemplateProcessor: SessionsTemplateProcessor? = null
 ) {
     companion object {
         private const val TAG = "ScribeRepository"
@@ -73,6 +81,10 @@ internal class ScribeRepository(
         templateId: String
     ): Result<Boolean> {
         return try {
+            val processor = sessionsTemplateProcessor
+            if (processor != null && usesSessionsApi(sessionId)) {
+                return processor.process(sessionId, templateId)
+            }
             when (val response = apiService.convertTransactionResult(sessionId, templateId)) {
                 is NetworkResponse.Success -> {
                     if (response.body.status == "success") {
@@ -101,6 +113,10 @@ internal class ScribeRepository(
         updatedData: List<SessionData>
     ): Result<Boolean> {
         return try {
+            val writer = sessionsDocumentWriter
+            if (writer != null && usesSessionsApi(sessionId)) {
+                return writer.save(sessionId, updatedData)
+            }
             val request = UpdateSessionRequest()
             request.addAll(updatedData.map {
                 UpdateSessionRequest.UpdateSessionRequestItem(
@@ -258,10 +274,18 @@ internal class ScribeRepository(
 
     // ---- Private helpers ----
 
+    private suspend fun usesSessionsApi(sessionId: String): Boolean =
+        sessionApiRouter?.usesSessionsApi(sessionId) ?: false
+
     private suspend fun sessionsFetcherFor(sessionId: String): SessionsResultFetcher? {
         val fetcher = sessionsResultFetcher ?: return null
         return if (usesSessionsApi(sessionId)) fetcher else null
     }
+
+    /** A session from another client that the Sessions API does not know: read it the legacy way. */
+    private suspend fun SessionFetchState?.shouldFallBackToLegacy(sessionId: String): Boolean =
+        this is SessionFetchState.Error && notOnSessionsApi &&
+                sessionApiRouter?.fallBackToLegacy(sessionId) == true
 
     private fun SessionFetchState?.toResult(
         mapper: (ScribeResultResponse) -> SessionResult
@@ -280,7 +304,9 @@ internal class ScribeRepository(
     ): Result<SessionResult> {
         return try {
             sessionsFetcherFor(sessionId)?.let { fetcher ->
-                return fetcher.fetch(sessionId).toResult(mapper)
+                val state = fetcher.fetch(sessionId)
+                if (!state.shouldFallBackToLegacy(sessionId)) return state.toResult(mapper)
+                logger.info(TAG, "Not on the Sessions API, reading legacy: $sessionId")
             }
             when (val response = apiService.getTransactionResult(sessionId, templateId)) {
                 is NetworkResponse.Success -> {
@@ -312,7 +338,9 @@ internal class ScribeRepository(
     ): Result<SessionResult> {
         return try {
             sessionsFetcherFor(sessionId)?.let { fetcher ->
-                return fetcher.poll(sessionId, pollMaxRetries, pollDelayMs).toResult(mapper)
+                val state = fetcher.poll(sessionId, pollMaxRetries, pollDelayMs)
+                if (!state.shouldFallBackToLegacy(sessionId)) return state.toResult(mapper)
+                logger.info(TAG, "Not on the Sessions API, polling legacy: $sessionId")
             }
             repeat(pollMaxRetries) {
                 when (val response = apiService.getTransactionResult(sessionId, templateId)) {

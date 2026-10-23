@@ -271,7 +271,8 @@ EkaScribeConfig config = new EkaScribeConfig(
     "android",
     true,
     true,
-    networkConfig
+    networkConfig,
+    false               // useSessionsApi
 );
 ```
 

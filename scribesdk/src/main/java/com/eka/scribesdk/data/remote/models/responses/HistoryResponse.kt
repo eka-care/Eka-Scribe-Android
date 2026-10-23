@@ -39,11 +39,12 @@ internal data class HistoryItem(
 
 @Keep
 internal data class PatientDetailsInfo(
+    /** Number or string; web sends "23", or "" when there is no age. Parsed leniently in the mapper. */
     @SerializedName("age")
-    var age: Int?,
-    @SerializedName("biologicalSex")
+    var age: String?,
+    @SerializedName(value = "biologicalSex", alternate = ["gender"])
     var biologicalSex: String?,
-    @SerializedName("username")
+    @SerializedName(value = "username", alternate = ["name"])
     var name: String? = null,
     @SerializedName("oid")
     var patientId: String? = null,
@@ -65,7 +66,7 @@ internal fun HistoryItem.toScribeHistoryItem(): ScribeHistoryItem {
         version = version,
         patientDetails = patientDetails?.let {
             ScribePatientInfo(
-                age = it.age,
+                age = it.age?.trim()?.toDoubleOrNull()?.toInt(),
                 biologicalSex = it.biologicalSex,
                 name = it.name,
                 patientId = it.patientId,

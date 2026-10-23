@@ -104,7 +104,8 @@ public class TestActivity extends AppCompatActivity implements MyScribeCallback.
                 "android",         // flavour (default)
                 true,              // enableAnalyser
                 true,              // debugMode
-                networkConfig      // networkConfig
+                networkConfig,     // networkConfig
+                false              // useSessionsApi (false = legacy transaction APIs + S3)
         );
 
         // EkaScribe is a Kotlin object — access via INSTANCE from Java
