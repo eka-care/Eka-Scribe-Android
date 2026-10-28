@@ -180,13 +180,16 @@ internal class SessionManager(
                 dataManager.saveSession(session)
 
                 // Call init transaction API before starting recording
+                val sessionsApi = transactionManager.usesSessionsApi(sessionId)
+                val createLabel = SessionLifecycleEvents.createLabel(sessionsApi)
                 val initResult =
                     transactionManager.initTransaction(sessionId, sessionConfig, folderName)
                 if (initResult is TransactionResult.Error) {
                     logger.error(TAG, "Init transaction failed: ${initResult.message}")
                     emitter.emit(
-                        SessionEventName.INIT_TRANSACTION_FAILED, EventType.ERROR,
-                        "Init transaction failed: ${initResult.message}",
+                        SessionLifecycleEvents.createSession(sessionsApi, success = false),
+                        EventType.ERROR,
+                        "$createLabel failed: ${initResult.message}",
                         mapOf("error" to initResult.message)
                     )
                     transitionToErrorIfAllowed()
@@ -200,8 +203,9 @@ internal class SessionManager(
                 // Extract folderName and bid from init response
                 val bid = (initResult as TransactionResult.Success).bid
                 emitter.emit(
-                    SessionEventName.INIT_TRANSACTION_SUCCESS, EventType.SUCCESS,
-                    "Init transaction succeeded",
+                    SessionLifecycleEvents.createSession(sessionsApi, success = true),
+                    EventType.SUCCESS,
+                    "$createLabel succeeded",
                     mapOf("folderName" to folderName, "bid" to bid)
                 )
 
@@ -356,12 +360,15 @@ internal class SessionManager(
                 }
 
                 // 5. Stop transaction API (only after all chunks uploaded)
+                val sessionsApi = transactionManager.usesSessionsApi(sessionId)
+                val endLabel = SessionLifecycleEvents.endLabel(sessionsApi)
                 val stopResult = transactionManager.stopTransaction(sessionId)
                 if (stopResult is TransactionResult.Error) {
                     logger.error(TAG, "Stop transaction failed: ${stopResult.message}")
                     emitter?.emit(
-                        SessionEventName.STOP_TRANSACTION_FAILED, EventType.ERROR,
-                        "Stop transaction failed: ${stopResult.message}",
+                        SessionLifecycleEvents.endSession(sessionsApi, success = false),
+                        EventType.ERROR,
+                        "$endLabel failed: ${stopResult.message}",
                         mapOf("error" to stopResult.message)
                     )
                     handleTransactionError(
@@ -372,8 +379,9 @@ internal class SessionManager(
                     return@launch
                 }
                 emitter?.emit(
-                    SessionEventName.STOP_TRANSACTION_SUCCESS, EventType.SUCCESS,
-                    "Stop transaction succeeded"
+                    SessionLifecycleEvents.endSession(sessionsApi, success = true),
+                    EventType.SUCCESS,
+                    "$endLabel succeeded"
                 )
 
                 // 6. Commit transaction API
@@ -392,10 +400,13 @@ internal class SessionManager(
                     )
                     return@launch
                 }
-                emitter?.emit(
-                    SessionEventName.COMMIT_TRANSACTION_SUCCESS, EventType.SUCCESS,
-                    "Commit transaction succeeded"
-                )
+                // The Sessions API has no commit call, so there is nothing to report for it
+                if (!sessionsApi) {
+                    emitter?.emit(
+                        SessionEventName.COMMIT_TRANSACTION_SUCCESS, EventType.SUCCESS,
+                        "Commit transaction succeeded"
+                    )
+                }
 
                 // 6. Poll for transcript (Phase 1)
                 val transcriptPollResult =

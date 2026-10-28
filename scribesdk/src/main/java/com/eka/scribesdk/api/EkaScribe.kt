@@ -274,7 +274,8 @@ object EkaScribe {
                 flavour = config.flavour,
                 appVersion = config.networkConfig.appVersionName,
                 logger = logger,
-                resultFetcher = sessionsResultFetcher
+                resultFetcher = sessionsResultFetcher,
+                onEvent = { callback.onSessionEvent(it) }
             ),
             useSessionsApi = config.useSessionsApi
         )

@@ -347,7 +347,7 @@ public class MyScribeCallback implements EkaScribeCallback {
 }
 ```
 
-> **`onSessionEvent` for analytics:** `SessionEvent` carries an `eventName` (e.g. `RECORDING_STARTED`, `CHUNK_UPLOADED`, `COMMIT_SUCCEEDED`, `POLL_RESULT_RECEIVED`) and `eventType` (`SUCCESS`, `ERROR`, `INFO`). Use this for detailed telemetry without adding any logging code inside the SDK.
+> **`onSessionEvent` for analytics:** `SessionEvent` carries an `eventName` (e.g. `RECORDING_STARTED`, `CHUNK_UPLOADED`, `END_SESSION_SUCCESS`, `OUTPUT_READY`) and `eventType` (`SUCCESS`, `ERROR`, `INFO`). Use this for detailed telemetry without adding any logging code inside the SDK.
 
 ---
 
@@ -654,11 +654,28 @@ CoroutineHelper.collectSessionState(
 
 `SessionEvent` fields:
 - `sessionId: String`
-- `eventName: SessionEventName` — e.g. `RECORDING_STARTED`, `CHUNK_UPLOADED`, `COMMIT_SUCCEEDED`, `POLL_RESULT_RECEIVED`
+- `eventName: SessionEventName` — e.g. `RECORDING_STARTED`, `CHUNK_UPLOADED`, `END_SESSION_SUCCESS`, `OUTPUT_READY`
 - `eventType: EventType` — `SUCCESS`, `ERROR`, or `INFO`
 - `message: String`
 - `metadata: Map<String, String>`
 - `timestampMs: Long`
+
+**Create and end events depend on the flow the session ran on.** A session created with `useSessionsApi = true` reports `CREATE_SESSION_SUCCESS` / `CREATE_SESSION_FAILED` and `END_SESSION_SUCCESS` / `END_SESSION_FAILED`. A legacy session reports the transaction names instead, and also `COMMIT_TRANSACTION_*`, which the Sessions API has no equivalent for.
+
+| Step | Sessions API | Legacy |
+|---|---|---|
+| Create the session | `CREATE_SESSION_SUCCESS` / `CREATE_SESSION_FAILED` | `INIT_TRANSACTION_SUCCESS` / `INIT_TRANSACTION_FAILED` |
+| End the session | `END_SESSION_SUCCESS` / `END_SESSION_FAILED` | `STOP_TRANSACTION_SUCCESS` / `STOP_TRANSACTION_FAILED` |
+| Commit | not sent (no commit step) | `COMMIT_TRANSACTION_SUCCESS` / `COMMIT_TRANSACTION_FAILED` |
+
+Sessions API sessions also report the two PATCH calls made around Create and End. Both are best effort and never fail the session:
+
+| Event | Meaning | Metadata |
+|---|---|---|
+| `UPDATE_SESSION_MODE_SUCCESS` / `UPDATE_SESSION_MODE_FAILED` | `PATCH session_mode`, sent in the background right after Create. If it fails it is resent just before End, which sends a second event. | `mode`, `retry` (`true` for the resend), `error` on failure |
+| `UPDATE_AUDIO_DURATION_SUCCESS` / `UPDATE_AUDIO_DURATION_FAILED` | `PATCH additional_data.audio_duration`, sent after End succeeds | `durationSeconds`, `error` on failure |
+
+Every other event (chunk upload, poll, `TRANSCRIPT_READY`, `OUTPUT_READY`, `SESSION_COMPLETED`, ...) is the same on both flows. The `ErrorCode` values (`INIT_TRANSACTION_FAILED`, `STOP_TRANSACTION_FAILED`, ...) are unchanged.
 
 ---
 

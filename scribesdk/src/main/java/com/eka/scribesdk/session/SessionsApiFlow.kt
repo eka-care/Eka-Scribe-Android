@@ -1,8 +1,11 @@
 package com.eka.scribesdk.session
 
 import com.eka.scribesdk.BuildConfig
+import com.eka.scribesdk.api.models.EventType
 import com.eka.scribesdk.api.models.PatientDetail
 import com.eka.scribesdk.api.models.SessionConfig
+import com.eka.scribesdk.api.models.SessionEvent
+import com.eka.scribesdk.api.models.SessionEventName
 import com.eka.scribesdk.common.logging.Logger
 import com.eka.scribesdk.data.DataManager
 import com.eka.scribesdk.data.local.db.entity.TransactionStage
@@ -40,7 +43,9 @@ internal class SessionsApiFlow(
     /** Host app version, saved on the session so we know which app build recorded it. */
     private val appVersion: String? = null,
     /** Runs the session_mode PATCH, so recording doesn't wait for it. */
-    private val backgroundScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val backgroundScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
+    /** Reports the session_mode and audio_duration PATCH outcomes to the host app's onSessionEvent. */
+    private val onEvent: ((SessionEvent) -> Unit)? = null
 ) {
     companion object {
         private const val TAG = "SessionsApiFlow"
@@ -121,7 +126,10 @@ internal class SessionsApiFlow(
         // user_status = recording_started as the web sends it, so a session that never reaches
         // End shows on web as "recording started" (recommit offered), not as a fresh session
         val modeRequest = PatchSessionRequest(sessionMode = sessionConfig.mode, userStatus = USER_STATUS_RECORDING_STARTED)
-        modePatches[sessionId] = ModePatch(modeRequest, backgroundScope.async { patchSession(sessionId, modeRequest) })
+        modePatches[sessionId] = ModePatch(
+            modeRequest,
+            backgroundScope.async { patchSessionMode(sessionId, modeRequest, retry = false) }
+        )
         return TransactionResult.Success()
     }
 
@@ -140,11 +148,27 @@ internal class SessionsApiFlow(
             )
             if (result is TransactionResult.Error) {
                 logger.warn(TAG, "audio_duration not saved for $sessionId: ${result.message}")
+                report(
+                    sessionId, SessionEventName.UPDATE_AUDIO_DURATION_FAILED, EventType.ERROR,
+                    "Update audio duration failed: ${result.message}",
+                    mapOf("durationSeconds" to seconds.toString(), "error" to result.message)
+                )
+            } else {
+                report(
+                    sessionId, SessionEventName.UPDATE_AUDIO_DURATION_SUCCESS, EventType.SUCCESS,
+                    "Audio duration updated",
+                    mapOf("durationSeconds" to seconds.toString())
+                )
             }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             logger.warn(TAG, "audio_duration not saved for $sessionId", e)
+            report(
+                sessionId, SessionEventName.UPDATE_AUDIO_DURATION_FAILED, EventType.ERROR,
+                "Update audio duration failed: ${e.message}",
+                mapOf("error" to (e.message ?: "unknown"))
+            )
         }
     }
 
@@ -153,7 +177,7 @@ internal class SessionsApiFlow(
         // session_mode must be set before End: wait for the PATCH, resend once if it failed
         modePatches[sessionId]?.let { pending ->
             if (pending.result.await() is TransactionResult.Error) {
-                val retry = patchSession(sessionId, pending.request)
+                val retry = patchSessionMode(sessionId, pending.request, retry = true)
                 if (retry is TransactionResult.Error) return retry // End is retried later, mode first
             }
             modePatches.remove(sessionId)
@@ -250,6 +274,50 @@ internal class SessionsApiFlow(
         )
         if (result is TransactionResult.Error) {
             logger.warn(TAG, "Cancel session failed (ignored): $sessionId - ${result.message}")
+        }
+    }
+
+    /** The session_mode PATCH, reported to the host app. [retry] marks the resend made just before End. */
+    private suspend fun patchSessionMode(
+        sessionId: String,
+        request: PatchSessionRequest,
+        retry: Boolean
+    ): TransactionResult {
+        val result = patchSession(sessionId, request)
+        val metadata = buildMap<String, String> {
+            request.sessionMode?.let { put("mode", it) }
+            put("retry", retry.toString())
+            if (result is TransactionResult.Error) put("error", result.message)
+        }
+        if (result is TransactionResult.Error) {
+            report(
+                sessionId, SessionEventName.UPDATE_SESSION_MODE_FAILED, EventType.ERROR,
+                "Update session mode failed: ${result.message}", metadata
+            )
+        } else {
+            report(
+                sessionId, SessionEventName.UPDATE_SESSION_MODE_SUCCESS, EventType.SUCCESS,
+                "Session mode updated", metadata
+            )
+        }
+        return result
+    }
+
+    /** A host app callback that throws must never break the session flow (or fail End's await). */
+    private fun report(
+        sessionId: String,
+        name: SessionEventName,
+        type: EventType,
+        message: String,
+        metadata: Map<String, String> = emptyMap()
+    ) {
+        val sink = onEvent ?: return
+        try {
+            sink(SessionEvent(sessionId, name, type, message, metadata))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            logger.warn(TAG, "Event listener threw for $name", e)
         }
     }
 

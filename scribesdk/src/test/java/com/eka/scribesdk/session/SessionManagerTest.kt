@@ -4,6 +4,8 @@ import android.content.Context
 import com.eka.scribesdk.api.EkaScribeCallback
 import com.eka.scribesdk.api.EkaScribeConfig
 import com.eka.scribesdk.api.models.ScribeError
+import com.eka.scribesdk.api.models.SessionEvent
+import com.eka.scribesdk.api.models.SessionEventName
 import com.eka.scribesdk.api.models.SessionState
 import com.eka.scribesdk.common.error.ErrorCode
 import com.eka.scribesdk.common.error.ScribeException
@@ -262,6 +264,40 @@ internal class SessionManagerTest {
                 assertEquals(ErrorCode.INVALID_STATE_TRANSITION, e.code)
             }
         }
+    }
+
+    @Test
+    fun `sessions api session reports create session instead of init transaction`() = runTest {
+        val events = mutableListOf<SessionEvent>()
+        val callback = mockk<EkaScribeCallback>(relaxed = true)
+        every { callback.onSessionEvent(any()) } answers { events.add(firstArg()) }
+        val tm = mockk<TransactionManager>(relaxed = true)
+        coEvery { tm.usesSessionsApi(any()) } returns true
+
+        val manager = createManagerWithSuccessInit(tm = tm)
+        manager.setCallback(callback)
+        manager.start(mockContext)
+        Thread.sleep(200)
+
+        val names = events.map { it.eventName }
+        assertTrue("CREATE_SESSION_SUCCESS expected, got $names", SessionEventName.CREATE_SESSION_SUCCESS in names)
+        assertTrue("INIT_TRANSACTION_SUCCESS must not be sent, got $names", SessionEventName.INIT_TRANSACTION_SUCCESS !in names)
+    }
+
+    @Test
+    fun `legacy session still reports init transaction`() = runTest {
+        val events = mutableListOf<SessionEvent>()
+        val callback = mockk<EkaScribeCallback>(relaxed = true)
+        every { callback.onSessionEvent(any()) } answers { events.add(firstArg()) }
+
+        val manager = createManagerWithSuccessInit()
+        manager.setCallback(callback)
+        manager.start(mockContext)
+        Thread.sleep(200)
+
+        val names = events.map { it.eventName }
+        assertTrue("INIT_TRANSACTION_SUCCESS expected, got $names", SessionEventName.INIT_TRANSACTION_SUCCESS in names)
+        assertTrue("CREATE_SESSION_SUCCESS must not be sent, got $names", SessionEventName.CREATE_SESSION_SUCCESS !in names)
     }
 
     private fun createManagerWithSuccessInit(

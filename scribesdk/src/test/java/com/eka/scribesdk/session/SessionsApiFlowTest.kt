@@ -3,6 +3,8 @@ package com.eka.scribesdk.session
 import com.eka.scribesdk.api.models.OutputTemplate
 import com.eka.scribesdk.api.models.PatientDetail
 import com.eka.scribesdk.api.models.SessionConfig
+import com.eka.scribesdk.api.models.SessionEvent
+import com.eka.scribesdk.api.models.SessionEventName
 import com.eka.scribesdk.api.models.SessionAudioUnavailableException
 import com.eka.scribesdk.api.models.SessionData
 import com.eka.scribesdk.common.logging.NoOpLogger
@@ -182,14 +184,16 @@ internal class SessionsApiFlowTest {
     private fun flow(
         api: FakeSessionsApi,
         dm: DataManager,
-        scope: CoroutineScope = CoroutineScope(Dispatchers.Unconfined)
+        scope: CoroutineScope = CoroutineScope(Dispatchers.Unconfined),
+        onEvent: ((SessionEvent) -> Unit)? = null
     ) = SessionsApiFlow(
         apiService = api,
         dataManager = dm,
         flavour = "android",
         logger = NoOpLogger(),
         appVersion = "4.9.0",
-        backgroundScope = scope
+        backgroundScope = scope,
+        onEvent = onEvent
     )
 
     private fun flowWithResults(api: FakeSessionsApi, dm: DataManager) = SessionsApiFlow(
@@ -357,6 +361,100 @@ internal class SessionsApiFlowTest {
         coEvery { dm.getAllChunks(SESSION_ID) } returns listOf(uploadedChunk(0).copy(durationMs = 5_000L))
 
         assertTrue(flow(api, dm).endSession(SESSION_ID) is TransactionResult.Success)
+    }
+
+    // ---- events for the PATCH calls ----
+
+    @Test
+    fun `session_mode PATCH is reported as UPDATE_SESSION_MODE_SUCCESS`() = runTest {
+        val api = FakeSessionsApi().apply {
+            createResponse = createdOk()
+            patchResponse = patchOk()
+        }
+        val events = mutableListOf<SessionEvent>()
+
+        flow(api, mockk(relaxed = true), onEvent = { events += it }).createSession(SESSION_ID, config())
+
+        val event = events.single()
+        assertEquals(SessionEventName.UPDATE_SESSION_MODE_SUCCESS, event.eventName)
+        assertEquals(SESSION_ID, event.sessionId)
+        assertEquals("false", event.metadata["retry"])
+        assertEquals(config().mode, event.metadata["mode"])
+    }
+
+    @Test
+    fun `a failed session_mode PATCH is reported, and so is the resend before End`() = runTest {
+        val api = FakeSessionsApi().apply {
+            createResponse = createdOk()
+            patchResponse = netServerError("busy", 503)
+            endResponse = netSuccess(EndSessionResponse(SESSION_ID, "processing", null, 0, null), code = 202)
+        }
+        val events = mutableListOf<SessionEvent>()
+        val flow = flow(api, mockk(relaxed = true), onEvent = { events += it })
+
+        flow.createSession(SESSION_ID, config())
+        api.patchResponse = patchOk()
+        flow.endSession(SESSION_ID)
+
+        assertEquals(
+            listOf(SessionEventName.UPDATE_SESSION_MODE_FAILED, SessionEventName.UPDATE_SESSION_MODE_SUCCESS),
+            events.map { it.eventName }
+        )
+        assertEquals("false", events[0].metadata["retry"])
+        assertEquals("busy", events[0].metadata["error"])
+        assertEquals("true", events[1].metadata["retry"])
+    }
+
+    @Test
+    fun `audio_duration PATCH is reported with the seconds that were sent`() = runTest {
+        val api = FakeSessionsApi().apply {
+            endResponse = netSuccess(EndSessionResponse(SESSION_ID, "processing", null, 2, null), code = 202)
+            patchResponse = patchOk()
+        }
+        val dm = mockk<DataManager>(relaxed = true)
+        coEvery { dm.getAllChunks(SESSION_ID) } returns listOf(
+            uploadedChunk(0).copy(durationMs = 20_000L),
+            uploadedChunk(1).copy(durationMs = 12_600L)
+        )
+        val events = mutableListOf<SessionEvent>()
+
+        flow(api, dm, onEvent = { events += it }).endSession(SESSION_ID)
+
+        val event = events.single()
+        assertEquals(SessionEventName.UPDATE_AUDIO_DURATION_SUCCESS, event.eventName)
+        assertEquals("33", event.metadata["durationSeconds"])
+    }
+
+    @Test
+    fun `a failed audio_duration PATCH is reported but does not fail End`() = runTest {
+        val api = FakeSessionsApi().apply {
+            endResponse = netSuccess(EndSessionResponse(SESSION_ID, "processing", null, 1, null), code = 202)
+            patchResponse = netServerError("nope", 500)
+        }
+        val dm = mockk<DataManager>(relaxed = true)
+        coEvery { dm.getAllChunks(SESSION_ID) } returns listOf(uploadedChunk(0).copy(durationMs = 5_000L))
+        val events = mutableListOf<SessionEvent>()
+
+        val result = flow(api, dm, onEvent = { events += it }).endSession(SESSION_ID)
+
+        assertTrue(result is TransactionResult.Success)
+        val event = events.single()
+        assertEquals(SessionEventName.UPDATE_AUDIO_DURATION_FAILED, event.eventName)
+        assertEquals("5", event.metadata["durationSeconds"])
+        assertEquals("nope", event.metadata["error"])
+    }
+
+    @Test
+    fun `a host callback that throws does not break Create or End`() = runTest {
+        val api = FakeSessionsApi().apply {
+            createResponse = createdOk()
+            patchResponse = patchOk()
+            endResponse = netSuccess(EndSessionResponse(SESSION_ID, "processing", null, 0, null), code = 202)
+        }
+        val flow = flow(api, mockk(relaxed = true), onEvent = { throw IllegalStateException("host bug") })
+
+        assertTrue(flow.createSession(SESSION_ID, config()) is TransactionResult.Success)
+        assertTrue(flow.endSession(SESSION_ID) is TransactionResult.Success)
     }
 
     @Test

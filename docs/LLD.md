@@ -63,6 +63,7 @@ com.eka.scribesdk/
 +-- session/                          # Session lifecycle management
 |   +-- SessionManager                # Single active session orchestrator
 |   +-- SessionEventEmitter           # Typed event emitter for session lifecycle
+|   +-- SessionLifecycleEvents        # Create/End event names per flow (CREATE_SESSION_* / END_SESSION_* vs INIT/STOP_TRANSACTION_*)
 |   +-- TransactionManager            # Lifecycle facade; Sessions API sessions delegate to SessionsApiFlow (legacy: init → stop → commit → poll)
 |   +-- SessionsApiFlow               # Sessions API lifecycle: create → PATCH → end → poll
 |   +-- SessionApiRouter              # Sessions API vs legacy per session (local api_flow, else the flag; 400/404/422 → legacy)
@@ -851,6 +852,8 @@ stopTransaction    --> SessionsApiFlow.endSession      POST  /voice/v1/sessions/
 commitTransaction  --> no call                         stage moves to ANALYZING
 pollResult         --> SessionsApiFlow.pollResult      GET   /voice/v1/sessions/{id}   (via SessionsResultFetcher)
 ```
+
+The events follow the flow. A Sessions API session reports `CREATE_SESSION_SUCCESS/FAILED` and `END_SESSION_SUCCESS/FAILED` (chosen in `SessionLifecycleEvents`) instead of `INIT_TRANSACTION_*` and `STOP_TRANSACTION_*`, and sends no `COMMIT_TRANSACTION_*` since there is no commit call. `SessionsApiFlow` also reports its two PATCH calls through `onEvent`, which `EkaScribe.init` wires to `onSessionEvent`: `UPDATE_SESSION_MODE_SUCCESS/FAILED` and `UPDATE_AUDIO_DURATION_SUCCESS/FAILED`. Legacy sessions keep the transaction names. `ErrorCode` values are unchanged.
 
 ```mermaid
 sequenceDiagram
