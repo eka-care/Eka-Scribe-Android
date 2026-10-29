@@ -408,6 +408,51 @@ internal class SessionManagerTest {
         assertEquals(SessionState.ERROR, manager.currentState)
     }
 
+    private fun managerReachingTranscriptPoll(
+        transcriptPoll: TransactionPollResult,
+        events: MutableList<SessionEvent>
+    ): SessionManager {
+        val tm = mockk<TransactionManager>(relaxed = true)
+        coEvery { tm.retryFailedUploads(any()) } returns true
+        coEvery { tm.stopTransaction(any()) } returns TransactionResult.Success()
+        coEvery { tm.commitTransaction(any()) } returns TransactionResult.Success()
+        coEvery { tm.pollResult(any(), any()) } returns transcriptPoll
+        val callback = mockk<EkaScribeCallback>(relaxed = true)
+        every { callback.onSessionEvent(any()) } answers { events.add(firstArg()) }
+        return createManagerWithSuccessInit(tm = tm).also { it.setCallback(callback) }
+    }
+
+    @Test
+    fun `failed transcript poll is reported as POLL_RESULT_FAILED`() = runTest {
+        val events = Collections.synchronizedList(mutableListOf<SessionEvent>())
+        val manager = managerReachingTranscriptPoll(TransactionPollResult.Failed("Processing failed"), events)
+        manager.start(mockContext)
+        Thread.sleep(200)
+
+        manager.stop()
+        Thread.sleep(200)
+
+        assertEquals(SessionState.ERROR, manager.currentState)
+        val event = events.single { it.eventName == SessionEventName.POLL_RESULT_FAILED }
+        assertEquals("transcript", event.metadata["phase"])
+        assertEquals("Processing failed", event.metadata["error"])
+    }
+
+    @Test
+    fun `transcript poll timeout is reported as POLL_RESULT_TIMEOUT`() = runTest {
+        val events = Collections.synchronizedList(mutableListOf<SessionEvent>())
+        val manager = managerReachingTranscriptPoll(TransactionPollResult.Timeout, events)
+        manager.start(mockContext)
+        Thread.sleep(200)
+
+        manager.stop()
+        Thread.sleep(200)
+
+        assertEquals(SessionState.ERROR, manager.currentState)
+        val event = events.single { it.eventName == SessionEventName.POLL_RESULT_TIMEOUT }
+        assertEquals("transcript", event.metadata["phase"])
+    }
+
     @Test
     fun `stop transitions to ERROR when transcript poll times out`() = runTest {
         val tm = mockk<TransactionManager>(relaxed = true)

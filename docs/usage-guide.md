@@ -675,6 +675,8 @@ Sessions API sessions also report the two PATCH calls made around Create and End
 | `UPDATE_SESSION_MODE_SUCCESS` / `UPDATE_SESSION_MODE_FAILED` | `PATCH session_mode`, sent in the background right after Create. If it fails it is resent just before End, which sends a second event. | `mode`, `retry` (`true` for the resend), `error` on failure |
 | `UPDATE_AUDIO_DURATION_SUCCESS` / `UPDATE_AUDIO_DURATION_FAILED` | `PATCH additional_data.audio_duration`, sent after End succeeds | `durationSeconds`, `error` on failure |
 
+`POLL_RESULT_FAILED` and `POLL_RESULT_TIMEOUT` fire on both flows when the transcript poll or the later output poll fails or times out; `metadata["phase"]` is `transcript` or `output`. A transcript-phase failure ends the session (`onSessionFailed`).
+
 Every other event (chunk upload, poll, `TRANSCRIPT_READY`, `OUTPUT_READY`, `SESSION_COMPLETED`, ...) is the same on both flows. The `ErrorCode` values (`INIT_TRANSACTION_FAILED`, `STOP_TRANSACTION_FAILED`, ...) are unchanged.
 
 ---

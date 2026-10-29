@@ -433,6 +433,11 @@ internal class SessionManager(
                     }
 
                     is TransactionPollResult.Failed -> {
+                        emitter?.emit(
+                            SessionEventName.POLL_RESULT_FAILED, EventType.ERROR,
+                            "Transcript poll failed: ${transcriptPollResult.error}",
+                            mapOf("error" to transcriptPollResult.error, "phase" to "transcript")
+                        )
                         handleTransactionError(
                             sessionId,
                             ErrorCode.TRANSCRIPTION_FAILED,
@@ -440,11 +445,16 @@ internal class SessionManager(
                         )
                         logger.warn(
                             TAG,
-                            "Transcript poll failed: ${transcriptPollResult.error}, proceeding to full output poll"
+                            "Transcript poll failed: ${transcriptPollResult.error}, session failed: $sessionId"
                         )
                     }
 
                     is TransactionPollResult.Timeout -> {
+                        emitter?.emit(
+                            SessionEventName.POLL_RESULT_TIMEOUT, EventType.ERROR,
+                            "Transcript poll timed out",
+                            mapOf("phase" to "transcript")
+                        )
                         handleTransactionError(
                             sessionId,
                             ErrorCode.POLL_TIMEOUT,
@@ -452,7 +462,7 @@ internal class SessionManager(
                         )
                         logger.warn(
                             TAG,
-                            "Transcript poll timeout, proceeding to full output poll: $sessionId"
+                            "Transcript poll timeout, session failed: $sessionId"
                         )
                     }
                 }
@@ -488,7 +498,7 @@ internal class SessionManager(
                         emitter?.emit(
                             SessionEventName.POLL_RESULT_FAILED, EventType.ERROR,
                             "Poll result failed: ${fullPollResult.error}",
-                            mapOf("error" to fullPollResult.error)
+                            mapOf("error" to fullPollResult.error, "phase" to "output")
                         )
                         // If transcript succeeded, session is already COMPLETED — only fire failure callback
                         // If transcript also failed, handle as full error
@@ -508,7 +518,8 @@ internal class SessionManager(
                         )
                         emitter?.emit(
                             SessionEventName.POLL_RESULT_TIMEOUT, EventType.ERROR,
-                            "Poll timed out, output may complete later"
+                            "Poll timed out, output may complete later",
+                            mapOf("phase" to "output")
                         )
                         logger.warn(TAG, "Full output poll timeout: $sessionId")
                     }
