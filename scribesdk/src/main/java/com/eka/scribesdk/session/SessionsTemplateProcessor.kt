@@ -30,6 +30,7 @@ internal class SessionsTemplateProcessor(
         private const val DEFAULT_INTERVAL_MS = 2_000L
         private const val HTTP_PROCESSING = 202
         private const val HTTP_TOO_MANY_REQUESTS = 429
+        private val FAILED_STATUSES = setOf("failure", "failed", "error")
     }
 
     /** Success once the new note is ready; the caller then reloads the session result. */
@@ -69,10 +70,16 @@ internal class SessionsTemplateProcessor(
         documentId: String?
     ): DocumentState = when (this) {
         is NetworkResponse.Success -> {
-            if (code == HTTP_PROCESSING) {
-                DocumentState.Pending
-            } else {
-                body.documentRefs().find(templateId, documentId)?.status.toDocumentState()
+            val listed = if (code == HTTP_PROCESSING) null else body.documentRefs().find(templateId, documentId)
+            when {
+                code == HTTP_PROCESSING -> DocumentState.Pending
+                listed != null -> listed.status.toDocumentState()
+                // A note that failed isn't listed in templates[]: the ?document_id= response then
+                // only says "status": "failed" at the top level. Without this, polling ran the
+                // full 2 minutes and the app sat on its loading screen.
+                documentId != null && body.status?.lowercase() in FAILED_STATUSES ->
+                    DocumentState.Failed("Template generation failed")
+                else -> DocumentState.Pending
             }
         }
 
@@ -94,7 +101,7 @@ internal class SessionsTemplateProcessor(
 
     private fun String?.toDocumentState(): DocumentState = when (this?.lowercase()) {
         "success", "completed", "partial", "partial_success" -> DocumentState.Ready
-        "failure", "failed", "error" -> DocumentState.Failed("Template generation failed")
+        in FAILED_STATUSES -> DocumentState.Failed("Template generation failed")
         else -> DocumentState.Pending
     }
 

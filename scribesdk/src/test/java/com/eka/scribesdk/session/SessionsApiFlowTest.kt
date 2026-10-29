@@ -668,6 +668,42 @@ internal class SessionsApiFlowTest {
     }
 
     @Test
+    fun `convert fails at once when the document query says failed and lists no note`() = runTest {
+        // What the server returned for a failed clinical_notes_template note (a-813083f5..., 29 Oct)
+        val failedDocument = GetSessionResponse(
+            sessionId = SESSION_ID, status = "failed", createdAt = null, languageDetected = null,
+            transcript = null, message = null, templates = null
+        )
+        val api = FakeSessionsApi().apply {
+            processResponse = processStarted()
+            getResponses.addLast(netSuccess(failedDocument))
+        }
+
+        val result = processor(api).process(SESSION_ID, "t-9")
+
+        assertEquals("Template generation failed", result.exceptionOrNull()?.message)
+        assertEquals(1, api.getCalls)
+    }
+
+    @Test
+    fun `convert keeps polling while the note isn't listed and nothing failed`() = runTest {
+        val notListedYet = GetSessionResponse(
+            sessionId = SESSION_ID, status = "completed", createdAt = null, languageDetected = null,
+            transcript = null, message = null, templates = null
+        )
+        val api = FakeSessionsApi().apply {
+            processResponse = processStarted()
+            getResponses.addLast(netSuccess(notListedYet))
+            getResponses.addLast(netSuccess(documentBody("success")))
+        }
+
+        val result = processor(api).process(SESSION_ID, "t-9")
+
+        assertTrue(result.isSuccess)
+        assertEquals(2, api.getCalls)
+    }
+
+    @Test
     fun `convert fails without polling when Process Template is refused`() = runTest {
         val api = FakeSessionsApi().apply { processResponse = netServerError("Session not found", 404) }
 
