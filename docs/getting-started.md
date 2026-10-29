@@ -37,7 +37,7 @@ EkaScribe  (com.eka.scribesdk.api.EkaScribe)
 
 The host app never directly touches audio capture, encoding, upload, or polling. The SDK handles all of it.
 
-**Version:** 4.2.4 | **Min SDK:** 24 (Android 7.0) | **Compile SDK:** 36 | **Java:** 17
+**Version:** 4.4.0 | **Min SDK:** 24 (Android 7.0) | **Compile SDK:** 36 | **Java:** 17
 
 ---
 

@@ -150,11 +150,11 @@ buildConfigField("String", "COG_URL", "\"${configProps["COG_URL"]}\"")
 ### `sdk.properties` — SDK version
 
 ```properties
-SDK_VERSION_NAME=4.2.4
-SDK_BUILD_NUMBER=1
+SDK_VERSION_NAME=4.4.0
+SDK_BUILD_NUMBER=2
 ```
 
-Update `SDK_VERSION_NAME` before tagging a release on GitHub.
+Update `SDK_VERSION_NAME` (and bump `SDK_BUILD_NUMBER`) before tagging a release on GitHub. The SDK sends both to the server: `sdk_version` in a Sessions API session's `additional_data`, and the `sdk-version-name` / `sdk-version` headers host apps add.
 
 ### `settings.gradle.kts` — Module and repository declarations
 
@@ -332,24 +332,24 @@ JitPack builds the SDK on demand when a consumer requests a version for the firs
 jdk:
   - openjdk17
 before_install:
-  - sdk install java 17.0.2-open
-  - sdk use java 17.0.2-open
+  - sdk install java 17.0.12-oracle
+  - sdk use java 17.0.12-oracle
 install:
   - ./gradlew :scribesdk:testReleaseUnitTest :scribesdk:publishReleasePublicationToMavenLocal
 ```
 
 ### Releasing a new version
 
-1. Update `SDK_VERSION_NAME` in `sdk.properties`.
-2. Commit and push to `main`.
-3. Create a GitHub tag matching the new version:
+1. Update `SDK_VERSION_NAME` in `sdk.properties` and bump `SDK_BUILD_NUMBER`.
+2. Merge to `main`.
+3. Tag the merge commit on `main` with the bare version (no `v` prefix, like the existing `4.3.2`):
    ```bash
-   git tag v4.2.5
-   git push origin v4.2.5
+   git tag 4.4.1
+   git push origin 4.4.1
    ```
 4. JitPack automatically detects the tag. The artifact becomes available at:
    ```
-   com.github.eka-care:Eka-Scribe-Android:4.2.5
+   com.github.eka-care:Eka-Scribe-Android:4.4.1
    ```
 
 ### Dependency coordinates
