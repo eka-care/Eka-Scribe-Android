@@ -30,8 +30,10 @@ import com.eka.scribesdk.data.DataManager
 import com.eka.scribesdk.data.DefaultDataManager
 import com.eka.scribesdk.data.ScribeRepository
 import com.eka.scribesdk.data.local.db.ScribeDatabase
+import com.eka.scribesdk.data.local.db.entity.ApiFlow
 import com.eka.scribesdk.data.local.db.entity.toScribeSession
 import com.eka.scribesdk.data.remote.S3CredentialProvider
+import com.eka.scribesdk.data.remote.models.requests.InitTransactionRequest
 import com.eka.scribesdk.data.remote.services.ScribeApiService
 import com.eka.scribesdk.data.remote.services.SessionsApiService
 import com.eka.scribesdk.data.remote.upload.ApiFlowChunkUploader
@@ -42,8 +44,10 @@ import com.eka.scribesdk.pipeline.Pipeline
 import com.eka.scribesdk.session.AudioFileProcessor
 import com.eka.scribesdk.session.SessionManager
 import com.eka.scribesdk.session.SessionsApiFlow
+import com.eka.scribesdk.session.SessionsResultFetcher
 import com.eka.scribesdk.session.TransactionManager
 import com.eka.scribesdk.session.TransactionResult
+import com.google.gson.Gson
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -226,6 +230,12 @@ object EkaScribe {
             logger = logger
         )
 
+        val sessionsResultFetcher = SessionsResultFetcher(
+            apiService = sessionsApiService,
+            logger = logger,
+            templateNames = { sessionId -> savedTemplateNames(dm.getSession(sessionId)?.sessionMetadata) }
+        )
+
         val txnManager = TransactionManager(
             apiService = developerApiService,
             dataManager = dm,
@@ -239,7 +249,8 @@ object EkaScribe {
                 apiService = sessionsApiService,
                 dataManager = dm,
                 flavour = config.flavour,
-                logger = logger
+                logger = logger,
+                resultFetcher = sessionsResultFetcher
             ),
             useSessionsApi = config.useSessionsApi
         )
@@ -254,7 +265,9 @@ object EkaScribe {
         )
         scribeRepository = ScribeRepository(
             apiService = developerApiService,
-            logger = logger
+            logger = logger,
+            sessionsResultFetcher = sessionsResultFetcher,
+            usesSessionsApi = { sessionId -> dm.getSession(sessionId)?.apiFlow == ApiFlow.SESSIONS_V1 }
         )
 
         sessionManager = SessionManager(
@@ -286,6 +299,24 @@ object EkaScribe {
         }
         isInitialized.set(true)
         logger.info(TAG, "SDK initialized")
+    }
+
+    /** Template names saved with the session's init config (templateId -> name). */
+    private fun savedTemplateNames(sessionMetadata: String?): Map<String, String> {
+        if (sessionMetadata.isNullOrBlank()) return emptyMap()
+        return try {
+            Gson().fromJson(sessionMetadata, InitTransactionRequest::class.java)
+                ?.outputFormatTemplate
+                .orEmpty()
+                .mapNotNull { template ->
+                    val id = template.templateId ?: return@mapNotNull null
+                    val name = template.name ?: return@mapNotNull null
+                    id to name
+                }
+                .toMap()
+        } catch (e: Exception) {
+            emptyMap()
+        }
     }
 
     // ---- Recording session APIs ----

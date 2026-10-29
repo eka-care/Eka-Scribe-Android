@@ -2,6 +2,7 @@ package com.eka.scribesdk.data.remote.services
 
 import com.eka.scribesdk.data.remote.models.responses.CreateSessionResponse
 import com.eka.scribesdk.data.remote.models.responses.EndSessionResponse
+import com.eka.scribesdk.data.remote.models.responses.GetSessionResponse
 import com.eka.scribesdk.data.remote.models.responses.PatchSessionResponse
 import com.eka.scribesdk.data.remote.models.responses.SessionsErrorResponse
 import com.eka.scribesdk.data.remote.models.responses.UploadAudioResponse
@@ -9,6 +10,7 @@ import com.google.gson.JsonObject
 import com.haroldadmin.cnradapter.NetworkResponse
 import okhttp3.RequestBody
 import retrofit2.http.Body
+import retrofit2.http.GET
 import retrofit2.http.PATCH
 import retrofit2.http.POST
 import retrofit2.http.Path
@@ -45,4 +47,10 @@ internal interface SessionsApiService {
         @Path("session_id") sessionId: String,
         @Body request: JsonObject
     ): NetworkResponse<EndSessionResponse, SessionsErrorResponse>
+
+    /** 202 = still processing, 200 = completed, 206 = partial; 410 (expired) arrives as ServerError. */
+    @GET("voice/v1/sessions/{session_id}")
+    suspend fun getSession(
+        @Path("session_id") sessionId: String
+    ): NetworkResponse<GetSessionResponse, SessionsErrorResponse>
 }
