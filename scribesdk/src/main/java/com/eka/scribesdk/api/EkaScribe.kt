@@ -33,11 +33,15 @@ import com.eka.scribesdk.data.local.db.ScribeDatabase
 import com.eka.scribesdk.data.local.db.entity.toScribeSession
 import com.eka.scribesdk.data.remote.S3CredentialProvider
 import com.eka.scribesdk.data.remote.services.ScribeApiService
+import com.eka.scribesdk.data.remote.services.SessionsApiService
+import com.eka.scribesdk.data.remote.upload.ApiFlowChunkUploader
 import com.eka.scribesdk.data.remote.upload.S3ChunkUploader
+import com.eka.scribesdk.data.remote.upload.SessionsChunkUploader
 import com.eka.scribesdk.encoder.Mp3AudioEncoder
 import com.eka.scribesdk.pipeline.Pipeline
 import com.eka.scribesdk.session.AudioFileProcessor
 import com.eka.scribesdk.session.SessionManager
+import com.eka.scribesdk.session.SessionsApiFlow
 import com.eka.scribesdk.session.TransactionManager
 import com.eka.scribesdk.session.TransactionResult
 import kotlinx.coroutines.CoroutineScope
@@ -149,6 +153,16 @@ object EkaScribe {
             )
         apiService = developerApiService
 
+        // Sessions API (/voice/v1/sessions) on the same host as the transaction APIs
+        val sessionsApiService: SessionsApiService = EkaNetwork
+            .creatorFor(
+                appId = enrichedNetworkConfig.appId,
+                service = "ekascribe_sessions_v1_service",
+            ).create(
+                serviceUrl = BuildConfig.DEVELOPER_URL,
+                serviceClass = SessionsApiService::class.java
+            )
+
         val database = ScribeDatabase.getInstance(context)
         val dm = DefaultDataManager(
             sessionDao = database.sessionDao(),
@@ -165,12 +179,24 @@ object EkaScribe {
             logger = logger
         )
 
-        val chunkUploader = S3ChunkUploader(
+        val s3ChunkUploader = S3ChunkUploader(
             context = context.applicationContext,
             credentialProvider = credentialProvider,
             bucketName = BuildConfig.BUCKET_NAME,
             maxRetryCount = EkaScribeConfig.MAX_UPLOAD_RETRIES,
             logger = logger
+        )
+        val sessionsChunkUploader = SessionsChunkUploader(
+            context = context.applicationContext,
+            apiService = sessionsApiService,
+            maxRetryCount = EkaScribeConfig.MAX_UPLOAD_RETRIES,
+            logger = logger
+        )
+        // Routes each chunk to S3 or the Sessions API based on the session's stored api_flow
+        val chunkUploader = ApiFlowChunkUploader(
+            legacyUploader = s3ChunkUploader,
+            sessionsUploader = sessionsChunkUploader,
+            dataManager = dm
         )
         val outputDir = File(context.filesDir, BuildConfig.OUTPUT_DIR)
         if (!outputDir.exists()) outputDir.mkdirs()
@@ -208,7 +234,14 @@ object EkaScribe {
             maxUploadRetries = EkaScribeConfig.MAX_UPLOAD_RETRIES,
             pollMaxRetries = EkaScribeConfig.POLL_MAX_RETRIES,
             pollDelayMs = EkaScribeConfig.POLL_DELAY_MS,
-            logger = logger
+            logger = logger,
+            sessionsApiFlow = SessionsApiFlow(
+                apiService = sessionsApiService,
+                dataManager = dm,
+                flavour = config.flavour,
+                logger = logger
+            ),
+            useSessionsApi = config.useSessionsApi
         )
         transactionManager = txnManager
         audioFileProcessor = AudioFileProcessor(

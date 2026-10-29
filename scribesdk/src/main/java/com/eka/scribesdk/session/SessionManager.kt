@@ -17,6 +17,7 @@ import com.eka.scribesdk.common.util.IdGenerator
 import com.eka.scribesdk.common.util.TimeProvider
 import com.eka.scribesdk.common.util.canRecordAudio
 import com.eka.scribesdk.data.DataManager
+import com.eka.scribesdk.data.local.db.entity.ApiFlow
 import com.eka.scribesdk.data.local.db.entity.SessionEntity
 import com.eka.scribesdk.data.local.db.entity.TransactionStage
 import com.eka.scribesdk.data.remote.models.requests.InitTransactionRequest
@@ -115,7 +116,7 @@ internal class SessionManager(
 
         transition(SessionState.STARTING)
 
-        val sessionId = IdGenerator.sessionId()
+        val sessionId = IdGenerator.sessionId(forSessionsApi = ekaScribeConfig.useSessionsApi)
         activeSessionId = sessionId
         activeSessionConfig = sessionConfig
         sessionScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -173,7 +174,8 @@ internal class SessionManager(
                     state = SessionState.RECORDING.name,
                     uploadStage = TransactionStage.INIT.name,
                     folderName = folderName,
-                    sessionMetadata = metadataJson
+                    sessionMetadata = metadataJson,
+                    apiFlow = ApiFlow.forNewSession(ekaScribeConfig.useSessionsApi)
                 )
                 dataManager.saveSession(session)
 
@@ -502,7 +504,9 @@ internal class SessionManager(
                 }
 
                 // Launch deferred full audio upload (fire-and-forget, survives session cleanup)
-                if (fullAudioResult != null && EkaScribeConfig.FULL_AUDIO_OUTPUT) {
+                if (fullAudioResult != null && EkaScribeConfig.FULL_AUDIO_OUTPUT &&
+                    !transactionManager.usesSessionsApi(sessionId)
+                ) {
                     launchDeferredFullAudioUpload(fullAudioResult)
                 }
             } catch (e: CancellationException) {
@@ -548,6 +552,16 @@ internal class SessionManager(
                 withTimeoutOrNull(5_000L) { activePipeline?.stop() }
             } catch (e: Exception) {
                 logger.warn(TAG, "Pipeline stop failed during cancel", e)
+            }
+        }
+        // Sessions API: mark the session cancelled on the server (no-op for legacy sessions)
+        sessionId?.let { id ->
+            deferredUploadScope.launch {
+                try {
+                    transactionManager.cancelSession(id)
+                } catch (e: Exception) {
+                    logger.warn(TAG, "Server cancel failed for $id", e)
+                }
             }
         }
     }

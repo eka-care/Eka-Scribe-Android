@@ -8,6 +8,7 @@ import com.eka.scribesdk.api.models.SessionState
 import com.eka.scribesdk.common.logging.Logger
 import com.eka.scribesdk.common.util.deleteFile
 import com.eka.scribesdk.data.DataManager
+import com.eka.scribesdk.data.local.db.entity.ApiFlow
 import com.eka.scribesdk.data.local.db.entity.TransactionStage
 import com.eka.scribesdk.data.local.db.entity.UploadState
 import com.eka.scribesdk.data.remote.models.requests.ChunkData
@@ -39,13 +40,31 @@ internal class TransactionManager(
     private val maxUploadRetries: Int,
     private val pollMaxRetries: Int,
     private val pollDelayMs: Long,
-    private val logger: Logger
+    private val logger: Logger,
+    /** Sessions API (`/voice/v1/sessions`) lifecycle; used for sessions whose apiFlow is SESSIONS_V1. */
+    private val sessionsApiFlow: SessionsApiFlow? = null,
+    /** When true, new sessions are created on the Sessions API instead of the transaction APIs. */
+    internal val useSessionsApi: Boolean = false
 ) {
     companion object {
         private const val TAG = "TransactionManager"
     }
 
     private val gson = Gson()
+
+    /** True when this session was created on the Sessions API (decided per session, not by the flag). */
+    suspend fun usesSessionsApi(sessionId: String): Boolean =
+        dataManager.getSession(sessionId)?.apiFlow == ApiFlow.SESSIONS_V1
+
+    private suspend fun sessionsFlowFor(sessionId: String): SessionsApiFlow? {
+        val flow = sessionsApiFlow ?: return null
+        return if (usesSessionsApi(sessionId)) flow else null
+    }
+
+    /** Marks a Sessions API session as cancelled on the server. No-op for legacy sessions. */
+    suspend fun cancelSession(sessionId: String) {
+        sessionsFlowFor(sessionId)?.cancelSession(sessionId)
+    }
 
     /**
      * Call the init transaction API before recording starts.
@@ -56,6 +75,8 @@ internal class TransactionManager(
         sessionConfig: SessionConfig,
         folderName: String
     ): TransactionResult {
+        sessionsFlowFor(sessionId)?.let { return it.createSession(sessionId, sessionConfig) }
+
         val s3Url = "s3://$bucketName/$folderName/$sessionId"
 
         val request = InitTransactionRequest(
@@ -119,6 +140,9 @@ internal class TransactionManager(
      * Sends the list of uploaded audio files and their timing info.
      */
     suspend fun stopTransaction(sessionId: String): TransactionResult {
+        // Sessions API: a single end call replaces stop + commit
+        sessionsFlowFor(sessionId)?.let { return it.endSession(sessionId) }
+
         val uploadedChunks = dataManager.getUploadedChunks(sessionId)
 
         val audioFiles = uploadedChunks.map { it.fileName }
@@ -166,6 +190,13 @@ internal class TransactionManager(
      * Sends the same audio files list (only uploaded ones).
      */
     suspend fun commitTransaction(sessionId: String): TransactionResult {
+        // Sessions API has no commit step; end (in stopTransaction) already started processing
+        if (sessionsFlowFor(sessionId) != null) {
+            dataManager.updateUploadStage(sessionId, TransactionStage.ANALYZING.name)
+            logger.info(TAG, "Commit skipped for Sessions API session: $sessionId")
+            return TransactionResult.Success()
+        }
+
         val uploadedChunks = dataManager.getUploadedChunks(sessionId)
 
         val audioFiles = uploadedChunks.filter { true }.map { it.fileName }
