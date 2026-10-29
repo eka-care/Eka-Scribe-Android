@@ -45,13 +45,26 @@ enum class SessionEventName {
     UPLOAD_RETRY_STARTED,
     UPLOAD_RETRY_COMPLETED,
 
-    // Transaction API
+    // Transaction API (legacy flow)
     INIT_TRANSACTION_SUCCESS,
     INIT_TRANSACTION_FAILED,
     STOP_TRANSACTION_SUCCESS,
     STOP_TRANSACTION_FAILED,
     COMMIT_TRANSACTION_SUCCESS,
     COMMIT_TRANSACTION_FAILED,
+
+    // Sessions API: sent instead of INIT/STOP_TRANSACTION_* for sessions created on it.
+    // There is no commit step, so COMMIT_TRANSACTION_* is not sent for these sessions.
+    CREATE_SESSION_SUCCESS,
+    CREATE_SESSION_FAILED,
+    END_SESSION_SUCCESS,
+    END_SESSION_FAILED,
+
+    // Sessions API: the PATCH calls made around Create and End
+    UPDATE_SESSION_MODE_SUCCESS,
+    UPDATE_SESSION_MODE_FAILED,
+    UPDATE_AUDIO_DURATION_SUCCESS,
+    UPDATE_AUDIO_DURATION_FAILED,
 
     // Poll
     POLL_RESULT_FAILED,

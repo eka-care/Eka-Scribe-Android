@@ -3,9 +3,19 @@ package com.eka.scribesdk.session
 import com.eka.scribesdk.common.logging.Logger
 import com.eka.scribesdk.data.remote.models.responses.ScribeResultResponse
 import com.eka.scribesdk.data.remote.models.responses.readableMessage
+import com.eka.scribesdk.data.remote.models.responses.GetSessionResponse
+import com.eka.scribesdk.data.remote.models.responses.AndroidBase64Codec
+import com.eka.scribesdk.data.remote.models.responses.Base64Codec
+import com.eka.scribesdk.data.remote.models.responses.CONTEXT
+import com.eka.scribesdk.data.remote.models.responses.documentRefs
+import com.eka.scribesdk.data.remote.models.responses.toAudioQuality
+import com.eka.scribesdk.data.remote.models.responses.toDocumentCreatedAt
+import com.eka.scribesdk.data.remote.models.responses.toDocumentNames
 import com.eka.scribesdk.data.remote.models.responses.toScribeResultResponse
 import com.eka.scribesdk.data.remote.services.SessionsApiService
+import com.google.gson.JsonObject
 import com.haroldadmin.cnradapter.NetworkResponse
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 
 /** Outcome of one `GET /voice/v1/sessions/{id}` call. */
@@ -19,7 +29,15 @@ internal sealed class SessionFetchState {
     /** 410: the session expired before processing; create a new one. */
     data object Expired : SessionFetchState()
 
-    data class Error(val message: String, val retryable: Boolean) : SessionFetchState()
+    /**
+     * [notOnSessionsApi]: the Sessions API does not know this session id: 404, or 400/422 for an id
+     * it cannot accept (old legacy ids are longer than its 32-char limit).
+     */
+    data class Error(
+        val message: String,
+        val retryable: Boolean,
+        val notOnSessionsApi: Boolean = false
+    ) : SessionFetchState()
 }
 
 /**
@@ -29,14 +47,19 @@ internal sealed class SessionFetchState {
 internal class SessionsResultFetcher(
     private val apiService: SessionsApiService,
     private val logger: Logger,
-    /** templateId -> name for a session (from its saved config); used as note titles. */
-    private val templateNames: suspend (sessionId: String) -> Map<String, String> = { emptyMap() }
+    /** Downloads the context text (Get Session lists the context document without it); null = not shown. */
+    private val contextReader: SessionContextReader? = null,
+    private val codec: Base64Codec = AndroidBase64Codec,
+    /** templateId -> name for a session's templates; used as note titles. */
+    private val templateNames: suspend (sessionId: String, templateIds: List<String>) -> Map<String, String> =
+        { _, _ -> emptyMap() }
 ) {
     companion object {
         private const val TAG = "SessionsResultFetcher"
         private const val HTTP_PARTIAL = 206
         private const val HTTP_PROCESSING = 202
         private const val HTTP_GONE = 410
+        private val HTTP_UNKNOWN_SESSION = setOf(400, 404, 422)
         private const val MAX_BACKOFF_MS = 10_000L
     }
 
@@ -48,9 +71,7 @@ internal class SessionsResultFetcher(
                     SessionFetchState.Error(response.body.message ?: "Processing failed", retryable = false)
 
                 else -> SessionFetchState.Done(
-                    result = response.body.toScribeResultResponse(
-                        templateNames = templateNames(sessionId)
-                    ),
+                    result = toResult(sessionId, response.body),
                     partial = response.code == HTTP_PARTIAL
                 )
             }
@@ -61,7 +82,11 @@ internal class SessionsResultFetcher(
                     SessionFetchState.Expired
                 } else {
                     val message = response.body.readableMessage("Get session failed (HTTP $code)")
-                    SessionFetchState.Error(message, retryable = code == null || code >= 500 || code == 429)
+                    SessionFetchState.Error(
+                        message,
+                        retryable = code == null || code >= 500 || code == 429,
+                        notOnSessionsApi = code in HTTP_UNKNOWN_SESSION
+                    )
                 }
             }
 
@@ -70,6 +95,62 @@ internal class SessionsResultFetcher(
 
             is NetworkResponse.UnknownError ->
                 SessionFetchState.Error(response.error.message ?: "Unknown error", retryable = true)
+        }
+
+    /**
+     * Note titles: each note's own name (renames included) from "List Session Documents"; template
+     * names are looked up only for notes that call did not name, e.g. when it fails.
+     */
+    private suspend fun toResult(sessionId: String, body: GetSessionResponse): ScribeResultResponse {
+        val sessionDocuments = sessionDocuments(sessionId)
+        val documentNames = sessionDocuments?.toDocumentNames().orEmpty()
+        val unnamedTemplateIds = body.documentRefs()
+            .filter { (_, documentId) -> documentId == null || documentId !in documentNames }
+            .map { (templateId, _) -> templateId }
+            .distinct()
+        val templateNames = if (unnamedTemplateIds.isEmpty()) {
+            emptyMap()
+        } else {
+            templateNames(sessionId, unnamedTemplateIds)
+        }
+        return body.toScribeResultResponse(
+            codec = codec,
+            templateNames = templateNames,
+            documentNames = documentNames,
+            contextTexts = contextTexts(body),
+            alwaysShowContext = contextReader != null,
+            audioQuality = sessionDocuments?.toAudioQuality(),
+            documentCreatedAt = sessionDocuments?.toDocumentCreatedAt().orEmpty()
+        )
+    }
+
+    /** document_id -> text for the session's context documents that could be read. */
+    private suspend fun contextTexts(body: GetSessionResponse): Map<String, String> {
+        val reader = contextReader ?: return emptyMap()
+        return body.documentRefs()
+            .filter { it.documentType == CONTEXT }
+            .mapNotNull { ref -> ref.documentId?.let { id -> reader.read(id)?.let { id to it } } }
+            .toMap()
+    }
+
+    /**
+     * "List Session Documents" (note names, audio quality); null on any failure, so titles fall
+     * back to template names and no quality is shown.
+     */
+    private suspend fun sessionDocuments(sessionId: String): JsonObject? =
+        try {
+            when (val response = apiService.listSessionDocuments(sessionId)) {
+                is NetworkResponse.Success -> response.body
+                else -> {
+                    logger.warn(TAG, "Session documents unavailable for $sessionId; using template names")
+                    null
+                }
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            logger.warn(TAG, "Session documents unavailable for $sessionId; using template names", e)
+            null
         }
 
     /**

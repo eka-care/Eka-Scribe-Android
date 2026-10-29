@@ -263,7 +263,8 @@ EkaScribeConfig config = new EkaScribeConfig(
     "android",
     true,
     true,
-    netConfig
+    netConfig,
+    true   // useSessionsApi
 );
 
 EkaScribe scribe = EkaScribe.INSTANCE;
@@ -544,6 +545,7 @@ SessionResult
 | `enableAnalyser` | `Boolean` | `true` | Enable audio quality analysis |
 | `debugMode` | `Boolean` | `false` | Enable detailed logging |
 | `networkConfig` | `NetworkConfig` | -- | **Required.** Network config |
+| `useSessionsApi` | `Boolean` | `false` | Create new sessions on the EkaScribe Sessions API (`/voice/v1/sessions`) instead of the legacy transaction APIs + S3. Sessions already started keep the backend they were created on |
 
 > Audio recording parameters (sample rate, chunk durations, retries,
 > etc.) are managed internally by the SDK with optimized defaults.
@@ -576,9 +578,9 @@ data class ScribeError(
 | `NETWORK_UNAVAILABLE` | No network connectivity |
 | `DB_ERROR` | Local database error |
 | `INVALID_STATE_TRANSITION` | Invalid state change attempted |
-| `INIT_TRANSACTION_FAILED` | Server session init failed |
-| `STOP_TRANSACTION_FAILED` | Server session stop failed |
-| `COMMIT_TRANSACTION_FAILED` | Server commit failed |
+| `INIT_TRANSACTION_FAILED` | Server session init failed (Create Session; legacy: `initTransaction`) |
+| `STOP_TRANSACTION_FAILED` | Server session stop failed (End Session; legacy: `stopTransaction`) |
+| `COMMIT_TRANSACTION_FAILED` | Server commit failed (legacy flow only; the Sessions API has no commit step) |
 | `POLL_TIMEOUT` | Result polling timed out |
 | `TRANSCRIPTION_FAILED` | Server-side transcription failed |
 | `RETRY_EXHAUSTED` | All retry attempts exhausted |

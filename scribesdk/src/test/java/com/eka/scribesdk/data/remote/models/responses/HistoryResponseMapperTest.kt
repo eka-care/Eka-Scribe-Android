@@ -21,7 +21,7 @@ internal class HistoryResponseMapperTest {
             uuid = "uuid-1",
             version = "v2",
             patientDetails = PatientDetailsInfo(
-                age = 30,
+                age = "30",
                 biologicalSex = "male",
                 name = "John Doe",
                 patientId = "p-1",
@@ -102,5 +102,31 @@ internal class HistoryResponseMapperTest {
         assertNull(patient!!.age)
         assertNull(patient.biologicalSex)
         assertNull(patient.name)
+    }
+
+    @Test
+    fun `history from web and desktop parses with string or blank age and name or gender keys`() {
+        val json = """
+            {"status": "success", "data": [
+              {"txn_id": "sc-1", "flavour": "ekascribe-web",
+               "patient_details": {"name": "Test Patx001", "age": "23", "gender": "M", "mobile": 7907484532}},
+              {"txn_id": "sc-2", "flavour": "ekascribe-web",
+               "patient_details": {"name": "No Age", "age": "", "gender": ""}},
+              {"txn_id": "a-3", "flavour": "android",
+               "patient_details": {"username": "Legacy Android", "age": 41, "biologicalSex": "F"}}
+            ]}
+        """.trimIndent()
+
+        val items = com.google.gson.Gson().fromJson(json, HistoryResponse::class.java)
+            .data!!.map { it!!.toScribeHistoryItem() }
+
+        assertEquals("Test Patx001", items[0].patientDetails?.name)
+        assertEquals(23, items[0].patientDetails?.age)
+        assertEquals("M", items[0].patientDetails?.biologicalSex)
+        assertEquals("No Age", items[1].patientDetails?.name)
+        assertNull(items[1].patientDetails?.age)
+        assertEquals("Legacy Android", items[2].patientDetails?.name)
+        assertEquals(41, items[2].patientDetails?.age)
+        assertEquals("F", items[2].patientDetails?.biologicalSex)
     }
 }

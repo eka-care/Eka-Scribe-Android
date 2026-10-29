@@ -4,6 +4,8 @@ import android.content.Context
 import com.eka.scribesdk.api.EkaScribeCallback
 import com.eka.scribesdk.api.EkaScribeConfig
 import com.eka.scribesdk.api.models.ScribeError
+import com.eka.scribesdk.api.models.SessionEvent
+import com.eka.scribesdk.api.models.SessionEventName
 import com.eka.scribesdk.api.models.SessionState
 import com.eka.scribesdk.common.error.ErrorCode
 import com.eka.scribesdk.common.error.ScribeException
@@ -264,6 +266,40 @@ internal class SessionManagerTest {
         }
     }
 
+    @Test
+    fun `sessions api session reports create session instead of init transaction`() = runTest {
+        val events = mutableListOf<SessionEvent>()
+        val callback = mockk<EkaScribeCallback>(relaxed = true)
+        every { callback.onSessionEvent(any()) } answers { events.add(firstArg()) }
+        val tm = mockk<TransactionManager>(relaxed = true)
+        coEvery { tm.usesSessionsApi(any()) } returns true
+
+        val manager = createManagerWithSuccessInit(tm = tm)
+        manager.setCallback(callback)
+        manager.start(mockContext)
+        Thread.sleep(200)
+
+        val names = events.map { it.eventName }
+        assertTrue("CREATE_SESSION_SUCCESS expected, got $names", SessionEventName.CREATE_SESSION_SUCCESS in names)
+        assertTrue("INIT_TRANSACTION_SUCCESS must not be sent, got $names", SessionEventName.INIT_TRANSACTION_SUCCESS !in names)
+    }
+
+    @Test
+    fun `legacy session still reports init transaction`() = runTest {
+        val events = mutableListOf<SessionEvent>()
+        val callback = mockk<EkaScribeCallback>(relaxed = true)
+        every { callback.onSessionEvent(any()) } answers { events.add(firstArg()) }
+
+        val manager = createManagerWithSuccessInit()
+        manager.setCallback(callback)
+        manager.start(mockContext)
+        Thread.sleep(200)
+
+        val names = events.map { it.eventName }
+        assertTrue("INIT_TRANSACTION_SUCCESS expected, got $names", SessionEventName.INIT_TRANSACTION_SUCCESS in names)
+        assertTrue("CREATE_SESSION_SUCCESS must not be sent, got $names", SessionEventName.CREATE_SESSION_SUCCESS !in names)
+    }
+
     private fun createManagerWithSuccessInit(
         tm: TransactionManager = mockk(relaxed = true),
         pipeline: Pipeline = mockk(relaxed = true),
@@ -370,6 +406,51 @@ internal class SessionManagerTest {
         Thread.sleep(200)
 
         assertEquals(SessionState.ERROR, manager.currentState)
+    }
+
+    private fun managerReachingTranscriptPoll(
+        transcriptPoll: TransactionPollResult,
+        events: MutableList<SessionEvent>
+    ): SessionManager {
+        val tm = mockk<TransactionManager>(relaxed = true)
+        coEvery { tm.retryFailedUploads(any()) } returns true
+        coEvery { tm.stopTransaction(any()) } returns TransactionResult.Success()
+        coEvery { tm.commitTransaction(any()) } returns TransactionResult.Success()
+        coEvery { tm.pollResult(any(), any()) } returns transcriptPoll
+        val callback = mockk<EkaScribeCallback>(relaxed = true)
+        every { callback.onSessionEvent(any()) } answers { events.add(firstArg()) }
+        return createManagerWithSuccessInit(tm = tm).also { it.setCallback(callback) }
+    }
+
+    @Test
+    fun `failed transcript poll is reported as POLL_RESULT_FAILED`() = runTest {
+        val events = Collections.synchronizedList(mutableListOf<SessionEvent>())
+        val manager = managerReachingTranscriptPoll(TransactionPollResult.Failed("Processing failed"), events)
+        manager.start(mockContext)
+        Thread.sleep(200)
+
+        manager.stop()
+        Thread.sleep(200)
+
+        assertEquals(SessionState.ERROR, manager.currentState)
+        val event = events.single { it.eventName == SessionEventName.POLL_RESULT_FAILED }
+        assertEquals("transcript", event.metadata["phase"])
+        assertEquals("Processing failed", event.metadata["error"])
+    }
+
+    @Test
+    fun `transcript poll timeout is reported as POLL_RESULT_TIMEOUT`() = runTest {
+        val events = Collections.synchronizedList(mutableListOf<SessionEvent>())
+        val manager = managerReachingTranscriptPoll(TransactionPollResult.Timeout, events)
+        manager.start(mockContext)
+        Thread.sleep(200)
+
+        manager.stop()
+        Thread.sleep(200)
+
+        assertEquals(SessionState.ERROR, manager.currentState)
+        val event = events.single { it.eventName == SessionEventName.POLL_RESULT_TIMEOUT }
+        assertEquals("transcript", event.metadata["phase"])
     }
 
     @Test

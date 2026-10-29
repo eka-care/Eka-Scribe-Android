@@ -7,6 +7,7 @@ import com.google.gson.Gson
 import com.google.gson.JsonArray
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
+import com.google.gson.JsonPrimitive
 import com.google.gson.annotations.SerializedName
 import java.nio.ByteBuffer
 import java.nio.charset.CharacterCodingException
@@ -54,6 +55,16 @@ internal object AndroidBase64Codec : Base64Codec {
 }
 
 private const val TRANSCRIPT = "transcript"
+internal const val CONTEXT = "context"
+internal const val CONTEXT_NAME = "Context"
+private const val CONTEXT_TEMPLATE_ID = "__non_tmp_doc"
+
+// Mobile sessions get this system document; it is always shown as the one "Clinical Notes"
+private const val CLINICAL_NOTES_TEMPLATE = "clinical_notes_template"
+private const val CLINICAL_NOTES_NAME = "Clinical Notes"
+
+/** Id of the empty Context note shown when a session has no context yet; saving it creates one. */
+internal fun contextPlaceholderId(sessionId: String): String = "${sessionId}_$CONTEXT"
 private val BASE64_PATTERN = Regex("^[A-Za-z0-9+/\\r\\n]+={0,2}$")
 private val gson = Gson()
 
@@ -64,12 +75,31 @@ private val gson = Gson()
  */
 internal fun GetSessionResponse.toScribeResultResponse(
     codec: Base64Codec = AndroidBase64Codec,
-    /** templateId -> display name; the API returns no names, so they come from the local session config. */
-    templateNames: Map<String, String> = emptyMap()
+    /** templateId -> display name (session config, then template catalog); used when a note has no name. */
+    templateNames: Map<String, String> = emptyMap(),
+    /** document_id -> the note's own current name, from "List Session Documents"; wins over [templateNames]. */
+    documentNames: Map<String, String> = emptyMap(),
+    /**
+     * document_id -> text of the session's context document. Get Session lists that document
+     * without its text, so it is downloaded separately.
+     */
+    contextTexts: Map<String, String> = emptyMap(),
+    /**
+     * Always show a Context note: editable with its text; read-only and empty when its text
+     * could not be read; empty and editable ([contextPlaceholderId]) when the session has none.
+     * When false, a context is shown only if its text is in [contextTexts].
+     */
+    alwaysShowContext: Boolean = false,
+    /** Overall audio quality (0..1); Get Session lacks it, so it comes from "List Session Documents". */
+    audioQuality: Double? = null,
+    /** document_id -> created_at (epoch seconds), from "List Session Documents"; picks the newest Clinical Notes. */
+    documentCreatedAt: Map<String, Long> = emptyMap()
 ): ScribeResultResponse {
     val custom = mutableListOf<ScribeResultResponse.Data.Output?>()
+    val contexts = mutableListOf<ScribeResultResponse.Data.Output?>()
     val integration = mutableListOf<ScribeResultResponse.Data.Integration?>()
     var transcriptDocumentId: String? = null
+    var hasContextDocument = false
 
     for ((templateId, entry) in templateEntries()) {
         val documentType = entry.stringOrNull("document_type")?.lowercase()
@@ -78,23 +108,48 @@ internal fun GetSessionResponse.toScribeResultResponse(
         val name = entry.stringOrNull("name")
             ?: entry.stringOrNull("document_name")
             ?: entry.stringOrNull("template_name")
+            ?: documentId?.let { documentNames[it] }
             ?: templateNames[templateId]?.takeIf { it.isNotBlank() }
             ?: templateId
 
         when {
             documentType == TRANSCRIPT || templateId == TRANSCRIPT -> transcriptDocumentId = documentId
-            documentType == "context" -> Unit
+            documentType == CONTEXT -> {
+                if (documentId == null) continue
+                hasContextDocument = true
+                val contextName = documentNames[documentId] ?: CONTEXT_NAME
+                val text = contextTexts[documentId]
+                if (text != null) {
+                    contexts += contextNote(documentId, templateId, contextName, text, codec)
+                } else if (alwaysShowContext) {
+                    // Text could not be read: shown, but read-only so an edit can't overwrite it
+                    integration += ScribeResultResponse.Data.Integration(
+                        documentId = documentId,
+                        documentType = CONTEXT,
+                        errors = null,
+                        name = contextName,
+                        status = ResultStatus.SUCCESS,
+                        templateId = templateId,
+                        type = OutputType.TEXT,
+                        value = codec.encode(""),
+                        warnings = null
+                    )
+                }
+            }
             documentType != null && (documentType.contains("integration") || documentType.contains("eka_emr")) -> {
-                val text = entry.get("data")?.toPlainText(codec)
+                // System documents often come back empty (null, {}, {"prescription": {}}); those are
+                // not notes, except Clinical Notes, which is always shown (blank when empty)
+                val text = entry.get("data")?.takeIf { it.hasContent() }?.toPlainText(codec)
+                val isClinicalNotes = templateId == CLINICAL_NOTES_TEMPLATE
                 integration += ScribeResultResponse.Data.Integration(
                     documentId = documentId,
                     documentType = documentType,
                     errors = null,
-                    name = name,
-                    status = status,
+                    name = if (isClinicalNotes && name == templateId) CLINICAL_NOTES_NAME else name,
+                    status = if (isClinicalNotes) ResultStatus.SUCCESS else status,
                     templateId = templateId,
                     type = OutputType.EKA_EMR,
-                    value = text?.let(codec::encode),
+                    value = (if (isClinicalNotes) text.orEmpty() else text)?.let(codec::encode),
                     warnings = null
                 )
             }
@@ -117,6 +172,12 @@ internal fun GetSessionResponse.toScribeResultResponse(
         }
     }
 
+    keepNewestClinicalNotes(custom, integration, documentCreatedAt)
+
+    if (alwaysShowContext && !hasContextDocument && !sessionId.isNullOrBlank()) {
+        contexts += contextNote(contextPlaceholderId(sessionId), CONTEXT_TEMPLATE_ID, CONTEXT_NAME, "", codec)
+    }
+
     val transcripts = transcript?.takeIf { it.isNotBlank() }?.let { text ->
         listOf(
             ScribeResultResponse.Data.Transcript(
@@ -134,17 +195,83 @@ internal fun GetSessionResponse.toScribeResultResponse(
 
     return ScribeResultResponse(
         data = ScribeResultResponse.Data(
-            audioMatrix = null,
+            audioMatrix = audioQuality?.let { ScribeResultResponse.Data.AudioMatrix(quality = it) },
             createdAt = createdAt,
             output = null,
             templateResults = ScribeResultResponse.Data.TemplateResults(
-                custom = custom,
+                // Context after the notes, so a note (not the context) is what opens first
+                custom = custom + contexts,
                 integration = integration,
                 transcript = transcripts
             )
         )
     )
 }
+
+private fun isClinicalNotes(name: String?, templateId: String?): Boolean =
+    templateId == CLINICAL_NOTES_TEMPLATE || name?.trim().equals(CLINICAL_NOTES_NAME, ignoreCase = true)
+
+/**
+ * One "Clinical Notes": the system document, notes generated with "+" and every regeneration from
+ * the Clinical Notes chip are separate documents, so only the newest one that can be shown is kept
+ * (without timestamps, a generated note wins over the system document). A failed or unfinished
+ * regeneration therefore never hides the note that is already there.
+ */
+private fun keepNewestClinicalNotes(
+    custom: MutableList<ScribeResultResponse.Data.Output?>,
+    integration: MutableList<ScribeResultResponse.Data.Integration?>,
+    createdAt: Map<String, Long>
+) {
+    val shownStatuses = setOf(ResultStatus.SUCCESS, ResultStatus.PARTIAL_COMPLETED)
+    val generated = custom.filterNotNull()
+        .filter { isClinicalNotes(it.name, it.templateId) && it.value != null && it.status in shownStatuses }
+        .map { Triple(it.documentId, createdAt[it.documentId] ?: -1L, 1) }
+    val system = integration.filterNotNull()
+        .filter { isClinicalNotes(it.name, it.templateId) && it.value != null && it.status in shownStatuses }
+        .map { Triple(it.documentId, createdAt[it.documentId] ?: -1L, 0) }
+    val candidates = generated + system
+    if (candidates.size < 2) return
+    val keep = candidates.maxWith(compareBy({ it.second }, { it.third })).first
+    custom.removeAll { it != null && isClinicalNotes(it.name, it.templateId) && it.documentId != keep }
+    integration.removeAll { it != null && isClinicalNotes(it.name, it.templateId) && it.documentId != keep }
+}
+
+private fun contextNote(
+    documentId: String,
+    templateId: String,
+    name: String,
+    text: String,
+    codec: Base64Codec
+) = ScribeResultResponse.Data.Output(
+    documentId = documentId,
+    documentType = "custom",
+    errors = null,
+    name = name,
+    status = ResultStatus.SUCCESS,
+    templateId = templateId,
+    type = OutputType.MARKDOWN,
+    value = codec.encode(text),
+    warnings = null
+)
+
+/** One note in a Get Session result. */
+internal data class DocumentRef(
+    val templateId: String,
+    val documentId: String?,
+    val status: String?,
+    val documentType: String? = null
+)
+
+/** Every note in this result, in response order. */
+internal fun GetSessionResponse.documentRefs(): List<DocumentRef> =
+    templateEntries().map { (templateId, entry) ->
+        DocumentRef(
+            templateId,
+            entry.stringOrNull("document_id"),
+            entry.stringOrNull("status"),
+            entry.stringOrNull("document_type")?.lowercase()
+        )
+    }
 
 /** Flattens `templates` (list of `{template_id: {...}}`, or a plain object) into (templateId, entry) pairs. */
 private fun GetSessionResponse.templateEntries(): List<Pair<String, JsonObject>> {
@@ -206,6 +333,15 @@ private fun JsonArray.toSections(): List<SectionData> =
         SectionData(title = obj.stringOrNull("title"), value = obj.get("value")?.displayText())
     }
 
+/** False for null, blank text, and objects/arrays that hold nothing but such values. */
+private fun JsonElement.hasContent(): Boolean = when {
+    isJsonNull -> false
+    isJsonPrimitive -> !asJsonPrimitive.isString || asString.isNotBlank()
+    isJsonObject -> asJsonObject.entrySet().any { (_, value) -> value.hasContent() }
+    isJsonArray -> asJsonArray.any { it.hasContent() }
+    else -> false
+}
+
 private fun JsonElement.displayText(): String =
     if (isJsonPrimitive) asString else if (isJsonNull) "" else toString()
 
@@ -215,6 +351,10 @@ private fun String.parsesAsSections(): Boolean =
     } catch (e: Exception) {
         false
     }
+
+/** A stored document's text (as downloaded from its presigned URL): base64 UTF-8 is decoded, plain text kept. */
+internal fun decodeStoredText(raw: String, codec: Base64Codec = AndroidBase64Codec): String =
+    JsonPrimitive(raw).toPlainText(codec)
 
 /** String content as plain text; decodes it first if it is base64-encoded UTF-8. */
 private fun JsonElement.toPlainText(codec: Base64Codec): String {

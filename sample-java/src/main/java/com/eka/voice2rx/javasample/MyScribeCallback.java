@@ -48,6 +48,17 @@ public class MyScribeCallback implements EkaScribeCallback {
         listener.onError(error);
     }
 
+    // Kotlin interface default methods are not inherited by Java, so these must be implemented
+    @Override
+    public void onTranscriptReady(@NotNull String sessionId, @NotNull SessionResult result) {
+        Log.d(TAG, "Transcript ready: " + sessionId);
+    }
+
+    @Override
+    public void onOutputReady(@NotNull String sessionId, @NotNull SessionResult result) {
+        Log.d(TAG, "Output ready: " + sessionId);
+    }
+
     @Override
     public void onSessionCompleted(@NotNull String sessionId, @NotNull SessionResult result) {
         Log.d(TAG, "Session completed: " + sessionId);

@@ -6,6 +6,8 @@ import com.eka.networking.client.NetworkConfig
 import com.eka.scribesdk.BuildConfig
 import com.eka.scribesdk.analyser.AnalyserState
 import com.eka.scribesdk.analyser.ModelDownloader
+import com.eka.scribesdk.api.models.SessionAudioLink
+import com.eka.scribesdk.api.models.SessionAudioUnavailableException
 import com.eka.scribesdk.api.models.AudioQualityMetrics
 import com.eka.scribesdk.api.models.ScribeError
 import com.eka.scribesdk.api.models.ScribeHistoryItem
@@ -34,6 +36,7 @@ import com.eka.scribesdk.data.local.db.entity.ApiFlow
 import com.eka.scribesdk.data.local.db.entity.toScribeSession
 import com.eka.scribesdk.data.remote.S3CredentialProvider
 import com.eka.scribesdk.data.remote.models.requests.InitTransactionRequest
+import com.eka.scribesdk.data.remote.models.responses.toTemplateItem
 import com.eka.scribesdk.data.remote.services.ScribeApiService
 import com.eka.scribesdk.data.remote.services.SessionsApiService
 import com.eka.scribesdk.data.remote.upload.ApiFlowChunkUploader
@@ -42,12 +45,19 @@ import com.eka.scribesdk.data.remote.upload.SessionsChunkUploader
 import com.eka.scribesdk.encoder.Mp3AudioEncoder
 import com.eka.scribesdk.pipeline.Pipeline
 import com.eka.scribesdk.session.AudioFileProcessor
+import com.eka.scribesdk.session.SessionAudioDownloader
 import com.eka.scribesdk.session.SessionManager
+import com.eka.scribesdk.session.SessionApiRouter
+import com.eka.scribesdk.session.SessionContextReader
 import com.eka.scribesdk.session.SessionsApiFlow
+import com.eka.scribesdk.session.SessionsDocumentWriter
 import com.eka.scribesdk.session.SessionsResultFetcher
+import com.eka.scribesdk.session.SessionsTemplateProcessor
+import com.eka.scribesdk.session.TemplateNameResolver
 import com.eka.scribesdk.session.TransactionManager
 import com.eka.scribesdk.session.TransactionResult
 import com.google.gson.Gson
+import com.haroldadmin.cnradapter.NetworkResponse
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -60,6 +70,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.OutputStream
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -86,6 +97,7 @@ object EkaScribe {
     private var modelDownloader: ModelDownloader? = null
     private var config: EkaScribeConfig? = null
     private var audioFileProcessor: AudioFileProcessor? = null
+    private var sessionAudioDownloader: SessionAudioDownloader? = null
     private var logger: Logger = NoOpLogger()
 
     private var isInitialized = AtomicBoolean(false)
@@ -230,10 +242,21 @@ object EkaScribe {
             logger = logger
         )
 
+        sessionAudioDownloader = SessionAudioDownloader(
+            apiService = sessionsApiService,
+            logger = logger
+        )
+
+        val templateNameResolver = TemplateNameResolver(
+            savedNames = { sessionId -> savedTemplateNames(dm.getSession(sessionId)?.sessionMetadata) },
+            fetchCatalog = { fetchTemplateCatalog(developerApiService) },
+            logger = logger
+        )
         val sessionsResultFetcher = SessionsResultFetcher(
             apiService = sessionsApiService,
             logger = logger,
-            templateNames = { sessionId -> savedTemplateNames(dm.getSession(sessionId)?.sessionMetadata) }
+            templateNames = templateNameResolver::namesFor,
+            contextReader = SessionContextReader(apiService = sessionsApiService, logger = logger)
         )
 
         val txnManager = TransactionManager(
@@ -249,8 +272,10 @@ object EkaScribe {
                 apiService = sessionsApiService,
                 dataManager = dm,
                 flavour = config.flavour,
+                appVersion = config.networkConfig.appVersionName,
                 logger = logger,
-                resultFetcher = sessionsResultFetcher
+                resultFetcher = sessionsResultFetcher,
+                onEvent = { callback.onSessionEvent(it) }
             ),
             useSessionsApi = config.useSessionsApi
         )
@@ -267,7 +292,14 @@ object EkaScribe {
             apiService = developerApiService,
             logger = logger,
             sessionsResultFetcher = sessionsResultFetcher,
-            usesSessionsApi = { sessionId -> dm.getSession(sessionId)?.apiFlow == ApiFlow.SESSIONS_V1 }
+            sessionApiRouter = SessionApiRouter(
+                sessionsApiEnabled = config.useSessionsApi,
+                recordedOnSessionsApi = { sessionId ->
+                    dm.getSession(sessionId)?.let { it.apiFlow == ApiFlow.SESSIONS_V1 }
+                }
+            ),
+            sessionsDocumentWriter = SessionsDocumentWriter(apiService = sessionsApiService, logger = logger),
+            sessionsTemplateProcessor = SessionsTemplateProcessor(apiService = sessionsApiService, logger = logger)
         )
 
         sessionManager = SessionManager(
@@ -300,6 +332,17 @@ object EkaScribe {
         isInitialized.set(true)
         logger.info(TAG, "SDK initialized")
     }
+
+    /** templateId -> title from `GET voice/api/v1/template`, or null when it fails. */
+    private suspend fun fetchTemplateCatalog(service: ScribeApiService): Map<String, String>? =
+        when (val response = service.getTemplates()) {
+            is NetworkResponse.Success ->
+                response.body.items.orEmpty()
+                    .mapNotNull { it?.toTemplateItem() }
+                    .associate { it.id to it.title }
+
+            else -> null
+        }
 
     /** Template names saved with the session's init config (templateId -> name). */
     private fun savedTemplateNames(sessionMetadata: String?): Map<String, String> {
@@ -388,6 +431,30 @@ object EkaScribe {
     suspend fun getSession(sessionId: String): ScribeSession? {
         return requireDataManager().getSession(sessionId)?.toScribeSession()
     }
+
+    /**
+     * A fresh download link for the session's recording on the server (Get Session Audio), for
+     * recordings not on this device, e.g. sessions recorded on another phone. The server owns
+     * retention and only returns a link while the audio exists; otherwise this fails with
+     * [SessionAudioUnavailableException]: NOT_READY (still being combined), NOT_ENABLED (full audio
+     * off for the business), NOT_FOUND (gone or unknown). Links expire, so don't store them.
+     */
+    suspend fun getSessionAudioLink(sessionId: String): Result<SessionAudioLink> = withContext(Dispatchers.IO) {
+        val downloader = sessionAudioDownloader
+            ?: return@withContext Result.failure(IllegalStateException("EkaScribe is not initialized"))
+        downloader.link(sessionId)
+    }
+
+    /**
+     * Downloads the session's recording (MP3) from the server into [destination], fetching a fresh
+     * link first. Same rules and failures as [getSessionAudioLink]. [destination] is not closed.
+     */
+    suspend fun downloadSessionAudio(sessionId: String, destination: OutputStream): Result<Unit> =
+        withContext(Dispatchers.IO) {
+            val downloader = sessionAudioDownloader
+                ?: return@withContext Result.failure(IllegalStateException("EkaScribe is not initialized"))
+            downloader.download(sessionId, destination)
+        }
 
     /**
      * Observe the upload progress (upload stage) for a session as a Flow.

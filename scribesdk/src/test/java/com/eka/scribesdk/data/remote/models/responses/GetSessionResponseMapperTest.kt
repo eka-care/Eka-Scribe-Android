@@ -115,6 +115,55 @@ internal class GetSessionResponseMapperTest {
         assertTrue(decode(integration.value).contains("paracetamol"))
     }
 
+    private val mobileSessionTemplates = """[
+        {"eka_emr_template": {"status": "success", "document_id": "d1", "document_type": "integration",
+            "data": {"prescription": {}}}},
+        {"nic_template": {"status": "success", "document_id": "d2", "document_type": "integration", "data": {}}},
+        {"clinical_notes_template": {"status": "success", "document_id": "d3",
+            "document_type": "integration", "data": null}},
+        {"9d9675c6": {"status": "success", "document_id": "d4", "document_type": "custom",
+            "data": "No medical information is available in this conversation."}}
+    ]"""
+
+    @Test
+    fun `empty system documents are hidden but Clinical Notes stays as a blank note`() {
+        // Real mobile session: integration docs requested at create come back with no content
+        val templates = response(mobileSessionTemplates).toScribeResultResponse(JvmCodec).toSessionResult("a-1").templates
+
+        assertEquals(listOf("d4", "d3", "a-1_transcript"), templates.map { it.documentId })
+        val clinicalNotes = templates[1]
+        assertEquals("Clinical Notes", clinicalNotes.name)
+        assertEquals("", clinicalNotes.sections.single().value)
+    }
+
+    @Test
+    fun `a generated Clinical Notes note replaces the empty system one`() {
+        val templates = response(mobileSessionTemplates)
+            .toScribeResultResponse(JvmCodec, documentNames = mapOf("d4" to "Clinical Notes"))
+            .toSessionResult("a-1").templates
+
+        assertEquals(listOf("d4", "a-1_transcript"), templates.map { it.documentId })
+    }
+
+    @Test
+    fun `only the newest Clinical Notes that can be shown is kept`() {
+        val templates = response(
+            """[
+                {"clinical_notes_template": {"status": "success", "document_id": "sys", "document_type": "integration", "data": null}},
+                {"9d96": {"status": "success", "document_id": "old", "document_type": "custom", "data": "First"}},
+                {"9d96": {"status": "success", "document_id": "new", "document_type": "custom", "data": "Second"}},
+                {"9d96": {"status": "failure", "document_id": "failed", "document_type": "custom", "data": null}},
+                {"soap": {"status": "success", "document_id": "soap", "document_type": "custom", "data": "Other note"}}
+            ]"""
+        ).toScribeResultResponse(
+            JvmCodec,
+            documentNames = mapOf("old" to "Clinical Notes", "new" to "Clinical Notes", "failed" to "Clinical Notes"),
+            documentCreatedAt = mapOf("sys" to 100L, "old" to 200L, "new" to 300L, "failed" to 400L)
+        ).toSessionResult("a-1").templates
+
+        assertEquals(listOf("new", "soap", "a-1_transcript"), templates.map { it.documentId })
+    }
+
     @Test
     fun `template name comes from the saved config when the API has none`() {
         val result = response(
@@ -122,6 +171,19 @@ internal class GetSessionResponseMapperTest {
         ).toScribeResultResponse(JvmCodec, templateNames = mapOf("t-1" to "SOAP Note"))
 
         assertEquals("SOAP Note", result.data!!.templateResults!!.custom!!.single()!!.name)
+    }
+
+    @Test
+    fun `a note's own name wins over the template name`() {
+        val result = response(
+            """[{"t-1": {"status": "success", "document_id": "doc_7", "data": "Note"}}]"""
+        ).toScribeResultResponse(
+            JvmCodec,
+            templateNames = mapOf("t-1" to "SOAP Note"),
+            documentNames = mapOf("doc_7" to "Follow-up visit")
+        )
+
+        assertEquals("Follow-up visit", result.data!!.templateResults!!.custom!!.single()!!.name)
     }
 
     @Test
