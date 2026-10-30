@@ -62,6 +62,15 @@ internal class SessionManager(
     companion object {
         private const val TAG = "SessionManager"
         private val deferredUploadScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+        /** No session to pause/resume/stop: none started, or it is ending / ended. */
+        private val NO_LIVE_SESSION_STATES = setOf(
+            SessionState.IDLE,
+            SessionState.STOPPING,
+            SessionState.PROCESSING,
+            SessionState.COMPLETED,
+            SessionState.ERROR
+        )
     }
 
     private val _stateFlow = MutableStateFlow(SessionState.IDLE)
@@ -255,6 +264,10 @@ internal class SessionManager(
             logger.info(TAG, "pause() called while already PAUSED — no-op")
             return
         }
+        if (current in NO_LIVE_SESSION_STATES) {
+            logger.info(TAG, "pause() called in state $current — no-op")
+            return
+        }
         if (current != SessionState.RECORDING) {
             throw ScribeException(
                 ErrorCode.INVALID_STATE_TRANSITION,
@@ -274,6 +287,10 @@ internal class SessionManager(
             logger.info(TAG, "resume() called while already RECORDING — no-op")
             return
         }
+        if (current in NO_LIVE_SESSION_STATES) {
+            logger.info(TAG, "resume() called in state $current — no-op")
+            return
+        }
         if (current != SessionState.PAUSED) {
             throw ScribeException(
                 ErrorCode.INVALID_STATE_TRANSITION,
@@ -289,8 +306,8 @@ internal class SessionManager(
 
     fun stop() {
         val currentState = _stateFlow.value
-        if (currentState == SessionState.STOPPING || currentState == SessionState.PROCESSING) {
-            logger.info(TAG, "stop() called while already $currentState — no-op")
+        if (currentState in NO_LIVE_SESSION_STATES) {
+            logger.info(TAG, "stop() called in state $currentState — no-op")
             return
         }
         if (currentState != SessionState.RECORDING && currentState != SessionState.PAUSED) {
