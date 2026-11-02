@@ -52,6 +52,19 @@ internal class TransactionManager(
 
     private val gson = Gson()
 
+    /**
+     * Called for every chunk whose retry in [retryFailedUploads] fails or is skipped, with the
+     * chunk id, its index and the reason. Set by the caller around the retry so the reason can be
+     * reported as an event.
+     */
+    @Volatile
+    var onChunkRetryFailed: ((chunkId: String, chunkIndex: Int, error: String) -> Unit)? = null
+
+    private fun reportRetryFailure(chunkId: String, chunkIndex: Int, error: String) {
+        // The callback reaches host code; a throwing host must not break the retry loop
+        runCatching { onChunkRetryFailed?.invoke(chunkId, chunkIndex, error) }
+    }
+
     /** True when this session was created on the Sessions API (decided per session, not by the flag). */
     suspend fun usesSessionsApi(sessionId: String): Boolean =
         dataManager.getSession(sessionId)?.apiFlow == ApiFlow.SESSIONS_V1
@@ -327,6 +340,7 @@ internal class TransactionManager(
             val file = File(chunk.filePath)
             if (!file.exists()) {
                 logger.warn(TAG, "Chunk file missing, skipping retry: ${chunk.chunkId}")
+                reportRetryFailure(chunk.chunkId, chunk.chunkIndex, "Chunk file missing")
                 continue
             }
 
@@ -357,6 +371,7 @@ internal class TransactionManager(
                 is UploadResult.Failure -> {
                     dataManager.markFailed(chunk.chunkId)
                     logger.warn(TAG, "Retry upload failed: ${chunk.chunkId} - ${result.error}")
+                    reportRetryFailure(chunk.chunkId, chunk.chunkIndex, result.error)
                 }
             }
         }

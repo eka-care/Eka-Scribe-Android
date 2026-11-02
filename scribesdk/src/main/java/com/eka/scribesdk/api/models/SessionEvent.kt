@@ -41,6 +41,8 @@ enum class SessionEventName {
     // Chunk upload
     CHUNK_UPLOADED,
     CHUNK_UPLOAD_FAILED,
+    /** A chunk that still failed (or was skipped) when retried at stop. Carries `error`. */
+    CHUNK_RETRY_FAILED,
     CHUNK_PROCESSING_FAILED,
     UPLOAD_RETRY_STARTED,
     UPLOAD_RETRY_COMPLETED,

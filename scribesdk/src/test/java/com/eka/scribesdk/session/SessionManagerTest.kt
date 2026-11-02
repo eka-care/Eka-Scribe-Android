@@ -300,6 +300,33 @@ internal class SessionManagerTest {
         assertTrue("CREATE_SESSION_SUCCESS must not be sent, got $names", SessionEventName.CREATE_SESSION_SUCCESS !in names)
     }
 
+    @Test
+    fun `a chunk that fails its retry at stop is reported as CHUNK_RETRY_FAILED`() = runTest {
+        val events = Collections.synchronizedList(mutableListOf<SessionEvent>())
+        val callback = mockk<EkaScribeCallback>(relaxed = true)
+        every { callback.onSessionEvent(any()) } answers { events.add(firstArg()) }
+        val tm = mockk<TransactionManager>(relaxed = true)
+        var reporter: ((String, Int, String) -> Unit)? = null
+        every { tm.onChunkRetryFailed = any() } answers { reporter = firstArg() }
+        coEvery { tm.retryFailedUploads(any()) } coAnswers {
+            reporter?.invoke("chunk-8", 8, "bad reply [HTTP 502, text/html, bytes=0]")
+            false
+        }
+
+        val manager = createManagerWithSuccessInit(tm = tm)
+        manager.setCallback(callback)
+        manager.start(mockContext)
+        Thread.sleep(200)
+        manager.stop()
+        Thread.sleep(300)
+
+        val event = events.single { it.eventName == SessionEventName.CHUNK_RETRY_FAILED }
+        assertEquals("8", event.metadata["chunkIndex"])
+        assertEquals("chunk-8", event.metadata["chunkId"])
+        assertEquals("bad reply [HTTP 502, text/html, bytes=0]", event.metadata["error"])
+        assertTrue(reporter == null)
+    }
+
     private fun createManagerWithSuccessInit(
         tm: TransactionManager = mockk(relaxed = true),
         pipeline: Pipeline = mockk(relaxed = true),

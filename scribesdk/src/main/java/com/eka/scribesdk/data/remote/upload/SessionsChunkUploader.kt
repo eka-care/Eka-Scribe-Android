@@ -32,6 +32,20 @@ internal class SessionsChunkUploader(
         /** Remote name for a chunk, e.g. index 0 -> `audio_0.mp3`. */
         internal fun remoteFileName(chunkIndex: Int, extension: String): String =
             "${FILE_BASE_NAME}_$chunkIndex.$extension"
+
+        /**
+         * HTTP status, content type and size of the uploaded chunk for an unreadable reply,
+         * e.g. ` [HTTP 502, text/html, bytes=31200]`. The size shows whether an empty or tiny chunk
+         * is what the server rejects.
+         */
+        internal fun unreadableReplyDetail(code: Int?, contentType: String?, fileBytes: Long?): String {
+            val parts = listOfNotNull(
+                code?.let { "HTTP $it" },
+                contentType?.substringBefore(';')?.trim()?.takeIf { it.isNotEmpty() },
+                fileBytes?.let { "bytes=$it" }
+            )
+            return if (parts.isEmpty()) "" else " [${parts.joinToString(", ")}]"
+        }
     }
 
     /** Tracks chunk IDs currently being uploaded to prevent double-enqueue. */
@@ -121,8 +135,18 @@ internal class SessionsChunkUploader(
             }
 
             is NetworkResponse.UnknownError -> {
-                logger.error(TAG, "Upload unknown error: ${metadata.chunkId}", response.error)
-                UploadResult.Failure(response.error.message ?: "Unknown error", isRetryable = true)
+                // The reply could not be parsed (e.g. an HTML gateway page or plain text). The raw
+                // status and content type say what actually came back, so keep them in the error.
+                val reply = unreadableReplyDetail(
+                    response.code,
+                    response.headers?.get("Content-Type"),
+                    file.length()
+                )
+                logger.error(TAG, "Upload unknown error: ${metadata.chunkId}$reply", response.error)
+                UploadResult.Failure(
+                    (response.error.message ?: "Unknown error") + reply,
+                    isRetryable = true
+                )
             }
         }
     }
