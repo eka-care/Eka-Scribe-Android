@@ -168,7 +168,10 @@ internal class SessionsChunkUploaderTest {
 
         assertEquals(3, api.calls.size)
         val failure = result as UploadResult.Failure
-        assertEquals("malformed JSON at line 1 column 1 path \$ [HTTP 502, text/html]", failure.error)
+        assertEquals(
+            "malformed JSON at line 1 column 1 path \$ [HTTP 502, text/html, bytes=1]",
+            failure.error
+        )
         assertTrue(failure.isRetryable)
     }
 
@@ -185,20 +188,21 @@ internal class SessionsChunkUploaderTest {
         val result = uploader(api).upload(file, metadata())
 
         val failure = result as UploadResult.Failure
-        assertEquals("malformed JSON at line 1 column 1 path \$", failure.error)
+        assertEquals("malformed JSON at line 1 column 1 path \$ [bytes=1]", failure.error)
         assertTrue(failure.isRetryable)
     }
 
     @Test
     fun `unreadable reply detail lists whatever the reply carried`() {
         assertEquals(
-            " [HTTP 502, text/html]",
-            SessionsChunkUploader.unreadableReplyDetail(502, "text/html; charset=utf-8")
+            " [HTTP 502, text/html, bytes=31200]",
+            SessionsChunkUploader.unreadableReplyDetail(502, "text/html; charset=utf-8", 31200)
         )
-        assertEquals(" [HTTP 200]", SessionsChunkUploader.unreadableReplyDetail(200, null))
-        assertEquals(" [HTTP 200]", SessionsChunkUploader.unreadableReplyDetail(200, " "))
-        assertEquals(" [text/plain]", SessionsChunkUploader.unreadableReplyDetail(null, "text/plain"))
-        assertEquals("", SessionsChunkUploader.unreadableReplyDetail(null, null))
+        assertEquals(" [HTTP 200]", SessionsChunkUploader.unreadableReplyDetail(200, null, null))
+        assertEquals(" [HTTP 200]", SessionsChunkUploader.unreadableReplyDetail(200, " ", null))
+        assertEquals(" [text/plain]", SessionsChunkUploader.unreadableReplyDetail(null, "text/plain", null))
+        assertEquals(" [bytes=0]", SessionsChunkUploader.unreadableReplyDetail(null, null, 0))
+        assertEquals("", SessionsChunkUploader.unreadableReplyDetail(null, null, null))
     }
 
     private fun uploader(api: FakeUploadApi, online: Boolean = true) = SessionsChunkUploader(

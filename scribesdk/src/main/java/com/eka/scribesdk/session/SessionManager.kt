@@ -332,7 +332,22 @@ internal class SessionManager(
                     SessionEventName.UPLOAD_RETRY_STARTED, EventType.INFO,
                     "Retrying failed chunk uploads"
                 )
-                val allUploaded = transactionManager.retryFailedUploads(sessionId)
+                transactionManager.onChunkRetryFailed = { chunkId, chunkIndex, error ->
+                    emitter?.emit(
+                        SessionEventName.CHUNK_RETRY_FAILED, EventType.ERROR,
+                        "Chunk retry failed: $error",
+                        mapOf(
+                            "chunkId" to chunkId,
+                            "chunkIndex" to chunkIndex.toString(),
+                            "error" to error
+                        )
+                    )
+                }
+                val allUploaded = try {
+                    transactionManager.retryFailedUploads(sessionId)
+                } finally {
+                    transactionManager.onChunkRetryFailed = null
+                }
                 emitter?.emit(
                     SessionEventName.UPLOAD_RETRY_COMPLETED,
                     if (allUploaded) EventType.SUCCESS else EventType.ERROR,

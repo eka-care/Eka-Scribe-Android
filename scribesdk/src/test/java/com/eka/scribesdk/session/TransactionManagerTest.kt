@@ -509,6 +509,80 @@ internal class TransactionManagerTest {
     }
 
     @Test
+    fun `retryFailedUploads reports why a retry failed`() = runTest {
+        val chunkFile = tempFolder.newFile("reported_chunk.mp3")
+        val dm = FakeDataManager()
+        dm.failedChunksList = listOf(
+            makeChunkEntity("c9", "9.mp3", filePath = chunkFile.absolutePath)
+        )
+        dm.sessionEntity = makeSessionEntity()
+        dm.allChunksUploaded = false
+        val uploader = FakeChunkUploader(UploadResult.Failure("bad reply [HTTP 502]", isRetryable = true))
+        val (manager, _, _) = createManager(dataManager = dm, uploader = uploader)
+        val reports = mutableListOf<Triple<String, Int, String>>()
+        manager.onChunkRetryFailed = { id, index, error -> reports += Triple(id, index, error) }
+
+        manager.retryFailedUploads(SESSION_ID)
+
+        assertEquals(listOf(Triple("c9", 0, "bad reply [HTTP 502]")), reports)
+    }
+
+    @Test
+    fun `retryFailedUploads reports a missing chunk file`() = runTest {
+        val dm = FakeDataManager()
+        dm.failedChunksList = listOf(
+            makeChunkEntity("c10", "10.mp3", filePath = "/nonexistent/path/10.mp3")
+        )
+        dm.sessionEntity = makeSessionEntity()
+        dm.allChunksUploaded = false
+        val (manager, _, _) = createManager(dataManager = dm)
+        val reports = mutableListOf<Triple<String, Int, String>>()
+        manager.onChunkRetryFailed = { id, index, error -> reports += Triple(id, index, error) }
+
+        manager.retryFailedUploads(SESSION_ID)
+
+        assertEquals(listOf(Triple("c10", 0, "Chunk file missing")), reports)
+    }
+
+    @Test
+    fun `retryFailedUploads does not report a retry that succeeds`() = runTest {
+        val chunkFile = tempFolder.newFile("ok_chunk.mp3")
+        val dm = FakeDataManager()
+        dm.failedChunksList = listOf(
+            makeChunkEntity("c11", "11.mp3", filePath = chunkFile.absolutePath)
+        )
+        dm.sessionEntity = makeSessionEntity()
+        dm.allChunksUploaded = true
+        val uploader = FakeChunkUploader(UploadResult.Success("s3://ok"))
+        val (manager, _, _) = createManager(dataManager = dm, uploader = uploader)
+        val reports = mutableListOf<String>()
+        manager.onChunkRetryFailed = { id, _, _ -> reports += id }
+
+        manager.retryFailedUploads(SESSION_ID)
+
+        assertTrue(reports.isEmpty())
+    }
+
+    @Test
+    fun `retryFailedUploads keeps going when the report callback throws`() = runTest {
+        val chunkFile = tempFolder.newFile("throwing_chunk.mp3")
+        val dm = FakeDataManager()
+        dm.failedChunksList = listOf(
+            makeChunkEntity("c12", "12.mp3", filePath = chunkFile.absolutePath)
+        )
+        dm.sessionEntity = makeSessionEntity()
+        dm.allChunksUploaded = false
+        val uploader = FakeChunkUploader(UploadResult.Failure("boom", isRetryable = true))
+        val (manager, _, _) = createManager(dataManager = dm, uploader = uploader)
+        manager.onChunkRetryFailed = { _, _, _ -> error("host callback failed") }
+
+        val result = manager.retryFailedUploads(SESSION_ID)
+
+        assertFalse(result)
+        assertTrue(dm.failedChunkIds.contains("c12"))
+    }
+
+    @Test
     fun `retryFailedUploads skips missing files`() = runTest {
         val dm = FakeDataManager()
         dm.failedChunksList = listOf(
