@@ -10,6 +10,7 @@ import com.eka.scribesdk.data.remote.models.responses.SessionsErrorResponse
 import com.eka.scribesdk.data.remote.models.responses.UploadAudioResponse
 import com.eka.scribesdk.data.remote.services.SessionsApiService
 import com.google.gson.JsonObject
+import com.google.gson.JsonSyntaxException
 import com.haroldadmin.cnradapter.NetworkResponse
 import io.mockk.every
 import io.mockk.mockk
@@ -158,6 +159,48 @@ internal class SessionsChunkUploaderTest {
         assertTrue(!failure.isRetryable)
     }
 
+    @Test
+    fun `upload keeps the http status and content type of an unreadable reply`() = runTest {
+        val api = FakeUploadApi().apply { responses += unreadableReply(502, "text/html; charset=utf-8") }
+        val file = tempFolder.newFile("clip.mp3").apply { writeText("a") }
+
+        val result = uploader(api).upload(file, metadata())
+
+        assertEquals(3, api.calls.size)
+        val failure = result as UploadResult.Failure
+        assertEquals("malformed JSON at line 1 column 1 path \$ [HTTP 502, text/html]", failure.error)
+        assertTrue(failure.isRetryable)
+    }
+
+    @Test
+    fun `upload still reports an unreadable reply that has no raw response`() = runTest {
+        val api = FakeUploadApi().apply {
+            responses += NetworkResponse.UnknownError<UploadAudioResponse, SessionsErrorResponse>(
+                JsonSyntaxException("malformed JSON at line 1 column 1 path \$"),
+                null
+            )
+        }
+        val file = tempFolder.newFile("clip.mp3").apply { writeText("a") }
+
+        val result = uploader(api).upload(file, metadata())
+
+        val failure = result as UploadResult.Failure
+        assertEquals("malformed JSON at line 1 column 1 path \$", failure.error)
+        assertTrue(failure.isRetryable)
+    }
+
+    @Test
+    fun `unreadable reply detail lists whatever the reply carried`() {
+        assertEquals(
+            " [HTTP 502, text/html]",
+            SessionsChunkUploader.unreadableReplyDetail(502, "text/html; charset=utf-8")
+        )
+        assertEquals(" [HTTP 200]", SessionsChunkUploader.unreadableReplyDetail(200, null))
+        assertEquals(" [HTTP 200]", SessionsChunkUploader.unreadableReplyDetail(200, " "))
+        assertEquals(" [text/plain]", SessionsChunkUploader.unreadableReplyDetail(null, "text/plain"))
+        assertEquals("", SessionsChunkUploader.unreadableReplyDetail(null, null))
+    }
+
     private fun uploader(api: FakeUploadApi, online: Boolean = true) = SessionsChunkUploader(
         context = if (online) onlineContext() else offlineContext(),
         apiService = api,
@@ -182,6 +225,24 @@ internal class SessionsChunkUploaderTest {
             SessionsErrorResponse(error = SessionsApiError(code = "error", message = message), message = null),
             Response.error<Any>(code, "{}".toResponseBody("application/json".toMediaType()))
         )
+
+    private fun unreadableReply(
+        code: Int,
+        contentType: String?
+    ): NetworkResponse<UploadAudioResponse, SessionsErrorResponse> {
+        val raw = okhttp3.Response.Builder()
+            .code(code)
+            .protocol(Protocol.HTTP_1_1)
+            .message("Bad Gateway")
+            .request(Request.Builder().url("http://test").build())
+            .apply { if (contentType != null) header("Content-Type", contentType) }
+            .build()
+        val body = "<html>bad gateway</html>".toResponseBody(contentType?.toMediaType())
+        return NetworkResponse.UnknownError(
+            JsonSyntaxException("malformed JSON at line 1 column 1 path \$"),
+            Response.error<Any>(body, raw)
+        )
+    }
 
     private fun <S> netSuccess(body: S): NetworkResponse<S, SessionsErrorResponse> {
         val raw = okhttp3.Response.Builder()

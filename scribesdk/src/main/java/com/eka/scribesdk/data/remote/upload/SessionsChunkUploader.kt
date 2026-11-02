@@ -32,6 +32,15 @@ internal class SessionsChunkUploader(
         /** Remote name for a chunk, e.g. index 0 -> `audio_0.mp3`. */
         internal fun remoteFileName(chunkIndex: Int, extension: String): String =
             "${FILE_BASE_NAME}_$chunkIndex.$extension"
+
+        /** HTTP status and content type of an unreadable reply, e.g. ` [HTTP 502, text/html]`. */
+        internal fun unreadableReplyDetail(code: Int?, contentType: String?): String {
+            val parts = listOfNotNull(
+                code?.let { "HTTP $it" },
+                contentType?.substringBefore(';')?.trim()?.takeIf { it.isNotEmpty() }
+            )
+            return if (parts.isEmpty()) "" else " [${parts.joinToString(", ")}]"
+        }
     }
 
     /** Tracks chunk IDs currently being uploaded to prevent double-enqueue. */
@@ -121,8 +130,14 @@ internal class SessionsChunkUploader(
             }
 
             is NetworkResponse.UnknownError -> {
-                logger.error(TAG, "Upload unknown error: ${metadata.chunkId}", response.error)
-                UploadResult.Failure(response.error.message ?: "Unknown error", isRetryable = true)
+                // The reply could not be parsed (e.g. an HTML gateway page or plain text). The raw
+                // status and content type say what actually came back, so keep them in the error.
+                val reply = unreadableReplyDetail(response.code, response.headers?.get("Content-Type"))
+                logger.error(TAG, "Upload unknown error: ${metadata.chunkId}$reply", response.error)
+                UploadResult.Failure(
+                    (response.error.message ?: "Unknown error") + reply,
+                    isRetryable = true
+                )
             }
         }
     }
