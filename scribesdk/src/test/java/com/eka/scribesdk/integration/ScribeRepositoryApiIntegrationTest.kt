@@ -402,6 +402,29 @@ internal class ScribeRepositoryApiIntegrationTest {
         assertEquals(io, repository.updateSessionContext(true, "s1", listOf("a"), emptyList()).exceptionOrNull())
     }
 
+    @Test
+    fun `deleteSession calls delete for that session`() = runTest {
+        api.deleteResponse = netSuccess(JsonObject())
+        assertTrue(repository.deleteSession("s1").isSuccess)
+        assertEquals(listOf("s1"), api.deleteCalls)
+    }
+
+    @Test
+    fun `deleteSession treats 404 as already deleted`() = runTest {
+        api.deleteResponse = netServerError(JsonObject(), 404)
+        assertTrue(repository.deleteSession("s1").isSuccess)
+    }
+
+    @Test
+    fun `deleteSession errors are failures`() = runTest {
+        api.deleteResponse = netServerError(JsonObject(), 500)
+        assertTrue(repository.deleteSession("s1").exceptionOrNull()!!.message!!.contains("HTTP 500"))
+
+        val io = IOException("offline")
+        api.deleteResponse = NetworkResponse.NetworkError(io)
+        assertEquals(io, repository.deleteSession("s1").exceptionOrNull())
+    }
+
     private fun sampleConfigData(): GetConfigResponse.Data {
         return GetConfigResponse.Data(
             consultationModes = listOf(
@@ -543,6 +566,15 @@ internal class ScribeRepositoryApiIntegrationTest {
         ): NetworkResponse<JsonObject, JsonObject> {
             contextCalls += "DELETE $sessionId" to Gson().toJson(request)
             return contextResponse
+        }
+
+        var deleteResponse: NetworkResponse<JsonObject, JsonObject> =
+            NetworkResponse.NetworkError(IOException("Not configured"))
+        val deleteCalls = mutableListOf<String>()
+
+        override suspend fun deleteSession(sessionId: String): NetworkResponse<JsonObject, JsonObject> {
+            deleteCalls += sessionId
+            return deleteResponse
         }
 
         override suspend fun getS3Config(url: String) = throw NotImplementedError()

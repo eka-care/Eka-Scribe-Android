@@ -1,5 +1,7 @@
 package com.eka.scribesdk.session
 
+import com.eka.scribesdk.api.models.PublishState
+import com.eka.scribesdk.api.models.PublishStatus
 import com.eka.scribesdk.api.models.SessionData
 import com.eka.scribesdk.common.logging.Logger
 import com.eka.scribesdk.data.remote.models.requests.UpsertDocumentRequest
@@ -49,6 +51,32 @@ internal class SessionsDocumentWriter(
         private const val CONTENT_TYPE = "text/plain"
         private const val STATUS_PUBLISHED = "success"
         private const val STATUS_UNPUBLISHED = "unpublished"
+        private val STATUSES_IN_PROGRESS = setOf("in_progress", "in-progress", "pending", "processing", "queued")
+        private val STATUSES_FAILED = setOf("failed", "failure", "error")
+
+        /** Below this a timestamp is in seconds (the web and [unpublish] write seconds). */
+        private const val MILLIS_THRESHOLD = 100_000_000_000L
+
+        /** Reads `{"emr_webhook": {"status": ..., "updated_at": ...}}`; a missing block is not published. */
+        internal fun parsePublishStatus(publish: JsonObject?): PublishStatus {
+            val webhook = publish?.get("emr_webhook")?.takeIf { it.isJsonObject }?.asJsonObject
+                ?: return PublishStatus(PublishState.NOT_PUBLISHED, updatedAtMs = null, rawStatus = null)
+            val raw = webhook.get("status")?.takeIf { it.isJsonPrimitive }?.asString
+            val state = when {
+                raw == null -> PublishState.NOT_PUBLISHED
+                raw.equals(STATUS_PUBLISHED, ignoreCase = true) -> PublishState.PUBLISHED
+                raw.lowercase() in STATUSES_IN_PROGRESS -> PublishState.IN_PROGRESS
+                raw.lowercase() in STATUSES_FAILED -> PublishState.FAILED
+                else -> PublishState.NOT_PUBLISHED
+            }
+            val updatedAt = webhook.get("updated_at")
+                ?.takeIf { it.isJsonPrimitive }
+                ?.asString
+                ?.toDoubleOrNull()
+                ?.toLong()
+                ?.let { if (it < MILLIS_THRESHOLD) it * 1000 else it }
+            return PublishStatus(state, updatedAt, raw)
+        }
 
         // Plain client: pre-signed URLs carry their own auth and reject an extra Authorization header
         private val plainClient by lazy {
@@ -135,6 +163,56 @@ internal class SessionsDocumentWriter(
         }
         return Result.failure(Exception("Failed to upload document content for ${item.documentId}"))
     }
+
+    /**
+     * Publishes the note to the EMR (`POST /sessions/{id}/documents/{doc}/publish`) and returns
+     * the resulting state. If the server accepted the publish but the EMR has not confirmed yet,
+     * the state is [PublishState.IN_PROGRESS]; call [publishStatus] later to refresh it.
+     */
+    suspend fun publish(sessionId: String, documentId: String): Result<PublishStatus> {
+        when (val response = apiService.publishDocument(sessionId, documentId, JsonObject())) {
+            is NetworkResponse.Success -> {
+                logger.info(TAG, "Published $documentId (session $sessionId)")
+                val fromResponse = response.body.get("data")
+                    ?.takeIf { it.isJsonObject }?.asJsonObject
+                    ?.get("publish")?.takeIf { it.isJsonObject }?.asJsonObject
+                    ?.let { parsePublishStatus(it) }
+                val status = fromResponse?.takeIf { it.state != PublishState.NOT_PUBLISHED }
+                    ?: publishStatus(documentId).getOrNull()
+                return Result.success(status.afterAcceptedPublish())
+            }
+
+            is NetworkResponse.ServerError ->
+                return Result.failure(Exception(response.body.readableMessage("Publish failed (HTTP ${response.code})")))
+
+            is NetworkResponse.NetworkError -> return Result.failure(response.error)
+            is NetworkResponse.UnknownError -> return Result.failure(response.error)
+        }
+    }
+
+    /** The note's current publish state, from Get Document. */
+    suspend fun publishStatus(documentId: String): Result<PublishStatus> =
+        when (val response = apiService.getDocument(documentId)) {
+            is NetworkResponse.Success -> {
+                val data = response.body.data
+                if (data == null) Result.failure(Exception("No document returned for $documentId"))
+                else Result.success(parsePublishStatus(data.publish))
+            }
+
+            is NetworkResponse.ServerError ->
+                Result.failure(Exception(response.body.readableMessage("Get document failed (HTTP ${response.code})")))
+
+            is NetworkResponse.NetworkError -> Result.failure(response.error)
+            is NetworkResponse.UnknownError -> Result.failure(response.error)
+        }
+
+    /** The publish call succeeded, so "not published" (or no read-back) means the EMR has not confirmed yet. */
+    private fun PublishStatus?.afterAcceptedPublish(): PublishStatus =
+        if (this == null || state == PublishState.NOT_PUBLISHED) {
+            PublishStatus(PublishState.IN_PROGRESS, updatedAtMs = this?.updatedAtMs, rawStatus = this?.rawStatus)
+        } else {
+            this
+        }
 
     private fun DocumentEnvelopeResponse.DocumentData.isPublishedToEmr(): Boolean {
         val webhook = publish?.get("emr_webhook")?.takeIf { it.isJsonObject }?.asJsonObject ?: return false

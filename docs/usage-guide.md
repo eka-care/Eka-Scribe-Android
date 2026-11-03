@@ -974,6 +974,51 @@ lifecycleScope.launch {
 
 Both return `Result<Unit>`. Calls: `PATCH` / `DELETE voice/api/v1/sessions/{sessionId}/context`. `documentId` must be the server `document_id`; a record that has not finished uploading only has a local id.
 
+**Publishing a note to the EMR** (Sessions API sessions):
+
+```kotlin
+lifecycleScope.launch {
+    // documentId = the note's SessionData.documentId
+    EkaScribe.publishNote(sessionId, documentId).onSuccess { status ->
+        when (status.state) {
+            PublishState.PUBLISHED -> showPublished(status.updatedAtMs)   // "Last done" time
+            PublishState.IN_PROGRESS -> showPublishing()                  // refresh later with getPublishStatus
+            PublishState.FAILED, PublishState.NOT_PUBLISHED -> showPublishButton()
+        }
+    }
+
+    // When opening a note: current state and "Last done" time
+    val status = EkaScribe.getPublishStatus(sessionId, documentId).getOrNull()
+}
+```
+
+Call: `POST voice/api/v1/sessions/{sessionId}/documents/{documentId}/publish`. State comes from the document's `publish.emr_webhook` (`status`, `updated_at`). Saving an edit with `updateSessionResult` unpublishes the note, as on web, so it shows Publish again.
+
+**Adding a patient after recording started** (e.g. the doctor started without one):
+
+```kotlin
+lifecycleScope.launch {
+    EkaScribe.updateSessionPatient(
+        sessionId,
+        PatientDetail(patientId = patientOid, name = "Rahul Rao", age = 52, biologicalSex = "M", visitId = visitId)
+    ).onFailure { /* show error */ }
+}
+```
+
+Works while recording, after End, or on a finished session. Sessions API sessions only: legacy sessions return a failure. Call: `PATCH voice/v1/sessions/{sessionId}` with `patient_details`. If the session is not created on the server yet (offline), the patient is saved and sent when it is.
+
+**Deleting a session**:
+
+```kotlin
+lifecycleScope.launch {
+    EkaScribe.deleteSession(sessionId)
+        .onSuccess { /* back to the list */ }
+        .onFailure { /* show error */ }
+}
+```
+
+Deletes the recording and notes on the server and any audio left on the device. Cannot be undone. Fails for the session being recorded now (use `cancelSession()`). A session the server no longer has counts as deleted. Call: `DELETE voice/api/v2/transaction/{sessionId}`.
+
 **Local database** (faster, offline-capable):
 
 ```kotlin

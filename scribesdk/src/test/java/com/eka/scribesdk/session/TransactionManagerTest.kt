@@ -1220,6 +1220,9 @@ internal class TransactionManagerTest {
             sessionId: String,
             request: com.eka.scribesdk.data.remote.models.requests.SessionContextRequest
         ) = throw NotImplementedError()
+
+        override suspend fun deleteSession(sessionId: String): NetworkResponse<com.google.gson.JsonObject, com.google.gson.JsonObject> =
+            throw NotImplementedError()
     }
 
     internal inner class FakeDataManager : DataManager {

@@ -1,5 +1,6 @@
 package com.eka.scribesdk.data
 
+import com.eka.scribesdk.api.models.PublishStatus
 import com.eka.scribesdk.api.models.ScribeHistoryItem
 import com.eka.scribesdk.api.models.SelectedUserPreferences
 import com.eka.scribesdk.api.models.SessionAttachment
@@ -300,6 +301,51 @@ internal class ScribeRepository(
                 is NetworkResponse.Success -> Result.success(Unit)
                 is NetworkResponse.ServerError ->
                     Result.failure(Exception("Error updating session context: HTTP ${response.code}"))
+                is NetworkResponse.NetworkError -> Result.failure(response.error)
+                is NetworkResponse.UnknownError -> Result.failure(response.error)
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    // ---- Publish (Sessions API only) ----
+
+    suspend fun publishNote(sessionId: String, documentId: String): Result<PublishStatus> =
+        withDocumentWriter(sessionId) { it.publish(sessionId, documentId) }
+
+    suspend fun getPublishStatus(sessionId: String, documentId: String): Result<PublishStatus> =
+        withDocumentWriter(sessionId) { it.publishStatus(documentId) }
+
+    private suspend fun withDocumentWriter(
+        sessionId: String,
+        block: suspend (SessionsDocumentWriter) -> Result<PublishStatus>
+    ): Result<PublishStatus> {
+        val writer = sessionsDocumentWriter
+        if (writer == null || !usesSessionsApi(sessionId)) {
+            return Result.failure(UnsupportedOperationException("Publishing is only supported for Sessions API sessions"))
+        }
+        return try {
+            block(writer)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    // ---- Delete session ----
+
+    /** Deletes the session on the server. A 404 counts as success: it is already gone. */
+    suspend fun deleteSession(sessionId: String): Result<Unit> {
+        return try {
+            when (val response = apiService.deleteSession(sessionId)) {
+                is NetworkResponse.Success -> Result.success(Unit)
+                is NetworkResponse.ServerError ->
+                    if (response.code == 404) {
+                        logger.info(TAG, "Delete session: $sessionId not found on server, treating as deleted")
+                        Result.success(Unit)
+                    } else {
+                        Result.failure(Exception("Error deleting session: HTTP ${response.code}"))
+                    }
                 is NetworkResponse.NetworkError -> Result.failure(response.error)
                 is NetworkResponse.UnknownError -> Result.failure(response.error)
             }

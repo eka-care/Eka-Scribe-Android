@@ -20,6 +20,7 @@ import com.eka.scribesdk.data.remote.models.responses.UpdateUserConfigResponse
 import com.google.gson.JsonObject
 import com.haroldadmin.cnradapter.NetworkResponse
 import retrofit2.http.Body
+import retrofit2.http.DELETE
 import retrofit2.http.GET
 import retrofit2.http.HTTP
 import retrofit2.http.PATCH
@@ -105,5 +106,11 @@ internal interface ScribeApiService {
     suspend fun removeSessionContext(
         @Path("session_id") sessionId: String,
         @Body request: SessionContextRequest
+    ): NetworkResponse<JsonObject, JsonObject>
+
+    /** Deletes the session and its output on the server (same as deleteSession in the web SDK). */
+    @DELETE("voice/api/v2/transaction/{session_id}")
+    suspend fun deleteSession(
+        @Path("session_id") sessionId: String
     ): NetworkResponse<JsonObject, JsonObject>
 }

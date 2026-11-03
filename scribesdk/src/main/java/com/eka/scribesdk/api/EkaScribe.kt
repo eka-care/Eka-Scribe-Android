@@ -6,6 +6,9 @@ import com.eka.networking.client.NetworkConfig
 import com.eka.scribesdk.BuildConfig
 import com.eka.scribesdk.analyser.AnalyserState
 import com.eka.scribesdk.analyser.ModelDownloader
+import com.eka.scribesdk.api.models.PatientDetail
+import com.eka.scribesdk.api.models.PublishState
+import com.eka.scribesdk.api.models.PublishStatus
 import com.eka.scribesdk.api.models.SessionAttachment
 import com.eka.scribesdk.api.models.SessionAudioLink
 import com.eka.scribesdk.api.models.SessionAudioUnavailableException
@@ -618,6 +621,80 @@ object EkaScribe {
         attachments: List<SessionAttachment> = emptyList(),
     ): Result<Unit> = withContext(Dispatchers.IO) {
         requireRepository().updateSessionContext(add = false, sessionId, pastSessionIds, attachments)
+    }
+
+    // ---- Publish ----
+
+    /**
+     * Publishes a note to the EMR (the Publish button). [documentId] is the note's
+     * [SessionData.documentId]. Same as publishDocument in the web SDK.
+     *
+     * Returns the new state: [PublishState.PUBLISHED], or [PublishState.IN_PROGRESS] when the EMR
+     * has not confirmed yet (refresh with [getPublishStatus]). Editing the note afterwards with
+     * [updateSessionResult] unpublishes it, so the doctor publishes the edited version again.
+     * Sessions API sessions only.
+     */
+    suspend fun publishNote(sessionId: String, documentId: String): Result<PublishStatus> =
+        withContext(Dispatchers.IO) {
+            requireRepository().publishNote(sessionId, documentId)
+        }
+
+    /**
+     * A note's publish state and when it last changed ([PublishStatus.updatedAtMs], the "Last done"
+     * time). Sessions API sessions only.
+     */
+    suspend fun getPublishStatus(sessionId: String, documentId: String): Result<PublishStatus> =
+        withContext(Dispatchers.IO) {
+            requireRepository().getPublishStatus(sessionId, documentId)
+        }
+
+    // ---- Patient / delete ----
+
+    /**
+     * Sets or replaces the patient on a session, e.g. when the doctor started recording without
+     * one and picks a patient during or after the recording. Can be called while recording.
+     * Same as sending patient_details in the web SDK's session PATCH.
+     *
+     * Sessions API sessions only; legacy (transaction API) sessions fail with an error.
+     */
+    suspend fun updateSessionPatient(sessionId: String, patient: PatientDetail): Result<Unit> =
+        withContext(Dispatchers.IO) {
+            val txnManager = transactionManager
+                ?: throw ScribeException(
+                    ErrorCode.INVALID_CONFIG,
+                    "EkaScribe SDK not initialized. Call EkaScribe.init() first."
+                )
+            when (val result = txnManager.updatePatientDetails(sessionId, patient)) {
+                is TransactionResult.Success -> Result.success(Unit)
+                is TransactionResult.Error -> Result.failure(Exception(result.message))
+            }
+        }
+
+    /**
+     * Deletes a session: its recording and notes on the server, and any audio left on this device.
+     * Cannot be undone. Same as deleteSession in the web SDK.
+     *
+     * Fails for the session that is being recorded right now; use [cancelSession] to discard it.
+     */
+    suspend fun deleteSession(sessionId: String): Result<Unit> = withContext(Dispatchers.IO) {
+        val manager = sessionManager
+        val isRecordingThis = manager != null && manager.currentSessionId == sessionId &&
+            manager.currentState in setOf(SessionState.STARTING, SessionState.RECORDING, SessionState.PAUSED)
+        if (isRecordingThis) {
+            return@withContext Result.failure(
+                ScribeException(
+                    ErrorCode.INVALID_STATE_TRANSITION,
+                    "Session $sessionId is still recording. Call cancelSession() to discard it."
+                )
+            )
+        }
+        requireRepository().deleteSession(sessionId).onSuccess {
+            try {
+                transactionManager?.deleteLocalSession(sessionId)
+            } catch (e: Exception) {
+                logger.warn(TAG, "Deleted on server, local cleanup failed for $sessionId", e)
+            }
+        }
     }
 
     // ---- Pre-recorded audio file processing ----

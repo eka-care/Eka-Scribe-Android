@@ -85,6 +85,9 @@ internal class SessionManager(
 
     val currentState: SessionState get() = _stateFlow.value
 
+    /** The session being recorded or processed now; null when idle. */
+    internal val currentSessionId: String? get() = activeSessionId
+
     fun setCallback(callback: EkaScribeCallback) {
         this.callback = callback
     }

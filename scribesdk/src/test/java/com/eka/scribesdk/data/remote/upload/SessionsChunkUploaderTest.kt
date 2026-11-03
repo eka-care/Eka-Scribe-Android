@@ -242,5 +242,7 @@ internal class SessionsChunkUploaderTest {
         override suspend fun getSessionAudio(sessionId: String) = error("not used")
         override suspend fun getSessionDocument(sessionId: String, documentId: String) = error("not used")
         override suspend fun getSession(sessionId: String) = error("not used")
+        override suspend fun publishDocument(sessionId: String, documentId: String, request: JsonObject) =
+            error("not used")
     }
 }
