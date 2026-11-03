@@ -4,10 +4,12 @@ import com.eka.scribesdk.api.models.ConfigOutputTemplate
 import com.eka.scribesdk.api.models.ConsultationMode
 import com.eka.scribesdk.api.models.ModelType
 import com.eka.scribesdk.api.models.SelectedUserPreferences
+import com.eka.scribesdk.api.models.SessionAttachment
 import com.eka.scribesdk.api.models.SessionData
 import com.eka.scribesdk.api.models.SupportedLanguage
 import com.eka.scribesdk.common.logging.Logger
 import com.eka.scribesdk.data.ScribeRepository
+import com.eka.scribesdk.data.remote.models.requests.SessionContextRequest
 import com.eka.scribesdk.data.remote.models.requests.UpdateSessionRequest
 import com.eka.scribesdk.data.remote.models.requests.UpdateTemplatesRequest
 import com.eka.scribesdk.data.remote.models.requests.UpdateUserConfigRequest
@@ -23,6 +25,8 @@ import com.eka.scribesdk.data.remote.models.responses.UpdateSessionResponse
 import com.eka.scribesdk.data.remote.models.responses.UpdateTemplateResponse
 import com.eka.scribesdk.data.remote.models.responses.UpdateUserConfigResponse
 import com.eka.scribesdk.data.remote.services.ScribeApiService
+import com.google.gson.Gson
+import com.google.gson.JsonObject
 import com.haroldadmin.cnradapter.NetworkResponse
 import kotlinx.coroutines.test.runTest
 import okhttp3.MediaType.Companion.toMediaType
@@ -352,6 +356,52 @@ internal class ScribeRepositoryApiIntegrationTest {
         assertTrue(repository.getHistory(10).isEmpty())
     }
 
+    @Test
+    fun `get history sends the patient oid filter`() = runTest {
+        api.historyResponse = netSuccess(HistoryResponse(data = emptyList()))
+        repository.getHistory(10, patientOid = "p-1")
+        assertEquals(mapOf("count" to "10", "oid" to "p-1"), api.lastHistoryQueries)
+    }
+
+    @Test
+    fun `session context sends the same calls and bodies as the web sdk`() = runTest {
+        api.contextResponse = netSuccess(JsonObject())
+        assertTrue(repository.updateSessionContext(true, "s1", listOf("a", "b"), emptyList()).isSuccess)
+        assertTrue(repository.updateSessionContext(false, "s1", listOf("a"), emptyList()).isSuccess)
+        assertTrue(
+            repository.updateSessionContext(true, "s1", emptyList(), listOf(SessionAttachment("doc-1", "p-1"))).isSuccess
+        )
+        assertTrue(
+            repository.updateSessionContext(false, "s1", emptyList(), listOf(SessionAttachment("doc-1"))).isSuccess
+        )
+        assertEquals(
+            listOf(
+                "PATCH s1" to """{"context":{"past_sessions":["a","b"]}}""",
+                "DELETE s1" to """{"context":{"past_sessions":["a"]}}""",
+                "PATCH s1" to """{"context":{"attachments":[{"id":"doc-1","patient_oid":"p-1"}]}}""",
+                "DELETE s1" to """{"context":{"attachments":[{"id":"doc-1"}]}}""",
+            ),
+            api.contextCalls
+        )
+    }
+
+    @Test
+    fun `session context with nothing to send makes no call`() = runTest {
+        assertTrue(repository.updateSessionContext(true, "s1", emptyList(), emptyList()).isSuccess)
+        assertTrue(api.contextCalls.isEmpty())
+    }
+
+    @Test
+    fun `session context errors are failures, not swallowed`() = runTest {
+        api.contextResponse = netServerError(JsonObject(), 400)
+        val server = repository.updateSessionContext(true, "s1", listOf("a"), emptyList())
+        assertTrue(server.exceptionOrNull()!!.message!!.contains("HTTP 400"))
+
+        val io = IOException("offline")
+        api.contextResponse = NetworkResponse.NetworkError(io)
+        assertEquals(io, repository.updateSessionContext(true, "s1", listOf("a"), emptyList()).exceptionOrNull())
+    }
+
     private fun sampleConfigData(): GetConfigResponse.Data {
         return GetConfigResponse.Data(
             consultationModes = listOf(
@@ -430,6 +480,9 @@ internal class ScribeRepositoryApiIntegrationTest {
         var lastUpdateTemplatesRequest: UpdateTemplatesRequest? = null
         var lastUpdateUserConfigRequest: UpdateUserConfigRequest? = null
         var lastHistoryQueries: Map<String, String>? = null
+        var contextResponse: NetworkResponse<JsonObject, JsonObject> =
+            NetworkResponse.NetworkError(IOException("Not configured"))
+        val contextCalls = mutableListOf<Pair<String, String>>()
 
         override suspend fun convertTransactionResult(
             sessionId: String,
@@ -474,6 +527,22 @@ internal class ScribeRepositoryApiIntegrationTest {
         ): NetworkResponse<HistoryResponse, HistoryResponse> {
             lastHistoryQueries = queries
             return historyResponse
+        }
+
+        override suspend fun addSessionContext(
+            sessionId: String,
+            request: SessionContextRequest
+        ): NetworkResponse<JsonObject, JsonObject> {
+            contextCalls += "PATCH $sessionId" to Gson().toJson(request)
+            return contextResponse
+        }
+
+        override suspend fun removeSessionContext(
+            sessionId: String,
+            request: SessionContextRequest
+        ): NetworkResponse<JsonObject, JsonObject> {
+            contextCalls += "DELETE $sessionId" to Gson().toJson(request)
+            return contextResponse
         }
 
         override suspend fun getS3Config(url: String) = throw NotImplementedError()

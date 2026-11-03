@@ -2,11 +2,13 @@ package com.eka.scribesdk.data
 
 import com.eka.scribesdk.api.models.ScribeHistoryItem
 import com.eka.scribesdk.api.models.SelectedUserPreferences
+import com.eka.scribesdk.api.models.SessionAttachment
 import com.eka.scribesdk.api.models.SessionData
 import com.eka.scribesdk.api.models.SessionResult
 import com.eka.scribesdk.api.models.TemplateItem
 import com.eka.scribesdk.api.models.UserConfigs
 import com.eka.scribesdk.common.logging.Logger
+import com.eka.scribesdk.data.remote.models.requests.SessionContextRequest
 import com.eka.scribesdk.data.remote.models.requests.UpdateSessionRequest
 import com.eka.scribesdk.data.remote.models.requests.UpdateTemplatesRequest
 import com.eka.scribesdk.data.remote.models.requests.UpdateUserConfigRequest
@@ -251,12 +253,11 @@ internal class ScribeRepository(
 
     // ---- History API ----
 
-    suspend fun getHistory(count: Int? = null): List<ScribeHistoryItem> {
+    suspend fun getHistory(count: Int? = null, patientOid: String? = null): List<ScribeHistoryItem> {
         return try {
-            val queryMap = if (count != null) {
-                mapOf("count" to count.toString())
-            } else {
-                emptyMap()
+            val queryMap = buildMap {
+                count?.let { put("count", it.toString()) }
+                patientOid?.let { put("oid", it) }
             }
             when (val response = apiService.getHistory(queryMap)) {
                 is NetworkResponse.Success -> {
@@ -269,6 +270,41 @@ internal class ScribeRepository(
             }
         } catch (e: Exception) {
             emptyList()
+        }
+    }
+
+    // ---- Session context (linked past sessions / attachments) ----
+
+    /** PATCH adds to the session context, DELETE removes from it; same body for both. */
+    suspend fun updateSessionContext(
+        add: Boolean,
+        sessionId: String,
+        pastSessionIds: List<String>,
+        attachments: List<SessionAttachment>,
+    ): Result<Unit> {
+        if (pastSessionIds.isEmpty() && attachments.isEmpty()) return Result.success(Unit)
+        val request = SessionContextRequest(
+            SessionContextRequest.Context(
+                pastSessions = pastSessionIds.takeIf { it.isNotEmpty() },
+                attachments = attachments.takeIf { it.isNotEmpty() }
+                    ?.map { SessionContextRequest.Attachment(it.documentId, it.patientOid) },
+            )
+        )
+        return try {
+            val response = if (add) {
+                apiService.addSessionContext(sessionId, request)
+            } else {
+                apiService.removeSessionContext(sessionId, request)
+            }
+            when (response) {
+                is NetworkResponse.Success -> Result.success(Unit)
+                is NetworkResponse.ServerError ->
+                    Result.failure(Exception("Error updating session context: HTTP ${response.code}"))
+                is NetworkResponse.NetworkError -> Result.failure(response.error)
+                is NetworkResponse.UnknownError -> Result.failure(response.error)
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
         }
     }
 

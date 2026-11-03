@@ -2,6 +2,7 @@ package com.eka.scribesdk.data.remote.services
 
 import com.eka.scribesdk.data.remote.models.AwsS3ConfigResponse
 import com.eka.scribesdk.data.remote.models.requests.InitTransactionRequest
+import com.eka.scribesdk.data.remote.models.requests.SessionContextRequest
 import com.eka.scribesdk.data.remote.models.requests.StopTransactionRequest
 import com.eka.scribesdk.data.remote.models.requests.UpdateSessionRequest
 import com.eka.scribesdk.data.remote.models.requests.UpdateTemplatesRequest
@@ -16,9 +17,11 @@ import com.eka.scribesdk.data.remote.models.responses.TemplatesResponse
 import com.eka.scribesdk.data.remote.models.responses.UpdateSessionResponse
 import com.eka.scribesdk.data.remote.models.responses.UpdateTemplateResponse
 import com.eka.scribesdk.data.remote.models.responses.UpdateUserConfigResponse
+import com.google.gson.JsonObject
 import com.haroldadmin.cnradapter.NetworkResponse
 import retrofit2.http.Body
 import retrofit2.http.GET
+import retrofit2.http.HTTP
 import retrofit2.http.PATCH
 import retrofit2.http.POST
 import retrofit2.http.PUT
@@ -89,4 +92,18 @@ internal interface ScribeApiService {
     suspend fun getHistory(
         @QueryMap queries: Map<String, String>
     ): NetworkResponse<HistoryResponse, HistoryResponse>
+
+    /** Adds past sessions / attachments to the session context (same as ekascribe-ts-sdk). */
+    @PATCH("voice/api/v1/sessions/{session_id}/context")
+    suspend fun addSessionContext(
+        @Path("session_id") sessionId: String,
+        @Body request: SessionContextRequest
+    ): NetworkResponse<JsonObject, JsonObject>
+
+    /** Removes past sessions / attachments from the session context. */
+    @HTTP(method = "DELETE", path = "voice/api/v1/sessions/{session_id}/context", hasBody = true)
+    suspend fun removeSessionContext(
+        @Path("session_id") sessionId: String,
+        @Body request: SessionContextRequest
+    ): NetworkResponse<JsonObject, JsonObject>
 }

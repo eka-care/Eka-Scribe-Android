@@ -942,10 +942,37 @@ lifecycleScope.launch {
     history.forEach { item ->
         Log.d("Scribe", "${item.txnId} — ${item.processingStatus}")
     }
+
+    // Only one patient's sessions (e.g. to pick past sessions to link, see below)
+    val patientHistory = EkaScribe.getHistory(count = 10, patientOid = patientOid)
 }
 ```
 
 `ScribeHistoryItem` key fields: `txnId`, `uuid`, `createdAt`, `mode`, `flavour`, `processingStatus`, `userStatus`, `patientDetails`
+
+**Linking past sessions and attaching documents** (session context, same as the web SDK):
+
+The AI also uses linked past sessions of the same patient and attached medical-records documents when it generates a session's output.
+
+```kotlin
+lifecycleScope.launch {
+    // Link past sessions (their txnIds from getHistory)
+    EkaScribe.addSessionContext(sessionId, pastSessionIds = listOf(pastTxnId))
+        .onFailure { /* show error */ }
+
+    // Attach a medical-records document (server document_id)
+    EkaScribe.addSessionContext(
+        sessionId,
+        attachments = listOf(SessionAttachment(documentId = documentId, patientOid = patientOid))
+    )
+
+    // Undo either
+    EkaScribe.removeSessionContext(sessionId, pastSessionIds = listOf(pastTxnId))
+    EkaScribe.removeSessionContext(sessionId, attachments = listOf(SessionAttachment(documentId)))
+}
+```
+
+Both return `Result<Unit>`. Calls: `PATCH` / `DELETE voice/api/v1/sessions/{sessionId}/context`. `documentId` must be the server `document_id`; a record that has not finished uploading only has a local id.
 
 **Local database** (faster, offline-capable):
 

@@ -6,6 +6,7 @@ import com.eka.networking.client.NetworkConfig
 import com.eka.scribesdk.BuildConfig
 import com.eka.scribesdk.analyser.AnalyserState
 import com.eka.scribesdk.analyser.ModelDownloader
+import com.eka.scribesdk.api.models.SessionAttachment
 import com.eka.scribesdk.api.models.SessionAudioLink
 import com.eka.scribesdk.api.models.SessionAudioUnavailableException
 import com.eka.scribesdk.api.models.AudioQualityMetrics
@@ -588,11 +589,36 @@ object EkaScribe {
     /**
      * Get session history from the server.
      * @param count Optional limit on number of results
+     * @param patientOid Optional: only this patient's sessions (e.g. to pick past sessions to link)
      */
-    suspend fun getHistory(count: Int? = null): List<ScribeHistoryItem> =
+    suspend fun getHistory(count: Int? = null, patientOid: String? = null): List<ScribeHistoryItem> =
         withContext(Dispatchers.IO) {
-            requireRepository().getHistory(count)
+            requireRepository().getHistory(count, patientOid)
         }
+
+    // ---- Session context (linked past sessions / attachments) ----
+
+    /**
+     * Adds context the AI uses when generating this session's output: past sessions of the same
+     * patient ([pastSessionIds], their session ids) and/or medical-records documents
+     * ([attachments]). Same as addSessionContext in the web SDK. Nothing to add is a no-op success.
+     */
+    suspend fun addSessionContext(
+        sessionId: String,
+        pastSessionIds: List<String> = emptyList(),
+        attachments: List<SessionAttachment> = emptyList(),
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        requireRepository().updateSessionContext(add = true, sessionId, pastSessionIds, attachments)
+    }
+
+    /** Removes linked past sessions and/or attachments added with [addSessionContext]. */
+    suspend fun removeSessionContext(
+        sessionId: String,
+        pastSessionIds: List<String> = emptyList(),
+        attachments: List<SessionAttachment> = emptyList(),
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        requireRepository().updateSessionContext(add = false, sessionId, pastSessionIds, attachments)
+    }
 
     // ---- Pre-recorded audio file processing ----
 

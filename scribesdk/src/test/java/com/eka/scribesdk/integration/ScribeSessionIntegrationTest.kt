@@ -752,6 +752,16 @@ internal class ScribeSessionIntegrationTest {
             throw NotImplementedError()
 
         override suspend fun getHistory(queries: Map<String, String>) = throw NotImplementedError()
+
+        override suspend fun addSessionContext(
+            sessionId: String,
+            request: com.eka.scribesdk.data.remote.models.requests.SessionContextRequest
+        ) = throw NotImplementedError()
+
+        override suspend fun removeSessionContext(
+            sessionId: String,
+            request: com.eka.scribesdk.data.remote.models.requests.SessionContextRequest
+        ) = throw NotImplementedError()
     }
 
     internal class FakeTimeProvider : TimeProvider {
