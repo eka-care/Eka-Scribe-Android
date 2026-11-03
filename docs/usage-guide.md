@@ -66,11 +66,11 @@ dependencyResolutionManagement {
 
 ```kotlin
 dependencies {
-    implementation("com.github.eka-care:Eka-Scribe-Android:4.4.0")
+    implementation("com.github.eka-care:Eka-Scribe-Android:4.5.0")
 }
 ```
 
-Replace `4.4.0` with the latest release tag from [GitHub releases](https://github.com/eka-care/Eka-Scribe-Android/releases).
+Replace `4.5.0` with the latest release tag from [GitHub releases](https://github.com/eka-care/Eka-Scribe-Android/releases).
 
 ---
 
