@@ -648,6 +648,21 @@ object EkaScribe {
             requireRepository().getPublishStatus(sessionId, documentId)
         }
 
+    // ---- Context text ----
+
+    /**
+     * Saves the doctor's free-text context for a session (the "Context" box: history, current
+     * medicines, what to focus on). The AI uses it when it generates the notes, so save it before
+     * [stopSession]. Each call replaces the previous text. Same as the web's context document.
+     *
+     * The session must exist on the server (fails right after [startSession] while offline;
+     * retry later). Sessions API sessions only.
+     */
+    suspend fun setSessionContextText(sessionId: String, text: String): Result<Unit> =
+        withContext(Dispatchers.IO) {
+            requireRepository().setSessionContextText(sessionId, text)
+        }
+
     // ---- Patient / delete ----
 
     /**

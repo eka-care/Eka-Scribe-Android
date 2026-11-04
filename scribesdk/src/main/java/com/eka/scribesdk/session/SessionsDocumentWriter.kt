@@ -5,6 +5,8 @@ import com.eka.scribesdk.api.models.PublishStatus
 import com.eka.scribesdk.api.models.SessionData
 import com.eka.scribesdk.common.logging.Logger
 import com.eka.scribesdk.data.remote.models.requests.UpsertDocumentRequest
+import com.eka.scribesdk.data.remote.models.responses.AndroidBase64Codec
+import com.eka.scribesdk.data.remote.models.responses.Base64Codec
 import com.eka.scribesdk.data.remote.models.responses.CONTEXT
 import com.eka.scribesdk.data.remote.models.responses.CONTEXT_NAME
 import com.eka.scribesdk.data.remote.models.responses.contextPlaceholderId
@@ -121,6 +123,19 @@ internal class SessionsDocumentWriter(
         }
         return Result.success(true)
     }
+
+    /**
+     * Saves the doctor's free-text context for the session (its `context` document), creating the
+     * document on first save. The session must already exist on the server.
+     */
+    suspend fun saveContextText(
+        sessionId: String,
+        text: String,
+        codec: Base64Codec = AndroidBase64Codec
+    ): Result<Boolean> = save(
+        sessionId,
+        listOf(SessionData(templateId = CONTEXT, documentId = contextPlaceholderId(sessionId), data = codec.encode(text)))
+    )
 
     /** The context document made for [sessionId] here, created on first use. */
     private suspend fun contextDocumentId(sessionId: String): Result<String> = createContextLock.withLock {

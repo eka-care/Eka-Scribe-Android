@@ -309,6 +309,20 @@ internal class ScribeRepository(
         }
     }
 
+    // ---- Context text (Sessions API only) ----
+
+    suspend fun setSessionContextText(sessionId: String, text: String): Result<Unit> {
+        val writer = sessionsDocumentWriter
+        if (writer == null || !usesSessionsApi(sessionId)) {
+            return Result.failure(UnsupportedOperationException("Context text is only supported for Sessions API sessions"))
+        }
+        return try {
+            writer.saveContextText(sessionId, text).map { }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     // ---- Publish (Sessions API only) ----
 
     suspend fun publishNote(sessionId: String, documentId: String): Result<PublishStatus> =

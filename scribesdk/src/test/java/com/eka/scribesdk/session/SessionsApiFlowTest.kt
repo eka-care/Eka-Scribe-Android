@@ -1049,6 +1049,25 @@ internal class SessionsApiFlowTest {
     }
 
     @Test
+    fun `saveContextText creates the context document and saves the encoded text`() = runTest {
+        val api = FakeSessionsApi().apply {
+            upsertResponse = netSuccess(
+                DocumentEnvelopeResponse(
+                    "success",
+                    DocumentEnvelopeResponse.DocumentData("ctx-new", SESSION_ID, "success", "https://s3.example/put")
+                )
+            )
+        }
+        val puts = mutableListOf<String>()
+        val writer = SessionsDocumentWriter(api, NoOpLogger()) { _, body -> puts += body; true }
+
+        assertTrue(writer.saveContextText(SESSION_ID, "Known diabetic", JvmCodec).isSuccess)
+
+        assertEquals("context", api.upsertBodies.single { it.has("type") }["type"].asString)
+        assertEquals(listOf(JvmCodec.encode("Known diabetic")), puts)
+    }
+
+    @Test
     fun `document writer unpublishes a note published to the EMR before saving`() = runTest {
         val api = FakeSessionsApi().apply { upsertResponse = publishedDocOk() }
         val puts = mutableListOf<String>()

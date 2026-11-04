@@ -974,6 +974,17 @@ lifecycleScope.launch {
 
 Both return `Result<Unit>`. Calls: `PATCH` / `DELETE voice/api/v1/sessions/{sessionId}/context`. `documentId` must be the server `document_id`; a record that has not finished uploading only has a local id.
 
+**Context text** (the doctor's free-text notes for the AI):
+
+```kotlin
+lifecycleScope.launch {
+    EkaScribe.setSessionContextText(sessionId, "Fever for 3 days, taking Dolo 650. Known diabetic.")
+        .onFailure { /* keep the text and retry, e.g. right before stopSession() */ }
+}
+```
+
+Saves the session's `context` document (created on first save; each call replaces the text). Save it before `stopSession()` so the notes use it. The session must already exist on the server, so a call right after `startSession()` while offline fails; retry later. Sessions API sessions only.
+
 **Publishing a note to the EMR** (Sessions API sessions):
 
 ```kotlin
