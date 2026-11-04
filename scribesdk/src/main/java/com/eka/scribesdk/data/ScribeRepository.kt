@@ -27,6 +27,9 @@ import com.eka.scribesdk.session.SessionsResultFetcher
 import com.eka.scribesdk.session.SessionsTemplateProcessor
 import com.haroldadmin.cnradapter.NetworkResponse
 import kotlinx.coroutines.delay
+import com.eka.scribesdk.data.remote.services.SessionsApiService
+import com.eka.scribesdk.data.remote.models.responses.toSessionDetails
+import com.eka.scribesdk.api.models.SessionDetails
 
 internal class ScribeRepository(
     private val apiService: ScribeApiService,
@@ -38,7 +41,9 @@ internal class ScribeRepository(
     /** Saves edits for Sessions API sessions via the Documents API; legacy sessions use PATCH v3/status. */
     private val sessionsDocumentWriter: SessionsDocumentWriter? = null,
     /** Convert-to-template for Sessions API sessions via Process Template; legacy keeps convert-to-template. */
-    private val sessionsTemplateProcessor: SessionsTemplateProcessor? = null
+    private val sessionsTemplateProcessor: SessionsTemplateProcessor? = null,
+    /** Get Session Details (patient, context) for Sessions API sessions. */
+    private val sessionsApiService: SessionsApiService? = null,
 ) {
     companion object {
         private const val TAG = "ScribeRepository"
@@ -341,6 +346,24 @@ internal class ScribeRepository(
         }
         return try {
             block(writer)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    // ---- Session details (patient + context) ----
+
+    suspend fun getSessionDetails(sessionId: String): Result<SessionDetails> {
+        val service = sessionsApiService
+            ?: return Result.failure(UnsupportedOperationException("Session details need the Sessions API"))
+        return try {
+            when (val response = service.listSessionDocuments(sessionId)) {
+                is NetworkResponse.Success -> Result.success(response.body.toSessionDetails(sessionId))
+                is NetworkResponse.ServerError ->
+                    Result.failure(Exception("Error reading session details: HTTP ${response.code}"))
+                is NetworkResponse.NetworkError -> Result.failure(response.error)
+                is NetworkResponse.UnknownError -> Result.failure(response.error)
+            }
         } catch (e: Exception) {
             Result.failure(e)
         }

@@ -974,6 +974,20 @@ lifecycleScope.launch {
 
 Both return `Result<Unit>`. Calls: `PATCH` / `DELETE voice/api/v1/sessions/{sessionId}/context`. `documentId` must be the server `document_id`; a record that has not finished uploading only has a local id.
 
+**Session details** (patient and context of a session opened later):
+
+```kotlin
+lifecycleScope.launch {
+    EkaScribe.getSessionDetails(sessionId).onSuccess { details ->
+        details.patient            // SessionPatient(oid, name) or null
+        details.linkedSessions     // LinkedSession(sessionId, dateEpochSeconds)
+        details.attachments        // SessionAttachment(documentId, patientOid)
+    }
+}
+```
+
+Call: `GET voice/api/v1/sessions/{sessionId}`. Sessions API sessions only.
+
 **Context text** (the doctor's free-text notes for the AI):
 
 ```kotlin

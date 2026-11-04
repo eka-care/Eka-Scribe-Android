@@ -10,6 +10,7 @@ import com.eka.scribesdk.api.models.PatientDetail
 import com.eka.scribesdk.api.models.PublishState
 import com.eka.scribesdk.api.models.PublishStatus
 import com.eka.scribesdk.api.models.SessionAttachment
+import com.eka.scribesdk.api.models.SessionDetails
 import com.eka.scribesdk.api.models.SessionAudioLink
 import com.eka.scribesdk.api.models.SessionAudioUnavailableException
 import com.eka.scribesdk.api.models.AudioQualityMetrics
@@ -303,7 +304,8 @@ object EkaScribe {
                 }
             ),
             sessionsDocumentWriter = SessionsDocumentWriter(apiService = sessionsApiService, logger = logger),
-            sessionsTemplateProcessor = SessionsTemplateProcessor(apiService = sessionsApiService, logger = logger)
+            sessionsTemplateProcessor = SessionsTemplateProcessor(apiService = sessionsApiService, logger = logger),
+            sessionsApiService = sessionsApiService
         )
 
         sessionManager = SessionManager(
@@ -647,6 +649,16 @@ object EkaScribe {
         withContext(Dispatchers.IO) {
             requireRepository().getPublishStatus(sessionId, documentId)
         }
+
+    // ---- Session details ----
+
+    /**
+     * The session's patient and the context added to it (linked past sessions, attachments), as the
+     * server has them now. Use it to show a session opened later, e.g. from history.
+     */
+    suspend fun getSessionDetails(sessionId: String): Result<SessionDetails> = withContext(Dispatchers.IO) {
+        requireRepository().getSessionDetails(sessionId)
+    }
 
     // ---- Context text ----
 
