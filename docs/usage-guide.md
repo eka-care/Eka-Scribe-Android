@@ -1244,6 +1244,7 @@ data class ScribeError(
 | `POLL_TIMEOUT` | Result polling timed out | Yes | Call `pollSessionResult(sessionId)` manually |
 | `TRANSCRIPTION_FAILED` | Server-side transcription failed | No | Contact support with `sessionId` |
 | `RETRY_EXHAUSTED` | Max retry attempts reached | No | Call `retrySession(sessionId, forceCommit = true)` |
+| `NO_AUDIO_CAPTURED` | The session ended before any audio was recorded; it is cancelled on the server | No | Start a new session |
 | `UNKNOWN` | Unexpected error | Unknown | Log and report |
 
 ---

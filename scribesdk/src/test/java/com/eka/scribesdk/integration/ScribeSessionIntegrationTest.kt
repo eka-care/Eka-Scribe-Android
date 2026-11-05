@@ -629,7 +629,8 @@ internal class ScribeSessionIntegrationTest {
         override suspend fun markInProgress(chunkId: String) {}
         override suspend fun markUploaded(chunkId: String) {}
         override suspend fun markFailed(chunkId: String) {}
-        override suspend fun getChunkCount(sessionId: String) = 0
+        // At least one chunk, as in a real recording; zero means "no audio captured"
+        override suspend fun getChunkCount(sessionId: String) = 1
         override fun sessionFlow(sessionId: String): Flow<SessionEntity?> = emptyFlow()
         override suspend fun deleteSession(sessionId: String) {}
         override suspend fun updateUploadStage(sessionId: String, stage: String) {
