@@ -85,6 +85,9 @@ internal class SessionManager(
 
     val currentState: SessionState get() = _stateFlow.value
 
+    /** The session being recorded or processed now; null when idle. */
+    internal val currentSessionId: String? get() = activeSessionId
+
     fun setCallback(callback: EkaScribeCallback) {
         this.callback = callback
     }
@@ -323,6 +326,29 @@ internal class SessionManager(
                     mapOf("chunkCount" to chunkCount.toString())
                 )
                 logger.info(TAG, "Pipeline stopped: $sessionId, chunks=$chunkCount")
+
+                // Ended before any audio was recorded: the server has nothing to transcribe and
+                // would only fail the session after the full poll. Fail it now and cancel it on
+                // the server so it doesn't sit in "processing" or show up in history.
+                if (chunkCount == 0) {
+                    logger.warn(TAG, "No audio captured, session failed: $sessionId")
+                    emitter?.emit(
+                        SessionEventName.SESSION_FAILED, EventType.ERROR,
+                        "No audio captured",
+                        mapOf("errorCode" to ErrorCode.NO_AUDIO_CAPTURED.name)
+                    )
+                    try {
+                        transactionManager.cancelSession(sessionId)
+                    } catch (e: Exception) {
+                        logger.warn(TAG, "Server cancel failed for $sessionId", e)
+                    }
+                    handleTransactionError(
+                        sessionId,
+                        ErrorCode.NO_AUDIO_CAPTURED,
+                        "No audio was recorded. Record the visit again."
+                    )
+                    return@launch
+                }
 
                 // 2. Transition to PROCESSING for API calls
                 transition(SessionState.PROCESSING)

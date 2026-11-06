@@ -1,12 +1,15 @@
 package com.eka.scribesdk.data
 
+import com.eka.scribesdk.api.models.PublishStatus
 import com.eka.scribesdk.api.models.ScribeHistoryItem
 import com.eka.scribesdk.api.models.SelectedUserPreferences
+import com.eka.scribesdk.api.models.SessionAttachment
 import com.eka.scribesdk.api.models.SessionData
 import com.eka.scribesdk.api.models.SessionResult
 import com.eka.scribesdk.api.models.TemplateItem
 import com.eka.scribesdk.api.models.UserConfigs
 import com.eka.scribesdk.common.logging.Logger
+import com.eka.scribesdk.data.remote.models.requests.SessionContextRequest
 import com.eka.scribesdk.data.remote.models.requests.UpdateSessionRequest
 import com.eka.scribesdk.data.remote.models.requests.UpdateTemplatesRequest
 import com.eka.scribesdk.data.remote.models.requests.UpdateUserConfigRequest
@@ -24,6 +27,9 @@ import com.eka.scribesdk.session.SessionsResultFetcher
 import com.eka.scribesdk.session.SessionsTemplateProcessor
 import com.haroldadmin.cnradapter.NetworkResponse
 import kotlinx.coroutines.delay
+import com.eka.scribesdk.data.remote.services.SessionsApiService
+import com.eka.scribesdk.data.remote.models.responses.toSessionDetails
+import com.eka.scribesdk.api.models.SessionDetails
 
 internal class ScribeRepository(
     private val apiService: ScribeApiService,
@@ -35,7 +41,9 @@ internal class ScribeRepository(
     /** Saves edits for Sessions API sessions via the Documents API; legacy sessions use PATCH v3/status. */
     private val sessionsDocumentWriter: SessionsDocumentWriter? = null,
     /** Convert-to-template for Sessions API sessions via Process Template; legacy keeps convert-to-template. */
-    private val sessionsTemplateProcessor: SessionsTemplateProcessor? = null
+    private val sessionsTemplateProcessor: SessionsTemplateProcessor? = null,
+    /** Get Session Details (patient, context) for Sessions API sessions. */
+    private val sessionsApiService: SessionsApiService? = null,
 ) {
     companion object {
         private const val TAG = "ScribeRepository"
@@ -251,12 +259,11 @@ internal class ScribeRepository(
 
     // ---- History API ----
 
-    suspend fun getHistory(count: Int? = null): List<ScribeHistoryItem> {
+    suspend fun getHistory(count: Int? = null, patientOid: String? = null): List<ScribeHistoryItem> {
         return try {
-            val queryMap = if (count != null) {
-                mapOf("count" to count.toString())
-            } else {
-                emptyMap()
+            val queryMap = buildMap {
+                count?.let { put("count", it.toString()) }
+                patientOid?.let { put("oid", it) }
             }
             when (val response = apiService.getHistory(queryMap)) {
                 is NetworkResponse.Success -> {
@@ -269,6 +276,118 @@ internal class ScribeRepository(
             }
         } catch (e: Exception) {
             emptyList()
+        }
+    }
+
+    // ---- Session context (linked past sessions / attachments) ----
+
+    /** PATCH adds to the session context, DELETE removes from it; same body for both. */
+    suspend fun updateSessionContext(
+        add: Boolean,
+        sessionId: String,
+        pastSessionIds: List<String>,
+        attachments: List<SessionAttachment>,
+    ): Result<Unit> {
+        if (pastSessionIds.isEmpty() && attachments.isEmpty()) return Result.success(Unit)
+        val request = SessionContextRequest(
+            SessionContextRequest.Context(
+                pastSessions = pastSessionIds.takeIf { it.isNotEmpty() },
+                attachments = attachments.takeIf { it.isNotEmpty() }
+                    ?.map { SessionContextRequest.Attachment(it.documentId, it.patientOid) },
+            )
+        )
+        return try {
+            val response = if (add) {
+                apiService.addSessionContext(sessionId, request)
+            } else {
+                apiService.removeSessionContext(sessionId, request)
+            }
+            when (response) {
+                is NetworkResponse.Success -> Result.success(Unit)
+                is NetworkResponse.ServerError ->
+                    Result.failure(Exception("Error updating session context: HTTP ${response.code}"))
+                is NetworkResponse.NetworkError -> Result.failure(response.error)
+                is NetworkResponse.UnknownError -> Result.failure(response.error)
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    // ---- Context text (Sessions API only) ----
+
+    suspend fun setSessionContextText(sessionId: String, text: String): Result<Unit> {
+        val writer = sessionsDocumentWriter
+        if (writer == null || !usesSessionsApi(sessionId)) {
+            return Result.failure(UnsupportedOperationException("Context text is only supported for Sessions API sessions"))
+        }
+        return try {
+            writer.saveContextText(sessionId, text).map { }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    // ---- Publish (Sessions API only) ----
+
+    suspend fun publishNote(sessionId: String, documentId: String): Result<PublishStatus> =
+        withDocumentWriter(sessionId) { it.publish(sessionId, documentId) }
+
+    suspend fun getPublishStatus(sessionId: String, documentId: String): Result<PublishStatus> =
+        withDocumentWriter(sessionId) { it.publishStatus(documentId) }
+
+    private suspend fun withDocumentWriter(
+        sessionId: String,
+        block: suspend (SessionsDocumentWriter) -> Result<PublishStatus>
+    ): Result<PublishStatus> {
+        val writer = sessionsDocumentWriter
+        if (writer == null || !usesSessionsApi(sessionId)) {
+            return Result.failure(UnsupportedOperationException("Publishing is only supported for Sessions API sessions"))
+        }
+        return try {
+            block(writer)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    // ---- Session details (patient + context) ----
+
+    suspend fun getSessionDetails(sessionId: String): Result<SessionDetails> {
+        val service = sessionsApiService
+            ?: return Result.failure(UnsupportedOperationException("Session details need the Sessions API"))
+        return try {
+            when (val response = service.listSessionDocuments(sessionId)) {
+                is NetworkResponse.Success -> Result.success(response.body.toSessionDetails(sessionId))
+                is NetworkResponse.ServerError ->
+                    Result.failure(Exception("Error reading session details: HTTP ${response.code}"))
+                is NetworkResponse.NetworkError -> Result.failure(response.error)
+                is NetworkResponse.UnknownError -> Result.failure(response.error)
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    // ---- Delete session ----
+
+    /** Deletes the session on the server. A 404 counts as success: it is already gone. */
+    suspend fun deleteSession(sessionId: String): Result<Unit> {
+        return try {
+            when (val response = apiService.deleteSession(sessionId)) {
+                is NetworkResponse.Success -> Result.success(Unit)
+                is NetworkResponse.ServerError ->
+                    if (response.code == 404) {
+                        logger.info(TAG, "Delete session: $sessionId not found on server, treating as deleted")
+                        Result.success(Unit)
+                    } else {
+                        Result.failure(Exception("Error deleting session: HTTP ${response.code}"))
+                    }
+                is NetworkResponse.NetworkError -> Result.failure(response.error)
+                is NetworkResponse.UnknownError -> Result.failure(response.error)
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
         }
     }
 

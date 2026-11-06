@@ -114,4 +114,15 @@ internal interface SessionsApiService {
     suspend fun getSession(
         @Path("session_id") sessionId: String
     ): NetworkResponse<GetSessionResponse, SessionsErrorResponse>
+
+    /**
+     * Publish Document: sends the note to the EMR (same as publishDocument in the web SDK).
+     * The response is read loosely; the publish state is read back with [getDocument] if needed.
+     */
+    @POST("voice/api/v1/sessions/{session_id}/documents/{document_id}/publish")
+    suspend fun publishDocument(
+        @Path("session_id") sessionId: String,
+        @Path("document_id") documentId: String,
+        @Body request: JsonObject
+    ): NetworkResponse<JsonObject, SessionsErrorResponse>
 }

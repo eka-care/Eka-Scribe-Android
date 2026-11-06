@@ -66,11 +66,11 @@ dependencyResolutionManagement {
 
 ```kotlin
 dependencies {
-    implementation("com.github.eka-care:Eka-Scribe-Android:4.4.0")
+    implementation("com.github.eka-care:Eka-Scribe-Android:4.5.0")
 }
 ```
 
-Replace `4.4.0` with the latest release tag from [GitHub releases](https://github.com/eka-care/Eka-Scribe-Android/releases).
+Replace `4.5.0` with the latest release tag from [GitHub releases](https://github.com/eka-care/Eka-Scribe-Android/releases).
 
 ---
 
@@ -942,10 +942,107 @@ lifecycleScope.launch {
     history.forEach { item ->
         Log.d("Scribe", "${item.txnId} — ${item.processingStatus}")
     }
+
+    // Only one patient's sessions (e.g. to pick past sessions to link, see below)
+    val patientHistory = EkaScribe.getHistory(count = 10, patientOid = patientOid)
 }
 ```
 
 `ScribeHistoryItem` key fields: `txnId`, `uuid`, `createdAt`, `mode`, `flavour`, `processingStatus`, `userStatus`, `patientDetails`
+
+**Linking past sessions and attaching documents** (session context, same as the web SDK):
+
+The AI also uses linked past sessions of the same patient and attached medical-records documents when it generates a session's output.
+
+```kotlin
+lifecycleScope.launch {
+    // Link past sessions (their txnIds from getHistory)
+    EkaScribe.addSessionContext(sessionId, pastSessionIds = listOf(pastTxnId))
+        .onFailure { /* show error */ }
+
+    // Attach a medical-records document (server document_id)
+    EkaScribe.addSessionContext(
+        sessionId,
+        attachments = listOf(SessionAttachment(documentId = documentId, patientOid = patientOid))
+    )
+
+    // Undo either
+    EkaScribe.removeSessionContext(sessionId, pastSessionIds = listOf(pastTxnId))
+    EkaScribe.removeSessionContext(sessionId, attachments = listOf(SessionAttachment(documentId)))
+}
+```
+
+Both return `Result<Unit>`. Calls: `PATCH` / `DELETE voice/api/v1/sessions/{sessionId}/context`. `documentId` must be the server `document_id`; a record that has not finished uploading only has a local id.
+
+**Session details** (patient and context of a session opened later):
+
+```kotlin
+lifecycleScope.launch {
+    EkaScribe.getSessionDetails(sessionId).onSuccess { details ->
+        details.patient            // SessionPatient(oid, name) or null
+        details.linkedSessions     // LinkedSession(sessionId, dateEpochSeconds)
+        details.attachments        // SessionAttachment(documentId, patientOid)
+    }
+}
+```
+
+Call: `GET voice/api/v1/sessions/{sessionId}`. Sessions API sessions only.
+
+**Context text** (the doctor's free-text notes for the AI):
+
+```kotlin
+lifecycleScope.launch {
+    EkaScribe.setSessionContextText(sessionId, "Fever for 3 days, taking Dolo 650. Known diabetic.")
+        .onFailure { /* keep the text and retry, e.g. right before stopSession() */ }
+}
+```
+
+Saves the session's `context` document (created on first save; each call replaces the text). Save it before `stopSession()` so the notes use it. The session must already exist on the server, so a call right after `startSession()` while offline fails; retry later. Sessions API sessions only.
+
+**Publishing a note to the EMR** (Sessions API sessions):
+
+```kotlin
+lifecycleScope.launch {
+    // documentId = the note's SessionData.documentId
+    EkaScribe.publishNote(sessionId, documentId).onSuccess { status ->
+        when (status.state) {
+            PublishState.PUBLISHED -> showPublished(status.updatedAtMs)   // "Last done" time
+            PublishState.IN_PROGRESS -> showPublishing()                  // refresh later with getPublishStatus
+            PublishState.FAILED, PublishState.NOT_PUBLISHED -> showPublishButton()
+        }
+    }
+
+    // When opening a note: current state and "Last done" time
+    val status = EkaScribe.getPublishStatus(sessionId, documentId).getOrNull()
+}
+```
+
+Call: `POST voice/api/v1/sessions/{sessionId}/documents/{documentId}/publish`. State comes from the document's `publish.emr_webhook` (`status`, `updated_at`). Saving an edit with `updateSessionResult` unpublishes the note, as on web, so it shows Publish again.
+
+**Adding a patient after recording started** (e.g. the doctor started without one):
+
+```kotlin
+lifecycleScope.launch {
+    EkaScribe.updateSessionPatient(
+        sessionId,
+        PatientDetail(patientId = patientOid, name = "Rahul Rao", age = 52, biologicalSex = "M", visitId = visitId)
+    ).onFailure { /* show error */ }
+}
+```
+
+Works while recording, after End, or on a finished session. Sessions API sessions only: legacy sessions return a failure. Call: `PATCH voice/v1/sessions/{sessionId}` with `patient_details`. If the session is not created on the server yet (offline), the patient is saved and sent when it is.
+
+**Deleting a session**:
+
+```kotlin
+lifecycleScope.launch {
+    EkaScribe.deleteSession(sessionId)
+        .onSuccess { /* back to the list */ }
+        .onFailure { /* show error */ }
+}
+```
+
+Deletes the recording and notes on the server and any audio left on the device. Cannot be undone. Fails for the session being recorded now (use `cancelSession()`). A session the server no longer has counts as deleted. Call: `DELETE voice/api/v2/transaction/{sessionId}`.
 
 **Local database** (faster, offline-capable):
 
@@ -1147,6 +1244,7 @@ data class ScribeError(
 | `POLL_TIMEOUT` | Result polling timed out | Yes | Call `pollSessionResult(sessionId)` manually |
 | `TRANSCRIPTION_FAILED` | Server-side transcription failed | No | Contact support with `sessionId` |
 | `RETRY_EXHAUSTED` | Max retry attempts reached | No | Call `retrySession(sessionId, forceCommit = true)` |
+| `NO_AUDIO_CAPTURED` | The session ended before any audio was recorded; it is cancelled on the server | No | Start a new session |
 | `UNKNOWN` | Unexpected error | Unknown | Log and report |
 
 ---

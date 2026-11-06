@@ -6,6 +6,11 @@ import com.eka.networking.client.NetworkConfig
 import com.eka.scribesdk.BuildConfig
 import com.eka.scribesdk.analyser.AnalyserState
 import com.eka.scribesdk.analyser.ModelDownloader
+import com.eka.scribesdk.api.models.PatientDetail
+import com.eka.scribesdk.api.models.PublishState
+import com.eka.scribesdk.api.models.PublishStatus
+import com.eka.scribesdk.api.models.SessionAttachment
+import com.eka.scribesdk.api.models.SessionDetails
 import com.eka.scribesdk.api.models.SessionAudioLink
 import com.eka.scribesdk.api.models.SessionAudioUnavailableException
 import com.eka.scribesdk.api.models.AudioQualityMetrics
@@ -299,7 +304,8 @@ object EkaScribe {
                 }
             ),
             sessionsDocumentWriter = SessionsDocumentWriter(apiService = sessionsApiService, logger = logger),
-            sessionsTemplateProcessor = SessionsTemplateProcessor(apiService = sessionsApiService, logger = logger)
+            sessionsTemplateProcessor = SessionsTemplateProcessor(apiService = sessionsApiService, logger = logger),
+            sessionsApiService = sessionsApiService
         )
 
         sessionManager = SessionManager(
@@ -588,11 +594,142 @@ object EkaScribe {
     /**
      * Get session history from the server.
      * @param count Optional limit on number of results
+     * @param patientOid Optional: only this patient's sessions (e.g. to pick past sessions to link)
      */
-    suspend fun getHistory(count: Int? = null): List<ScribeHistoryItem> =
+    suspend fun getHistory(count: Int? = null, patientOid: String? = null): List<ScribeHistoryItem> =
         withContext(Dispatchers.IO) {
-            requireRepository().getHistory(count)
+            requireRepository().getHistory(count, patientOid)
         }
+
+    // ---- Session context (linked past sessions / attachments) ----
+
+    /**
+     * Adds context the AI uses when generating this session's output: past sessions of the same
+     * patient ([pastSessionIds], their session ids) and/or medical-records documents
+     * ([attachments]). Same as addSessionContext in the web SDK. Nothing to add is a no-op success.
+     */
+    suspend fun addSessionContext(
+        sessionId: String,
+        pastSessionIds: List<String> = emptyList(),
+        attachments: List<SessionAttachment> = emptyList(),
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        requireRepository().updateSessionContext(add = true, sessionId, pastSessionIds, attachments)
+    }
+
+    /** Removes linked past sessions and/or attachments added with [addSessionContext]. */
+    suspend fun removeSessionContext(
+        sessionId: String,
+        pastSessionIds: List<String> = emptyList(),
+        attachments: List<SessionAttachment> = emptyList(),
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        requireRepository().updateSessionContext(add = false, sessionId, pastSessionIds, attachments)
+    }
+
+    // ---- Publish ----
+
+    /**
+     * Publishes a note to the EMR (the Publish button). [documentId] is the note's
+     * [SessionData.documentId]. Same as publishDocument in the web SDK.
+     *
+     * Returns the new state: [PublishState.PUBLISHED], or [PublishState.IN_PROGRESS] when the EMR
+     * has not confirmed yet (refresh with [getPublishStatus]). Editing the note afterwards with
+     * [updateSessionResult] unpublishes it, so the doctor publishes the edited version again.
+     * Sessions API sessions only.
+     */
+    suspend fun publishNote(sessionId: String, documentId: String): Result<PublishStatus> =
+        withContext(Dispatchers.IO) {
+            requireRepository().publishNote(sessionId, documentId)
+        }
+
+    /**
+     * A note's publish state and when it last changed ([PublishStatus.updatedAtMs], the "Last done"
+     * time). Sessions API sessions only.
+     */
+    suspend fun getPublishStatus(sessionId: String, documentId: String): Result<PublishStatus> =
+        withContext(Dispatchers.IO) {
+            requireRepository().getPublishStatus(sessionId, documentId)
+        }
+
+    // ---- Session details ----
+
+    /**
+     * The session's patient and the context added to it (linked past sessions, attachments), as the
+     * server has them now. Use it to show a session opened later, e.g. from history.
+     */
+    suspend fun getSessionDetails(sessionId: String): Result<SessionDetails> = withContext(Dispatchers.IO) {
+        requireRepository().getSessionDetails(sessionId)
+    }
+
+    // ---- Context text ----
+
+    /**
+     * Saves the doctor's free-text context for a session (the "Context" box: history, current
+     * medicines, what to focus on). The AI uses it when it generates the notes, so save it before
+     * [stopSession]. Each call replaces the previous text. Same as the web's context document.
+     *
+     * The session must exist on the server (fails right after [startSession] while offline;
+     * retry later). Sessions API sessions only.
+     */
+    suspend fun setSessionContextText(sessionId: String, text: String): Result<Unit> =
+        withContext(Dispatchers.IO) {
+            requireRepository().setSessionContextText(sessionId, text)
+        }
+
+    // ---- Patient / delete ----
+
+    /**
+     * Sets or replaces the patient on a session, e.g. when the doctor started recording without
+     * one and picks a patient during or after the recording. Can be called while recording.
+     * Same as sending patient_details in the web SDK's session PATCH.
+     *
+     * Sessions API sessions only; legacy (transaction API) sessions fail with an error.
+     */
+    suspend fun updateSessionPatient(sessionId: String, patient: PatientDetail): Result<Unit> =
+        withContext(Dispatchers.IO) {
+            val txnManager = transactionManager
+                ?: throw ScribeException(
+                    ErrorCode.INVALID_CONFIG,
+                    "EkaScribe SDK not initialized. Call EkaScribe.init() first."
+                )
+            when (val result = txnManager.updatePatientDetails(sessionId, patient)) {
+                is TransactionResult.Success -> Result.success(Unit)
+                is TransactionResult.Error -> Result.failure(Exception(result.message))
+            }
+        }
+
+    /**
+     * Removes the patient from a session (PATCH patient_details: {}), as the web SDK does.
+     * Sessions API sessions only.
+     */
+    suspend fun removeSessionPatient(sessionId: String): Result<Unit> =
+        updateSessionPatient(sessionId, PatientDetail())
+
+    /**
+     * Deletes a session: its recording and notes on the server, and any audio left on this device.
+     * Cannot be undone. Same as deleteSession in the web SDK.
+     *
+     * Fails for the session that is being recorded right now; use [cancelSession] to discard it.
+     */
+    suspend fun deleteSession(sessionId: String): Result<Unit> = withContext(Dispatchers.IO) {
+        val manager = sessionManager
+        val isRecordingThis = manager != null && manager.currentSessionId == sessionId &&
+            manager.currentState in setOf(SessionState.STARTING, SessionState.RECORDING, SessionState.PAUSED)
+        if (isRecordingThis) {
+            return@withContext Result.failure(
+                ScribeException(
+                    ErrorCode.INVALID_STATE_TRANSITION,
+                    "Session $sessionId is still recording. Call cancelSession() to discard it."
+                )
+            )
+        }
+        requireRepository().deleteSession(sessionId).onSuccess {
+            try {
+                transactionManager?.deleteLocalSession(sessionId)
+            } catch (e: Exception) {
+                logger.warn(TAG, "Deleted on server, local cleanup failed for $sessionId", e)
+            }
+        }
+    }
 
     // ---- Pre-recorded audio file processing ----
 

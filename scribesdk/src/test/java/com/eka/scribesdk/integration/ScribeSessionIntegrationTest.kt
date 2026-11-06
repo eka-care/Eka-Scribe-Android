@@ -629,7 +629,8 @@ internal class ScribeSessionIntegrationTest {
         override suspend fun markInProgress(chunkId: String) {}
         override suspend fun markUploaded(chunkId: String) {}
         override suspend fun markFailed(chunkId: String) {}
-        override suspend fun getChunkCount(sessionId: String) = 0
+        // At least one chunk, as in a real recording; zero means "no audio captured"
+        override suspend fun getChunkCount(sessionId: String) = 1
         override fun sessionFlow(sessionId: String): Flow<SessionEntity?> = emptyFlow()
         override suspend fun deleteSession(sessionId: String) {}
         override suspend fun updateUploadStage(sessionId: String, stage: String) {
@@ -752,6 +753,19 @@ internal class ScribeSessionIntegrationTest {
             throw NotImplementedError()
 
         override suspend fun getHistory(queries: Map<String, String>) = throw NotImplementedError()
+
+        override suspend fun addSessionContext(
+            sessionId: String,
+            request: com.eka.scribesdk.data.remote.models.requests.SessionContextRequest
+        ) = throw NotImplementedError()
+
+        override suspend fun removeSessionContext(
+            sessionId: String,
+            request: com.eka.scribesdk.data.remote.models.requests.SessionContextRequest
+        ) = throw NotImplementedError()
+
+        override suspend fun deleteSession(sessionId: String): NetworkResponse<com.google.gson.JsonObject, com.google.gson.JsonObject> =
+            throw NotImplementedError()
     }
 
     internal class FakeTimeProvider : TimeProvider {
