@@ -698,6 +698,13 @@ object EkaScribe {
         }
 
     /**
+     * Removes the patient from a session (PATCH patient_details: {}), as the web SDK does.
+     * Sessions API sessions only.
+     */
+    suspend fun removeSessionPatient(sessionId: String): Result<Unit> =
+        updateSessionPatient(sessionId, PatientDetail())
+
+    /**
      * Deletes a session: its recording and notes on the server, and any audio left on this device.
      * Cannot be undone. Same as deleteSession in the web SDK.
      *

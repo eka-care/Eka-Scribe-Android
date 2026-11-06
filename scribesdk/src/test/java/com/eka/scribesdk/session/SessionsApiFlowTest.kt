@@ -43,6 +43,7 @@ import okhttp3.Request
 import okhttp3.RequestBody
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -1214,12 +1215,14 @@ internal class SessionsApiFlowTest {
     }
 
     @Test
-    fun `updatePatientDetails with an empty patient makes no call`() = runTest {
-        val api = FakeSessionsApi()
+    fun `updatePatientDetails with an empty patient clears it`() = runTest {
+        val api = FakeSessionsApi().apply { patchResponse = patchOk() }
         val dm = mockk<DataManager>(relaxed = true)
 
-        assertTrue(flow(api, dm).updatePatientDetails(SESSION_ID, PatientDetail()) is TransactionResult.Error)
-        assertTrue(api.patchBodies.isEmpty())
+        assertTrue(flow(api, dm).updatePatientDetails(SESSION_ID, PatientDetail()) is TransactionResult.Success)
+        val body = api.patchBodies.single()
+        assertEquals(0, body.getAsJsonObject("patient_details").size())
+        assertFalse(body.has("additional_data"))
     }
 
     @Test

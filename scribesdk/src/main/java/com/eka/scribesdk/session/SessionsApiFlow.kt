@@ -285,14 +285,15 @@ internal class SessionsApiFlow(
 
     /**
      * Sets or replaces the session's patient (`PATCH /sessions/{id}` with patient_details), e.g. a
-     * patient picked during or after a recording started without one.
+     * patient picked during or after a recording started without one. An empty [PatientDetail]
+     * removes the patient.
      *
      * Before the session exists on the server (stage INIT: create not done yet, offline, or
      * pending recovery) the patient is kept and sent by createSession / its follow-up PATCH.
      */
     suspend fun updatePatientDetails(sessionId: String, patient: PatientDetail): TransactionResult {
-        val details = toPatientDetails(patient)
-            ?: return TransactionResult.Error("Patient details are empty")
+        // Empty patient = clear it, sent as patient_details: {} like the web SDK's remove
+        val details = toPatientDetails(patient) ?: emptyMap()
 
         // Order matters: record first, then read the stage (createSession does the reverse)
         pendingPatients[sessionId] = patient
