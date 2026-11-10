@@ -40,6 +40,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -65,7 +66,7 @@ internal class SessionManager(
     }
 
     private val _stateFlow = MutableStateFlow(SessionState.IDLE)
-    val stateFlow: Flow<SessionState> = _stateFlow.asStateFlow()
+    val stateFlow: StateFlow<SessionState> = _stateFlow.asStateFlow()
 
     // Stable shared flows that survive pipeline lifecycle
     private val _voiceActivityFlow =
@@ -78,12 +79,19 @@ internal class SessionManager(
 
     private var activeSessionId: String? = null
     private var activeSessionConfig: SessionConfig? = null
+
+    /** Config of the session being recorded or processed now (patient, templates). */
+    internal val currentSessionConfig: SessionConfig? get() = activeSessionConfig
     private var pipeline: Pipeline? = null
     private var callback: EkaScribeCallback? = null
     private var eventEmitter: SessionEventEmitter? = null
     private var sessionScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     val currentState: SessionState get() = _stateFlow.value
+
+    private val _pauseReason = MutableStateFlow<PauseReason?>(null)
+    /** Why the session is paused; null while it isn't. */
+    val pauseReason: StateFlow<PauseReason?> = _pauseReason.asStateFlow()
 
     /** The session being recorded or processed now; null when idle. */
     internal val currentSessionId: String? get() = activeSessionId
@@ -252,7 +260,7 @@ internal class SessionManager(
         }
     }
 
-    fun pause() {
+    fun pause(reason: PauseReason = PauseReason.USER) {
         val current = _stateFlow.value
         if (current == SessionState.PAUSED) {
             logger.info(TAG, "pause() called while already PAUSED — no-op")
@@ -265,9 +273,13 @@ internal class SessionManager(
             )
         }
         pipeline?.pause()
+        _pauseReason.value = reason
         transition(SessionState.PAUSED)
         activeSessionId?.let { callback?.onSessionPaused(it) }
-        eventEmitter?.emit(SessionEventName.SESSION_PAUSED, EventType.INFO, "Session paused")
+        eventEmitter?.emit(
+            SessionEventName.SESSION_PAUSED, EventType.INFO, "Session paused",
+            mapOf("reason" to reason.name)
+        )
         logger.info(TAG, "Session paused: $activeSessionId")
     }
 
@@ -284,10 +296,13 @@ internal class SessionManager(
             )
         }
         pipeline?.resume()
+        _pauseReason.value = null
         transition(SessionState.RECORDING)
         activeSessionId?.let { callback?.onSessionResumed(it) }
         eventEmitter?.emit(SessionEventName.SESSION_RESUMED, EventType.INFO, "Session resumed")
         logger.info(TAG, "Session resumed: $activeSessionId")
+        // Resumed while the other app still holds the mic: it would only record silence
+        if (pipeline?.micSilenced?.value == true) pause(PauseReason.MIC_IN_USE)
     }
 
     fun stop() {
@@ -304,6 +319,7 @@ internal class SessionManager(
         }
 
         transition(SessionState.STOPPING)
+        _pauseReason.value = null
         val sessionId = activeSessionId ?: return
         val emitter = eventEmitter
 
@@ -315,6 +331,8 @@ internal class SessionManager(
 
         sessionScope.launch(Dispatchers.IO) {
             try {
+                // Ended on purpose: not an unfinished recording any more (see EkaScribe.getUnfinishedSessions)
+                dataManager.updateSessionState(sessionId, SessionState.PROCESSING.name)
                 // 1. Stop the audio pipeline
                 val fullAudioResult = pipeline?.stop()
 
@@ -592,7 +610,10 @@ internal class SessionManager(
         sessionScope.cancel()
         cleanup()
         forceTransition(SessionState.IDLE)
-        sessionId?.let { callback?.onSessionCancelled(it) }
+        sessionId?.let { id ->
+            callback?.onSessionCancelled(id)
+            deferredUploadScope.launch { runCatching { dataManager.updateSessionState(id, SessionState.ERROR.name) } }
+        }
         logger.info(TAG, "Session cancelled from state: $current")
         // Fire-and-forget pipeline stop on a dedicated scope
         deferredUploadScope.launch {
@@ -685,10 +706,25 @@ internal class SessionManager(
         activePipeline.audioQualityFlow?.let { flow ->
             scope.launch { flow.collect { _audioQualityFlow.emit(it) } }
         }
+        // Another app took the mic: pause rather than record minutes of silence
+        scope.launch {
+            activePipeline.micSilenced.collect { silenced ->
+                if (!silenced) return@collect
+                when {
+                    _stateFlow.value == SessionState.RECORDING -> {
+                        runCatching { pause(PauseReason.MIC_IN_USE) }
+                        emitter.emit(SessionEventName.SESSION_PAUSED, EventType.INFO, "Paused: mic taken by another app")
+                    }
+                    // The other app usually takes audio focus first, which already paused us: say why
+                    _stateFlow.value == SessionState.PAUSED && _pauseReason.value == PauseReason.AUDIO_FOCUS ->
+                        _pauseReason.value = PauseReason.MIC_IN_USE
+                }
+            }
+        }
         scope.launch {
             activePipeline.audioFocusFlow.collect { hasFocus ->
                 if (!hasFocus && _stateFlow.value == SessionState.RECORDING) {
-                    pause()
+                    pause(PauseReason.AUDIO_FOCUS)
                 }
                 emitter.emit(
                     SessionEventName.AUDIO_FOCUS_CHANGED, EventType.INFO,
@@ -701,6 +737,7 @@ internal class SessionManager(
     }
 
     private fun cleanup() {
+        _pauseReason.value = null
         pipeline = null
         activeSessionId = null
         activeSessionConfig = null

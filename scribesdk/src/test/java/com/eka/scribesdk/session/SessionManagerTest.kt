@@ -28,6 +28,7 @@ import io.mockk.mockkStatic
 import io.mockk.verify
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -309,6 +310,7 @@ internal class SessionManagerTest {
         uploader: ChunkUploader = FakeChunkUploader()
     ): SessionManager {
         val pipelineFactory = mockk<Pipeline.Factory>(relaxed = true)
+        every { pipeline.micSilenced } returns MutableStateFlow(false)
 
         coEvery { tm.initTransaction(any(), any(), any()) } returns TransactionResult.Success(
             "folder",
@@ -318,6 +320,7 @@ internal class SessionManagerTest {
         every { pipeline.voiceActivityFlow } returns emptyFlow()
         every { pipeline.audioQualityFlow } returns emptyFlow()
         every { pipeline.audioFocusFlow } returns emptyFlow()
+        every { pipeline.micSilenced } returns MutableStateFlow(false)
 
         return SessionManager(
             dataManager = dm,
@@ -336,6 +339,7 @@ internal class SessionManagerTest {
         every { pipeline.voiceActivityFlow } returns emptyFlow()
         every { pipeline.audioQualityFlow } returns emptyFlow()
         every { pipeline.audioFocusFlow } returns emptyFlow()
+        every { pipeline.micSilenced } returns MutableStateFlow(false)
         coEvery { pipeline.stop() } throws RuntimeException("Pipeline crash")
 
         val manager = createManagerWithSuccessInit(pipeline = pipeline)
@@ -575,6 +579,7 @@ internal class SessionManagerTest {
         every { pipeline.voiceActivityFlow } returns emptyFlow()
         every { pipeline.audioQualityFlow } returns emptyFlow()
         every { pipeline.audioFocusFlow } returns emptyFlow()
+        every { pipeline.micSilenced } returns MutableStateFlow(false)
 
             val tempFile = File.createTempFile("test_audio", ".mp3")
         tempFile.deleteOnExit()

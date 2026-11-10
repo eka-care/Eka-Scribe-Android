@@ -35,6 +35,7 @@ import io.mockk.mockk
 import io.mockk.mockkStatic
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.emptyFlow
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -87,6 +88,7 @@ internal class ScribeSessionIntegrationTest {
         every { mockPipeline.voiceActivityFlow } returns null
         every { mockPipeline.audioQualityFlow } returns null
         every { mockPipeline.audioFocusFlow } returns audioFocusFlow
+        every { mockPipeline.micSilenced } returns MutableStateFlow(false)
         coEvery { mockPipeline.stop() } returns null
 
         mockPipelineFactory = mockk()

@@ -22,12 +22,24 @@ class AndroidAudioRecorder(
 
     companion object {
         private const val TAG = "AndroidAudioRecorder"
+
+        /** Pure digital silence this long means another app holds the mic (backup for the system signal). */
+        private const val SILENCE_AS_TAKEN_MS = 30_000L
+        private const val SILENT_PEAK = 1
     }
 
     private var audioRecord: AudioRecord? = null
     private var recordThread: Thread? = null
     private var frameCallback: FrameCallback? = null
     private var focusCallback: AudioFocusCallback? = null
+    private var micSilencedCallback: ((Boolean) -> Unit)? = null
+    private var recordingCallback: AudioManager.AudioRecordingCallback? = null
+
+    // Mic taken by another app: the system's "silenced" flag (Android 10+), or a long run of zeros
+    private val silencedBySystem = AtomicBoolean(false)
+    private val silencedByZeros = AtomicBoolean(false)
+    private var reportedSilenced = false
+    private var zeroRunMs = 0L
     private val isRecording = AtomicBoolean(false)
     private val isPaused = AtomicBoolean(false)
     private val frameCounter = AtomicLong(0)
@@ -58,6 +70,51 @@ class AndroidAudioRecorder(
 
     override fun setAudioFocusCallback(callback: AudioFocusCallback) {
         this.focusCallback = callback
+    }
+
+    override fun setMicSilencedCallback(callback: (Boolean) -> Unit) {
+        this.micSilencedCallback = callback
+    }
+
+    @Synchronized
+    private fun reportSilenced() {
+        val silenced = silencedBySystem.get() || silencedByZeros.get()
+        if (silenced == reportedSilenced) return
+        reportedSilenced = silenced
+        logger.warn(TAG, if (silenced) "Mic taken by another app: recording silence" else "Mic is back")
+        micSilencedCallback?.invoke(silenced)
+    }
+
+    /** Android 10+: the system tells us when another app takes the mic and we are silenced. */
+    private fun watchSilencing() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
+        val callback = object : AudioManager.AudioRecordingCallback() {
+            override fun onRecordingConfigChanged(configs: MutableList<android.media.AudioRecordingConfiguration>) {
+                val sessionId = audioRecord?.audioSessionId ?: return
+                val mine = configs.firstOrNull { it.clientAudioSessionId == sessionId } ?: return
+                silencedBySystem.set(mine.isClientSilenced)
+                reportSilenced()
+            }
+        }
+        recordingCallback = callback
+        audioManager?.registerAudioRecordingCallback(callback, android.os.Handler(android.os.Looper.getMainLooper()))
+    }
+
+    /** Backup on every Android version: exact zeros for [SILENCE_AS_TAKEN_MS]. A real room is never this quiet. */
+    private fun trackZeros(pcm: ShortArray, count: Int) {
+        var peak = 0
+        for (i in 0 until count) {
+            val v = kotlin.math.abs(pcm[i].toInt())
+            if (v > peak) peak = v
+            if (peak > SILENT_PEAK) break
+        }
+        if (peak > SILENT_PEAK) {
+            zeroRunMs = 0
+            if (silencedByZeros.getAndSet(false)) reportSilenced()
+            return
+        }
+        zeroRunMs += count * 1000L / config.sampleRate
+        if (zeroRunMs >= SILENCE_AS_TAKEN_MS && !silencedByZeros.getAndSet(true)) reportSilenced()
     }
 
     @SuppressLint("MissingPermission")
@@ -100,7 +157,12 @@ class AndroidAudioRecorder(
         isRecording.set(true)
         isPaused.set(false)
         frameCounter.set(0)
+        zeroRunMs = 0
+        silencedBySystem.set(false)
+        silencedByZeros.set(false)
+        reportedSilenced = false
         audioRecord?.startRecording()
+        watchSilencing()
 
         recordThread = Thread({
             Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO)
@@ -114,6 +176,7 @@ class AndroidAudioRecorder(
 
                 val readCount = audioRecord?.read(buffer, 0, config.frameSize) ?: -1
                 if (readCount > 0) {
+                    trackZeros(buffer, readCount)
                     val frame = AudioFrame(
                         pcm = buffer.copyOf(readCount),
                         timestampMs = System.currentTimeMillis(),
@@ -135,6 +198,10 @@ class AndroidAudioRecorder(
         recordThread?.join()
         recordThread = null
 
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            recordingCallback?.let { audioManager?.unregisterAudioRecordingCallback(it) }
+        }
+        recordingCallback = null
         audioRecord?.release()
         audioRecord = null
         abandonAudioFocus()
@@ -147,6 +214,9 @@ class AndroidAudioRecorder(
     }
 
     override fun resume() {
+        // Count silence afresh: the zeros before the pause shouldn't pause us again straight away
+        zeroRunMs = 0
+        if (silencedByZeros.getAndSet(false)) reportSilenced()
         isPaused.set(false)
         logger.info(TAG, "Recording resumed")
     }

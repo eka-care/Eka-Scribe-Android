@@ -1,6 +1,9 @@
 package com.eka.scribesdk.api
 
+import com.eka.scribesdk.recorder.RecordingForegroundService
+import com.eka.scribesdk.recorder.RecordingServiceController
 import android.content.Context
+import android.content.Intent
 import com.eka.networking.client.EkaNetwork
 import com.eka.networking.client.NetworkConfig
 import com.eka.scribesdk.BuildConfig
@@ -22,6 +25,10 @@ import com.eka.scribesdk.api.models.SessionConfig
 import com.eka.scribesdk.api.models.SessionData
 import com.eka.scribesdk.api.models.SessionResult
 import com.eka.scribesdk.api.models.SessionState
+import com.eka.scribesdk.data.local.db.entity.TransactionStage
+import com.eka.scribesdk.session.RecordingGuard
+import com.eka.scribesdk.api.models.UnfinishedSession
+import com.eka.scribesdk.api.models.RecordingAlert
 import com.eka.scribesdk.api.models.TemplateItem
 import com.eka.scribesdk.api.models.UploadStage
 import com.eka.scribesdk.api.models.UserConfigs
@@ -74,6 +81,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.flow.first
 import java.io.File
 import java.io.OutputStream
 import java.util.concurrent.atomic.AtomicBoolean
@@ -103,6 +112,10 @@ object EkaScribe {
     private var config: EkaScribeConfig? = null
     private var audioFileProcessor: AudioFileProcessor? = null
     private var sessionAudioDownloader: SessionAudioDownloader? = null
+    private var recordingGuard: RecordingGuard? = null
+    /** Outlives init/destroy so the app can collect it before the SDK is ready. */
+    private val _recordingAlert = MutableStateFlow<RecordingAlert?>(null)
+    private val initialized = MutableStateFlow(false)
     private var logger: Logger = NoOpLogger()
 
     private var isInitialized = AtomicBoolean(false)
@@ -320,6 +333,48 @@ object EkaScribe {
             it.setCallback(callback)
         }
 
+        // Microphone foreground service while recording / paused, so the mic keeps working with
+        // the app in the background or the screen locked (Android silences it otherwise)
+        val recordingService = RecordingServiceController(
+            context = context.applicationContext,
+            logger = logger,
+            sessionLabel = {
+                sessionManager?.currentSessionConfig?.let { config ->
+                    listOfNotNull(
+                        config.patientDetails?.name?.takeIf { it.isNotBlank() } ?: "No patient",
+                        config.outputTemplates?.firstOrNull()?.templateName?.takeIf { it.isNotBlank() },
+                    ).joinToString(" · ")
+                }
+            },
+        ) { action ->
+            when (action) {
+                RecordingForegroundService.NotificationAction.PAUSE -> pauseSession()
+                RecordingForegroundService.NotificationAction.RESUME -> resumeSession()
+                RecordingForegroundService.NotificationAction.CONTINUE -> confirmStillRecording()
+            }
+        }
+        sessionManager?.let { manager ->
+            sdkScope.launch { manager.stateFlow.collect { recordingService.onState(it) } }
+            // Forgotten End, low battery, mic taken by another app
+            val guard = RecordingGuard(
+                context = context.applicationContext,
+                scope = sdkScope,
+                state = manager.stateFlow,
+                pauseReason = manager.pauseReason,
+                pause = { reason -> manager.pause(reason) },
+                stop = { manager.stop() },
+                logger = logger,
+            )
+            recordingGuard = guard
+            guard.start()
+            sdkScope.launch {
+                guard.alert.collect {
+                    _recordingAlert.value = it
+                    recordingService.onAlert(it)
+                }
+            }
+        }
+
         // Deferred model download (non-blocking)
         if (config.enableAnalyser) {
             sdkScope.launch {
@@ -336,6 +391,7 @@ object EkaScribe {
             }
         }
         isInitialized.set(true)
+        initialized.value = true
         logger.info(TAG, "SDK initialized")
     }
 
@@ -390,6 +446,20 @@ object EkaScribe {
         )
     }
 
+    /**
+     * Put on the app's intent when End is tapped on the recording notification. The app should
+     * open its own End confirmation (End there needs the screen unlocked).
+     */
+    const val EXTRA_END_REQUESTED = "com.eka.scribesdk.extra.END_REQUESTED"
+
+    private const val UNFINISHED_MAX_AGE_MS = 24 * 60 * 60 * 1000L
+    private const val INIT_WAIT_MS = 15_000L
+
+    /** The screen the recording notification opens (and End opens, with [EXTRA_END_REQUESTED]). */
+    fun setNotificationIntent(intent: Intent) {
+        RecordingForegroundService.openAppIntent = intent
+    }
+
     fun pauseSession() {
         requireInitialized().pause()
     }
@@ -404,6 +474,62 @@ object EkaScribe {
 
     fun cancelSession() {
         requireInitialized().cancel()
+    }
+
+    /**
+     * What the doctor should know about the recording now (mic taken, "Still recording?", low
+     * battery), or null. The recording notification already shows it; show it in the app too.
+     */
+    fun getRecordingAlert(): StateFlow<RecordingAlert?> = _recordingAlert.asStateFlow()
+
+    /** "Continue" on "Still recording?": asks again after another stretch of recording. */
+    fun confirmStillRecording() {
+        recordingGuard?.answered()
+    }
+
+    /**
+     * Recordings that stopped without End (app killed, phone restarted, battery died) in the last
+     * day, with audio already saved. Offer to turn each into a note ([recoverSession]) or drop it
+     * ([discardUnfinishedSession]).
+     */
+    suspend fun getUnfinishedSessions(): List<UnfinishedSession> = withContext(Dispatchers.IO) {
+        // The app may ask while it's still initialising the SDK (at launch)
+        withTimeoutOrNull(INIT_WAIT_MS) { initialized.first { it } }
+        val dm = dataManager ?: return@withContext emptyList()
+        val active = sessionManager?.currentSessionId
+        val since = System.currentTimeMillis() - UNFINISHED_MAX_AGE_MS
+        dm.getAllSessions()
+            .filter {
+                it.sessionId != active && it.createdAt >= since &&
+                    it.state == SessionState.RECORDING.name &&
+                    it.uploadStage == TransactionStage.STOP.name
+            }
+            .mapNotNull { session ->
+                val chunks = dm.getAllChunks(session.sessionId)
+                if (chunks.isEmpty()) return@mapNotNull null
+                val patient = runCatching {
+                    Gson().fromJson(session.sessionMetadata, InitTransactionRequest::class.java)?.patientDetails?.name
+                }.getOrNull()
+                UnfinishedSession(
+                    sessionId = session.sessionId,
+                    createdAt = session.createdAt,
+                    recordedMs = chunks.sumOf { it.durationMs },
+                    patientName = patient?.takeIf { it.isNotBlank() },
+                )
+            }
+    }
+
+    /** Make the note from an unfinished session's saved audio: uploads what's left, ends and commits it. */
+    suspend fun recoverSession(sessionId: String): TransactionResult = withContext(Dispatchers.IO) {
+        requireDataManager().updateSessionState(sessionId, SessionState.PROCESSING.name)
+        retrySession(sessionId, forceCommit = true)
+    }
+
+    /** Drop an unfinished session: cancelled on the server, not offered again. */
+    suspend fun discardUnfinishedSession(sessionId: String) = withContext(Dispatchers.IO) {
+        requireDataManager().updateSessionState(sessionId, SessionState.ERROR.name)
+        runCatching { transactionManager?.cancelSession(sessionId) }
+        Unit
     }
 
     fun isRecording(): Boolean {
@@ -760,6 +886,9 @@ object EkaScribe {
     fun destroy() {
         sessionManager?.destroy()
         sessionManager = null
+        recordingGuard = null
+        _recordingAlert.value = null
+        initialized.value = false
         transactionManager = null
         scribeRepository = null
         apiService = null
