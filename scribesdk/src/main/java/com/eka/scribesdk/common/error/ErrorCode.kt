@@ -16,5 +16,8 @@ enum class ErrorCode {
     POLL_TIMEOUT,
     TRANSCRIPTION_FAILED,
     RETRY_EXHAUSTED,
+
+    /** The session ended before any audio was recorded, so there is nothing to transcribe. */
+    NO_AUDIO_CAPTURED,
     UNKNOWN
 }

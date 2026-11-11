@@ -584,6 +584,7 @@ data class ScribeError(
 | `POLL_TIMEOUT` | Result polling timed out |
 | `TRANSCRIPTION_FAILED` | Server-side transcription failed |
 | `RETRY_EXHAUSTED` | All retry attempts exhausted |
+| `NO_AUDIO_CAPTURED` | Session ended before any audio was recorded (cancelled on the server) |
 | `UNKNOWN` | Unexpected error |
 
 ### Retrying Failed Sessions

@@ -1,6 +1,10 @@
 package com.eka.scribesdk.data.remote.models.responses
 
 import com.google.gson.JsonObject
+import com.eka.scribesdk.api.models.SessionPatient
+import com.eka.scribesdk.api.models.SessionDetails
+import com.eka.scribesdk.api.models.SessionAttachment
+import com.eka.scribesdk.api.models.LinkedSession
 
 /**
  * document_id -> document_name from "List Session Documents"
@@ -43,6 +47,38 @@ internal fun JsonObject.toAudioQuality(): Double? {
     val quality = data.get("audio_matrix")?.takeIf { it.isJsonObject }?.asJsonObject?.get("quality")
         ?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isNumber } ?: return null
     return quality.asDouble
+}
+
+/**
+ * Patient and context (linked sessions, attachments) from "List Session Documents" / Get Session
+ * Details. Parsed leniently: missing or unexpected parts are left empty.
+ */
+internal fun JsonObject.toSessionDetails(sessionId: String): SessionDetails {
+    val data = get("data")?.takeIf { it.isJsonObject }?.asJsonObject ?: this
+    val patient = data.get("patient_details")?.takeIf { it.isJsonObject }?.asJsonObject?.let { p ->
+        val oid = p.primitiveString("oid")?.takeIf { it.isNotBlank() }
+        val name = (p.primitiveString("name") ?: p.primitiveString("username"))?.takeIf { it.isNotBlank() }
+        if (oid == null && name == null) null else SessionPatient(oid = oid, name = name)
+    }
+    val context = data.get("context")?.takeIf { it.isJsonObject }?.asJsonObject
+    val linked = context?.get("past_sessions")?.takeIf { it.isJsonArray }?.asJsonArray?.mapNotNull { element ->
+        when {
+            // {"session_id": ..., "date_epoch": ...} or a bare id
+            element.isJsonObject -> element.asJsonObject.let { o ->
+                val id = o.primitiveString("session_id") ?: o.primitiveString("id") ?: return@mapNotNull null
+                LinkedSession(id, o.get("date_epoch")?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isNumber }?.asLong)
+            }
+
+            element.isJsonPrimitive -> LinkedSession(element.asString, null)
+            else -> null
+        }
+    }.orEmpty()
+    val attachments = context?.get("attachments")?.takeIf { it.isJsonArray }?.asJsonArray?.mapNotNull { element ->
+        val o = element.takeIf { it.isJsonObject }?.asJsonObject ?: return@mapNotNull null
+        val id = o.primitiveString("id") ?: return@mapNotNull null
+        SessionAttachment(documentId = id, patientOid = o.primitiveString("patient_oid") ?: o.primitiveString("patient_id"))
+    }.orEmpty()
+    return SessionDetails(sessionId = sessionId, patient = patient, linkedSessions = linked, attachments = attachments)
 }
 
 private fun JsonObject.primitiveString(key: String): String? =

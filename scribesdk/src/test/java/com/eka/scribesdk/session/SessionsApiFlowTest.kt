@@ -2,6 +2,7 @@ package com.eka.scribesdk.session
 
 import com.eka.scribesdk.api.models.OutputTemplate
 import com.eka.scribesdk.api.models.PatientDetail
+import com.eka.scribesdk.api.models.PublishState
 import com.eka.scribesdk.api.models.SessionConfig
 import com.eka.scribesdk.api.models.SessionEvent
 import com.eka.scribesdk.api.models.SessionEventName
@@ -42,6 +43,7 @@ import okhttp3.Request
 import okhttp3.RequestBody
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -89,6 +91,8 @@ internal class SessionsApiFlowTest {
         val getResponses = ArrayDeque<NetworkResponse<GetSessionResponse, SessionsErrorResponse>>()
         var getCalls = 0
         val upsertBodies = mutableListOf<JsonObject>()
+        val tiptapQueries = mutableListOf<String>()
+        val tiptapBodies = mutableListOf<JsonObject>()
         var upsertResponse: NetworkResponse<DocumentEnvelopeResponse, SessionsErrorResponse>? = null
         /** null = the call throws, like a network failure. */
         var documentsResponse: NetworkResponse<JsonObject, SessionsErrorResponse>? = null
@@ -113,6 +117,9 @@ internal class SessionsApiFlowTest {
         override suspend fun upsertDocument(request: JsonObject) =
             upsertResponse!!.also { upsertBodies += request }
 
+        override suspend fun saveTiptapDocument(tiptapJson: String, request: JsonObject) =
+            upsertResponse!!.also { tiptapQueries += tiptapJson; tiptapBodies += request }
+
         override suspend fun getSessionAudio(sessionId: String) =
             audioResponse!!.also { audioCalls++ }
 
@@ -130,6 +137,12 @@ internal class SessionsApiFlowTest {
 
         override suspend fun listSessionDocuments(sessionId: String) =
             documentsResponse ?: error("documents call failed")
+
+        var publishResponse: NetworkResponse<JsonObject, SessionsErrorResponse>? = null
+        val publishCalls = mutableListOf<Pair<String, String>>()
+
+        override suspend fun publishDocument(sessionId: String, documentId: String, request: JsonObject) =
+            publishResponse!!.also { publishCalls += sessionId to documentId }
 
         override suspend fun getSession(sessionId: String): NetworkResponse<GetSessionResponse, SessionsErrorResponse> {
             getCalls++
@@ -1042,6 +1055,46 @@ internal class SessionsApiFlowTest {
     }
 
     @Test
+    fun `saveContextText creates the context document and saves the encoded text`() = runTest {
+        val api = FakeSessionsApi().apply {
+            upsertResponse = netSuccess(
+                DocumentEnvelopeResponse(
+                    "success",
+                    DocumentEnvelopeResponse.DocumentData("ctx-new", SESSION_ID, "success", "https://s3.example/put")
+                )
+            )
+        }
+        val puts = mutableListOf<String>()
+        val writer = SessionsDocumentWriter(api, NoOpLogger()) { _, body -> puts += body; true }
+
+        assertTrue(writer.saveContextText(SESSION_ID, "Known diabetic", codec = JvmCodec).isSuccess)
+
+        assertEquals("context", api.upsertBodies.single { it.has("type") }["type"].asString)
+        assertEquals(listOf(JvmCodec.encode("Known diabetic")), puts)
+        assertTrue(api.tiptapBodies.isEmpty())
+    }
+
+    @Test
+    fun `saveContextText also stores the formatted copy the website's context editor opens`() = runTest {
+        val api = FakeSessionsApi().apply {
+            upsertResponse = netSuccess(
+                DocumentEnvelopeResponse(
+                    "success",
+                    DocumentEnvelopeResponse.DocumentData("ctx-new", SESSION_ID, "success", "https://s3.example/put")
+                )
+            )
+        }
+        val writer = SessionsDocumentWriter(api, NoOpLogger()) { _, _ -> true }
+        val doc = """{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Known diabetic"}]}]}"""
+
+        assertTrue(writer.saveContextText(SESSION_ID, "Known diabetic", doc, JvmCodec).isSuccess)
+
+        val body = api.tiptapBodies.single()
+        assertEquals("ctx-new", body["document_id"].asString)
+        assertEquals("doc", body["tiptap_json"].asJsonObject["type"].asString)
+    }
+
+    @Test
     fun `document writer unpublishes a note published to the EMR before saving`() = runTest {
         val api = FakeSessionsApi().apply { upsertResponse = publishedDocOk() }
         val puts = mutableListOf<String>()
@@ -1056,6 +1109,25 @@ internal class SessionsApiFlowTest {
         assertEquals("unpublished", webhook["status"].asString)
         assertEquals("doc-1", api.upsertBodies[1]["document_id"].asString)
         assertEquals(listOf("https://s3.example/put"), puts)
+    }
+
+    @Test
+    fun `document writer stores the formatted copy the website opens`() = runTest {
+        val api = FakeSessionsApi().apply { upsertResponse = uploadUrlOk() }
+        val writer = SessionsDocumentWriter(api, NoOpLogger()) { _, _ -> true }
+        val doc = """{"type":"doc","content":[]}"""
+
+        val result = writer.save(
+            SESSION_ID,
+            listOf(SessionData(templateId = "t1", documentId = "doc-1", data = "SGVsbG8=", tiptapJson = doc))
+        )
+
+        assertTrue(result.isSuccess)
+        assertEquals(listOf("true"), api.tiptapQueries)
+        val body = api.tiptapBodies.single()
+        assertEquals(SESSION_ID, body["session_id"].asString)
+        assertEquals("doc-1", body["document_id"].asString)
+        assertEquals("doc", body["tiptap_json"].asJsonObject["type"].asString)
     }
 
     @Test
@@ -1137,5 +1209,156 @@ internal class SessionsApiFlowTest {
         val patch = api.patchBodies.single()
         assertEquals("cancelled", patch["user_status"].asString)
         assertEquals("cancelled", patch["processing_status"].asString)
+    }
+
+    // ---- updatePatientDetails ----
+
+    private val newPatient = PatientDetail(age = 30, biologicalSex = "M", name = "Rahul", patientId = "oid-9", visitId = "v-9")
+
+    @Test
+    fun `updatePatientDetails patches patient_details once the session exists`() = runTest {
+        val api = FakeSessionsApi().apply { patchResponse = patchOk() }
+        val dm = mockk<DataManager>(relaxed = true)
+        coEvery { dm.getSession(SESSION_ID) } returns sessionsEntity(TransactionStage.STOP)
+
+        val result = flow(api, dm).updatePatientDetails(SESSION_ID, newPatient)
+
+        assertTrue(result is TransactionResult.Success)
+        val patch = api.patchBodies.single()
+        val patient = patch["patient_details"].asJsonObject
+        assertEquals("oid-9", patient["oid"].asString)
+        assertEquals("Rahul", patient["name"].asString)
+        assertEquals("30", patient["age"].asString)
+        assertEquals("M", patient["gender"].asString)
+        assertEquals("v-9", patch["additional_data"].asJsonObject["visit_id"].asString)
+    }
+
+    @Test
+    fun `updatePatientDetails before create is sent by createSession instead`() = runTest {
+        val api = FakeSessionsApi().apply { createResponse = createdOk(); patchResponse = patchOk() }
+        val dm = mockk<DataManager>(relaxed = true)
+        coEvery { dm.getSession(SESSION_ID) } returns sessionsEntity(TransactionStage.INIT)
+        val flow = flow(api, dm)
+
+        assertTrue(flow.updatePatientDetails(SESSION_ID, newPatient) is TransactionResult.Success)
+        assertTrue(api.patchBodies.isEmpty())
+
+        flow.createSession(SESSION_ID, config())
+
+        assertEquals("oid-9", api.createBodies.single()["patient_details"].asJsonObject["oid"].asString)
+        // The mode PATCH after create carries it too, for an update made while create was in flight
+        assertEquals("oid-9", api.patchBodies.single()["patient_details"].asJsonObject["oid"].asString)
+    }
+
+    @Test
+    fun `updatePatientDetails returns the server error`() = runTest {
+        val api = FakeSessionsApi().apply { patchResponse = netServerError("bad", 400) }
+        val dm = mockk<DataManager>(relaxed = true)
+        coEvery { dm.getSession(SESSION_ID) } returns sessionsEntity(TransactionStage.COMMIT)
+
+        assertTrue(flow(api, dm).updatePatientDetails(SESSION_ID, newPatient) is TransactionResult.Error)
+    }
+
+    @Test
+    fun `updatePatientDetails with an empty patient clears it`() = runTest {
+        val api = FakeSessionsApi().apply { patchResponse = patchOk() }
+        val dm = mockk<DataManager>(relaxed = true)
+
+        assertTrue(flow(api, dm).updatePatientDetails(SESSION_ID, PatientDetail()) is TransactionResult.Success)
+        val body = api.patchBodies.single()
+        assertEquals(0, body.getAsJsonObject("patient_details").size())
+        assertFalse(body.has("additional_data"))
+    }
+
+    @Test
+    fun `mode patch has no patient_details when none was set`() = runTest {
+        val api = FakeSessionsApi().apply { createResponse = createdOk(); patchResponse = patchOk() }
+        val dm = mockk<DataManager>(relaxed = true)
+
+        flow(api, dm).createSession(SESSION_ID, config())
+
+        assertNull(api.patchBodies.single()["patient_details"])
+    }
+
+    // ---- publish ----
+
+    private fun docWithPublish(publishJson: String?) = netSuccess<DocumentEnvelopeResponse, SessionsErrorResponse>(
+        DocumentEnvelopeResponse(
+            "success",
+            DocumentEnvelopeResponse.DocumentData(
+                "doc-1", SESSION_ID, "success", null,
+                publish = publishJson?.let { JsonParser.parseString(it).asJsonObject }
+            )
+        )
+    )
+
+    private fun writer(api: FakeSessionsApi) = SessionsDocumentWriter(api, NoOpLogger()) { _, _ -> true }
+
+    @Test
+    fun `publish calls the publish endpoint and reads the state from the response`() = runTest {
+        val api = FakeSessionsApi().apply {
+            publishResponse = netSuccess(
+                JsonParser.parseString(
+                    """{"data": {"publish": {"emr_webhook": {"status": "success", "updated_at": 1762165140}}}}"""
+                ).asJsonObject
+            )
+        }
+
+        val status = writer(api).publish(SESSION_ID, "doc-1").getOrThrow()
+
+        assertEquals(listOf(SESSION_ID to "doc-1"), api.publishCalls)
+        assertEquals(PublishState.PUBLISHED, status.state)
+        assertEquals(1762165140_000L, status.updatedAtMs)
+        assertTrue(api.getDocumentCalls.isEmpty())
+    }
+
+    @Test
+    fun `publish reads the state back when the response has none`() = runTest {
+        val api = FakeSessionsApi().apply {
+            publishResponse = netSuccess(JsonObject())
+            getDocumentResponse = docWithPublish("""{"emr_webhook": {"status": "success", "updated_at": 1762165140123}}""")
+        }
+
+        val status = writer(api).publish(SESSION_ID, "doc-1").getOrThrow()
+
+        assertEquals(listOf("doc-1"), api.getDocumentCalls)
+        assertEquals(PublishState.PUBLISHED, status.state)
+        assertEquals(1762165140123L, status.updatedAtMs)
+    }
+
+    @Test
+    fun `accepted publish that is not confirmed yet is in progress`() = runTest {
+        val api = FakeSessionsApi().apply {
+            publishResponse = netSuccess(JsonObject())
+            getDocumentResponse = docWithPublish(null)
+        }
+
+        assertEquals(PublishState.IN_PROGRESS, writer(api).publish(SESSION_ID, "doc-1").getOrThrow().state)
+    }
+
+    @Test
+    fun `publish server error is a failure`() = runTest {
+        val api = FakeSessionsApi().apply { publishResponse = netServerError("EMR not configured", 400) }
+
+        val result = writer(api).publish(SESSION_ID, "doc-1")
+
+        assertTrue(result.isFailure)
+        assertTrue(api.getDocumentCalls.isEmpty())
+    }
+
+    @Test
+    fun `publishStatus maps the emr webhook states`() = runTest {
+        val api = FakeSessionsApi()
+        val cases = mapOf(
+            null to PublishState.NOT_PUBLISHED,
+            """{"emr_webhook": {"status": "unpublished", "updated_at": 1}}""" to PublishState.NOT_PUBLISHED,
+            """{"emr_webhook": {"status": "success"}}""" to PublishState.PUBLISHED,
+            """{"emr_webhook": {"status": "in_progress"}}""" to PublishState.IN_PROGRESS,
+            """{"emr_webhook": {"status": "failed"}}""" to PublishState.FAILED,
+        )
+        cases.forEach { (json, expected) ->
+            api.getDocumentResponse = docWithPublish(json)
+            assertEquals(json, expected, writer(api).publishStatus("doc-1").getOrThrow().state)
+        }
     }
 }

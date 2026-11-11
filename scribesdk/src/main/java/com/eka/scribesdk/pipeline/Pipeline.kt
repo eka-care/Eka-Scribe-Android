@@ -39,6 +39,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -85,6 +88,10 @@ internal class Pipeline(
     private val _audioFocusFlow = MutableSharedFlow<Boolean>(replay = 1, extraBufferCapacity = 4)
     val audioFocusFlow: Flow<Boolean> = _audioFocusFlow.asSharedFlow()
 
+    /** True while another app holds the mic and we only record silence. */
+    private val _micSilenced = MutableStateFlow(false)
+    val micSilenced: StateFlow<Boolean> = _micSilenced.asStateFlow()
+
     val audioQualityFlow: Flow<AudioQualityMetrics>?
         get() = analyser.qualityFlow.map { it.toMetrics() }
 
@@ -101,6 +108,7 @@ internal class Pipeline(
         recorder.setAudioFocusCallback { hasFocus ->
             _audioFocusFlow.tryEmit(hasFocus)
         }
+        recorder.setMicSilencedCallback { _micSilenced.value = it }
 
         recorder.start()
     }

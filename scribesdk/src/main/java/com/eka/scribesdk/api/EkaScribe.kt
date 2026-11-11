@@ -1,11 +1,19 @@
 package com.eka.scribesdk.api
 
+import com.eka.scribesdk.recorder.RecordingForegroundService
+import com.eka.scribesdk.recorder.RecordingServiceController
 import android.content.Context
+import android.content.Intent
 import com.eka.networking.client.EkaNetwork
 import com.eka.networking.client.NetworkConfig
 import com.eka.scribesdk.BuildConfig
 import com.eka.scribesdk.analyser.AnalyserState
 import com.eka.scribesdk.analyser.ModelDownloader
+import com.eka.scribesdk.api.models.PatientDetail
+import com.eka.scribesdk.api.models.PublishState
+import com.eka.scribesdk.api.models.PublishStatus
+import com.eka.scribesdk.api.models.SessionAttachment
+import com.eka.scribesdk.api.models.SessionDetails
 import com.eka.scribesdk.api.models.SessionAudioLink
 import com.eka.scribesdk.api.models.SessionAudioUnavailableException
 import com.eka.scribesdk.api.models.AudioQualityMetrics
@@ -17,6 +25,10 @@ import com.eka.scribesdk.api.models.SessionConfig
 import com.eka.scribesdk.api.models.SessionData
 import com.eka.scribesdk.api.models.SessionResult
 import com.eka.scribesdk.api.models.SessionState
+import com.eka.scribesdk.data.local.db.entity.TransactionStage
+import com.eka.scribesdk.session.RecordingGuard
+import com.eka.scribesdk.api.models.UnfinishedSession
+import com.eka.scribesdk.api.models.RecordingAlert
 import com.eka.scribesdk.api.models.TemplateItem
 import com.eka.scribesdk.api.models.UploadStage
 import com.eka.scribesdk.api.models.UserConfigs
@@ -69,6 +81,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.flow.first
 import java.io.File
 import java.io.OutputStream
 import java.util.concurrent.atomic.AtomicBoolean
@@ -98,6 +112,10 @@ object EkaScribe {
     private var config: EkaScribeConfig? = null
     private var audioFileProcessor: AudioFileProcessor? = null
     private var sessionAudioDownloader: SessionAudioDownloader? = null
+    private var recordingGuard: RecordingGuard? = null
+    /** Outlives init/destroy so the app can collect it before the SDK is ready. */
+    private val _recordingAlert = MutableStateFlow<RecordingAlert?>(null)
+    private val initialized = MutableStateFlow(false)
     private var logger: Logger = NoOpLogger()
 
     private var isInitialized = AtomicBoolean(false)
@@ -299,7 +317,8 @@ object EkaScribe {
                 }
             ),
             sessionsDocumentWriter = SessionsDocumentWriter(apiService = sessionsApiService, logger = logger),
-            sessionsTemplateProcessor = SessionsTemplateProcessor(apiService = sessionsApiService, logger = logger)
+            sessionsTemplateProcessor = SessionsTemplateProcessor(apiService = sessionsApiService, logger = logger),
+            sessionsApiService = sessionsApiService
         )
 
         sessionManager = SessionManager(
@@ -312,6 +331,48 @@ object EkaScribe {
             logger = logger
         ).also {
             it.setCallback(callback)
+        }
+
+        // Microphone foreground service while recording / paused, so the mic keeps working with
+        // the app in the background or the screen locked (Android silences it otherwise)
+        val recordingService = RecordingServiceController(
+            context = context.applicationContext,
+            logger = logger,
+            sessionLabel = {
+                sessionManager?.currentSessionConfig?.let { config ->
+                    listOfNotNull(
+                        config.patientDetails?.name?.takeIf { it.isNotBlank() } ?: "No patient",
+                        config.outputTemplates?.firstOrNull()?.templateName?.takeIf { it.isNotBlank() },
+                    ).joinToString(" · ")
+                }
+            },
+        ) { action ->
+            when (action) {
+                RecordingForegroundService.NotificationAction.PAUSE -> pauseSession()
+                RecordingForegroundService.NotificationAction.RESUME -> resumeSession()
+                RecordingForegroundService.NotificationAction.CONTINUE -> confirmStillRecording()
+            }
+        }
+        sessionManager?.let { manager ->
+            sdkScope.launch { manager.stateFlow.collect { recordingService.onState(it) } }
+            // Forgotten End, low battery, mic taken by another app
+            val guard = RecordingGuard(
+                context = context.applicationContext,
+                scope = sdkScope,
+                state = manager.stateFlow,
+                pauseReason = manager.pauseReason,
+                pause = { reason -> manager.pause(reason) },
+                stop = { manager.stop() },
+                logger = logger,
+            )
+            recordingGuard = guard
+            guard.start()
+            sdkScope.launch {
+                guard.alert.collect {
+                    _recordingAlert.value = it
+                    recordingService.onAlert(it)
+                }
+            }
         }
 
         // Deferred model download (non-blocking)
@@ -330,6 +391,7 @@ object EkaScribe {
             }
         }
         isInitialized.set(true)
+        initialized.value = true
         logger.info(TAG, "SDK initialized")
     }
 
@@ -384,6 +446,20 @@ object EkaScribe {
         )
     }
 
+    /**
+     * Put on the app's intent when End is tapped on the recording notification. The app should
+     * open its own End confirmation (End there needs the screen unlocked).
+     */
+    const val EXTRA_END_REQUESTED = "com.eka.scribesdk.extra.END_REQUESTED"
+
+    private const val UNFINISHED_MAX_AGE_MS = 24 * 60 * 60 * 1000L
+    private const val INIT_WAIT_MS = 15_000L
+
+    /** The screen the recording notification opens (and End opens, with [EXTRA_END_REQUESTED]). */
+    fun setNotificationIntent(intent: Intent) {
+        RecordingForegroundService.openAppIntent = intent
+    }
+
     fun pauseSession() {
         requireInitialized().pause()
     }
@@ -398,6 +474,62 @@ object EkaScribe {
 
     fun cancelSession() {
         requireInitialized().cancel()
+    }
+
+    /**
+     * What the doctor should know about the recording now (mic taken, "Still recording?", low
+     * battery), or null. The recording notification already shows it; show it in the app too.
+     */
+    fun getRecordingAlert(): StateFlow<RecordingAlert?> = _recordingAlert.asStateFlow()
+
+    /** "Continue" on "Still recording?": asks again after another stretch of recording. */
+    fun confirmStillRecording() {
+        recordingGuard?.answered()
+    }
+
+    /**
+     * Recordings that stopped without End (app killed, phone restarted, battery died) in the last
+     * day, with audio already saved. Offer to turn each into a note ([recoverSession]) or drop it
+     * ([discardUnfinishedSession]).
+     */
+    suspend fun getUnfinishedSessions(): List<UnfinishedSession> = withContext(Dispatchers.IO) {
+        // The app may ask while it's still initialising the SDK (at launch)
+        withTimeoutOrNull(INIT_WAIT_MS) { initialized.first { it } }
+        val dm = dataManager ?: return@withContext emptyList()
+        val active = sessionManager?.currentSessionId
+        val since = System.currentTimeMillis() - UNFINISHED_MAX_AGE_MS
+        dm.getAllSessions()
+            .filter {
+                it.sessionId != active && it.createdAt >= since &&
+                    it.state == SessionState.RECORDING.name &&
+                    it.uploadStage == TransactionStage.STOP.name
+            }
+            .mapNotNull { session ->
+                val chunks = dm.getAllChunks(session.sessionId)
+                if (chunks.isEmpty()) return@mapNotNull null
+                val patient = runCatching {
+                    Gson().fromJson(session.sessionMetadata, InitTransactionRequest::class.java)?.patientDetails?.name
+                }.getOrNull()
+                UnfinishedSession(
+                    sessionId = session.sessionId,
+                    createdAt = session.createdAt,
+                    recordedMs = chunks.sumOf { it.durationMs },
+                    patientName = patient?.takeIf { it.isNotBlank() },
+                )
+            }
+    }
+
+    /** Make the note from an unfinished session's saved audio: uploads what's left, ends and commits it. */
+    suspend fun recoverSession(sessionId: String): TransactionResult = withContext(Dispatchers.IO) {
+        requireDataManager().updateSessionState(sessionId, SessionState.PROCESSING.name)
+        retrySession(sessionId, forceCommit = true)
+    }
+
+    /** Drop an unfinished session: cancelled on the server, not offered again. */
+    suspend fun discardUnfinishedSession(sessionId: String) = withContext(Dispatchers.IO) {
+        requireDataManager().updateSessionState(sessionId, SessionState.ERROR.name)
+        runCatching { transactionManager?.cancelSession(sessionId) }
+        Unit
     }
 
     fun isRecording(): Boolean {
@@ -548,6 +680,15 @@ object EkaScribe {
         requireRepository().updateSessionResult(sessionId, updatedData)
     }
 
+    /**
+     * The formatted note the website opens, or null when the document has only markdown.
+     * A failure means the copy could not be read, so a later save must not replace it.
+     */
+    suspend fun getNoteFormatting(sessionId: String, documentId: String): Result<String?> =
+        withContext(Dispatchers.IO) {
+            requireRepository().getNoteFormatting(sessionId, documentId)
+        }
+
     // ---- Template APIs ----
 
     /**
@@ -588,11 +729,147 @@ object EkaScribe {
     /**
      * Get session history from the server.
      * @param count Optional limit on number of results
+     * @param patientOid Optional: only this patient's sessions (e.g. to pick past sessions to link)
      */
-    suspend fun getHistory(count: Int? = null): List<ScribeHistoryItem> =
+    suspend fun getHistory(count: Int? = null, patientOid: String? = null): List<ScribeHistoryItem> =
         withContext(Dispatchers.IO) {
-            requireRepository().getHistory(count)
+            requireRepository().getHistory(count, patientOid)
         }
+
+    // ---- Session context (linked past sessions / attachments) ----
+
+    /**
+     * Adds context the AI uses when generating this session's output: past sessions of the same
+     * patient ([pastSessionIds], their session ids) and/or medical-records documents
+     * ([attachments]). Same as addSessionContext in the web SDK. Nothing to add is a no-op success.
+     */
+    suspend fun addSessionContext(
+        sessionId: String,
+        pastSessionIds: List<String> = emptyList(),
+        attachments: List<SessionAttachment> = emptyList(),
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        requireRepository().updateSessionContext(add = true, sessionId, pastSessionIds, attachments)
+    }
+
+    /** Removes linked past sessions and/or attachments added with [addSessionContext]. */
+    suspend fun removeSessionContext(
+        sessionId: String,
+        pastSessionIds: List<String> = emptyList(),
+        attachments: List<SessionAttachment> = emptyList(),
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        requireRepository().updateSessionContext(add = false, sessionId, pastSessionIds, attachments)
+    }
+
+    // ---- Publish ----
+
+    /**
+     * Publishes a note to the EMR (the Publish button). [documentId] is the note's
+     * [SessionData.documentId]. Same as publishDocument in the web SDK.
+     *
+     * Returns the new state: [PublishState.PUBLISHED], or [PublishState.IN_PROGRESS] when the EMR
+     * has not confirmed yet (refresh with [getPublishStatus]). Editing the note afterwards with
+     * [updateSessionResult] unpublishes it, so the doctor publishes the edited version again.
+     * Sessions API sessions only.
+     */
+    suspend fun publishNote(sessionId: String, documentId: String): Result<PublishStatus> =
+        withContext(Dispatchers.IO) {
+            requireRepository().publishNote(sessionId, documentId)
+        }
+
+    /**
+     * A note's publish state and when it last changed ([PublishStatus.updatedAtMs], the "Last done"
+     * time). Sessions API sessions only.
+     */
+    suspend fun getPublishStatus(sessionId: String, documentId: String): Result<PublishStatus> =
+        withContext(Dispatchers.IO) {
+            requireRepository().getPublishStatus(sessionId, documentId)
+        }
+
+    // ---- Session details ----
+
+    /**
+     * The session's patient and the context added to it (linked past sessions, attachments), as the
+     * server has them now. Use it to show a session opened later, e.g. from history.
+     */
+    suspend fun getSessionDetails(sessionId: String): Result<SessionDetails> = withContext(Dispatchers.IO) {
+        requireRepository().getSessionDetails(sessionId)
+    }
+
+    // ---- Context text ----
+
+    /**
+     * Saves the doctor's free-text context for a session (the "Context" box: history, current
+     * medicines, what to focus on). The AI uses it when it generates the notes, so save it before
+     * [stopSession]. Each call replaces the previous text. Same as the web's context document.
+     *
+     * The session must exist on the server (fails right after [startSession] while offline;
+     * retry later). Sessions API sessions only.
+     */
+    suspend fun setSessionContextText(
+        sessionId: String,
+        text: String,
+        /** The editor's TipTap document, which the website's context editor opens; null keeps its copy. */
+        tiptapJson: String? = null,
+    ): Result<Unit> =
+        withContext(Dispatchers.IO) {
+            requireRepository().setSessionContextText(sessionId, text, tiptapJson)
+        }
+
+    // ---- Patient / delete ----
+
+    /**
+     * Sets or replaces the patient on a session, e.g. when the doctor started recording without
+     * one and picks a patient during or after the recording. Can be called while recording.
+     * Same as sending patient_details in the web SDK's session PATCH.
+     *
+     * Sessions API sessions only; legacy (transaction API) sessions fail with an error.
+     */
+    suspend fun updateSessionPatient(sessionId: String, patient: PatientDetail): Result<Unit> =
+        withContext(Dispatchers.IO) {
+            val txnManager = transactionManager
+                ?: throw ScribeException(
+                    ErrorCode.INVALID_CONFIG,
+                    "EkaScribe SDK not initialized. Call EkaScribe.init() first."
+                )
+            when (val result = txnManager.updatePatientDetails(sessionId, patient)) {
+                is TransactionResult.Success -> Result.success(Unit)
+                is TransactionResult.Error -> Result.failure(Exception(result.message))
+            }
+        }
+
+    /**
+     * Removes the patient from a session (PATCH patient_details: {}), as the web SDK does.
+     * Sessions API sessions only.
+     */
+    suspend fun removeSessionPatient(sessionId: String): Result<Unit> =
+        updateSessionPatient(sessionId, PatientDetail())
+
+    /**
+     * Deletes a session: its recording and notes on the server, and any audio left on this device.
+     * Cannot be undone. Same as deleteSession in the web SDK.
+     *
+     * Fails for the session that is being recorded right now; use [cancelSession] to discard it.
+     */
+    suspend fun deleteSession(sessionId: String): Result<Unit> = withContext(Dispatchers.IO) {
+        val manager = sessionManager
+        val isRecordingThis = manager != null && manager.currentSessionId == sessionId &&
+            manager.currentState in setOf(SessionState.STARTING, SessionState.RECORDING, SessionState.PAUSED)
+        if (isRecordingThis) {
+            return@withContext Result.failure(
+                ScribeException(
+                    ErrorCode.INVALID_STATE_TRANSITION,
+                    "Session $sessionId is still recording. Call cancelSession() to discard it."
+                )
+            )
+        }
+        requireRepository().deleteSession(sessionId).onSuccess {
+            try {
+                transactionManager?.deleteLocalSession(sessionId)
+            } catch (e: Exception) {
+                logger.warn(TAG, "Deleted on server, local cleanup failed for $sessionId", e)
+            }
+        }
+    }
 
     // ---- Pre-recorded audio file processing ----
 
@@ -623,6 +900,9 @@ object EkaScribe {
     fun destroy() {
         sessionManager?.destroy()
         sessionManager = null
+        recordingGuard = null
+        _recordingAlert.value = null
+        initialized.value = false
         transactionManager = null
         scribeRepository = null
         apiService = null
