@@ -34,6 +34,20 @@ internal class RecordingForegroundService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    /** The foreground type we run as now; 0 while not in the foreground yet. */
+    private var foregroundType = 0
+
+    /**
+     * Android 15+: a dataSync service gets about 6 hours a day. When that runs out Android calls
+     * this and kills the app if the service is still running, so stop. The note keeps being
+     * generated in the app; only the "keep alive in the background" guarantee is gone.
+     */
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        foregroundType = 0
+        stopSelf()
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // A notification button: hand it to the SDK. The state change then updates or stops us.
         NotificationAction.entries.firstOrNull { it.intentAction == intent?.action }?.let { action ->
@@ -61,17 +75,35 @@ internal class RecordingForegroundService : Service() {
      */
     private fun goForeground(notification: Notification, microphone: Boolean) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-            runCatching { startForeground(NOTIFICATION_ID, notification) }.onFailure { stopSelf() }
+            if (foregroundType != 0) return updateNotification(notification)
+            runCatching { startForeground(NOTIFICATION_ID, notification) }
+                .onSuccess { foregroundType = -1 }
+                .onFailure { stopSelf() }
             return
         }
+        val wanted = if (microphone) ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+        // Same type: only the text changed. Update it without asking Android to start us again,
+        // which it can refuse while the app is in the background.
+        if (foregroundType == wanted) return updateNotification(notification)
         val types = buildList {
             if (microphone) add(ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
             add(ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
         }
         for (type in types) {
-            if (runCatching { startForeground(NOTIFICATION_ID, notification, type) }.isSuccess) return
+            if (runCatching { startForeground(NOTIFICATION_ID, notification, type) }.isSuccess) {
+                foregroundType = type
+                return
+            }
         }
-        stopSelf()
+        // Refused (e.g. the daily dataSync time is used up). Already in the foreground: carry on
+        // with the type we have. Not yet: stopping is only safe because the controller starts us
+        // with startForegroundService just once, when the recording starts in the app.
+        if (foregroundType != 0) updateNotification(notification) else stopSelf()
+    }
+
+    @android.annotation.SuppressLint("MissingPermission")
+    private fun updateNotification(notification: Notification) {
+        runCatching { androidx.core.app.NotificationManagerCompat.from(this).notify(NOTIFICATION_ID, notification) }
     }
 
     private fun contentIntent(): PendingIntent? {
@@ -278,6 +310,8 @@ internal class RecordingForegroundService : Service() {
             label: String?,
             alert: RecordingAlert? = null,
             alertNow: Boolean = false,
+            /** Already started: a plain start, which can't crash the app if Android declines it. */
+            running: Boolean = false,
         ) {
             val intent = Intent(context, RecordingForegroundService::class.java)
                 .putExtra(EXTRA_PHASE, phase.name)
@@ -285,7 +319,18 @@ internal class RecordingForegroundService : Service() {
                 .putExtra(EXTRA_LABEL, label)
                 .putExtra(EXTRA_ALERT, alert?.name)
                 .putExtra(EXTRA_ALERT_NEW, alertNow)
-            ContextCompat.startForegroundService(context, intent)
+            if (!running) {
+                ContextCompat.startForegroundService(context, intent)
+                return
+            }
+            // A plain start of the running service is allowed from the background (the app has a
+            // foreground service). startForegroundService would oblige it to call startForeground
+            // again, and a refusal there crashes the app.
+            try {
+                context.startService(intent)
+            } catch (e: IllegalStateException) {
+                ContextCompat.startForegroundService(context, intent)
+            }
         }
 
         internal fun hide(context: Context) {
@@ -327,8 +372,8 @@ internal class RecordingServiceController(
         }.onFailure { logger.warn(TAG, "Recording alert: ${it.message}") }
     }
 
-    private fun show(phase: RecordingForegroundService.Phase, alertNow: Boolean = false) {
-        RecordingForegroundService.show(context, phase, recordingSince, null, alert, alertNow)
+    private fun show(phase: RecordingForegroundService.Phase, alertNow: Boolean = false, firstStart: Boolean = false) {
+        RecordingForegroundService.show(context, phase, recordingSince, null, alert, alertNow, running = !firstStart)
     }
 
     fun onState(state: SessionState) {
@@ -337,13 +382,14 @@ internal class RecordingServiceController(
         try {
             when (state) {
                 SessionState.RECORDING -> {
+                    val firstStart = !running
                     when {
-                        !running -> recordingSince = now
+                        firstStart -> recordingSince = now
                         pausedAt != 0L -> recordingSince += now - pausedAt
                     }
                     pausedAt = 0L
                     running = true
-                    show(RecordingForegroundService.Phase.RECORDING)
+                    show(RecordingForegroundService.Phase.RECORDING, firstStart = firstStart)
                 }
                 SessionState.PAUSED -> {
                     if (!running) return
@@ -352,7 +398,9 @@ internal class RecordingServiceController(
                 }
                 // Already in the foreground from recording: carry on through upload and processing
                 SessionState.STOPPING, SessionState.PROCESSING -> if (running) {
-                    RecordingForegroundService.show(context, RecordingForegroundService.Phase.PROCESSING, recordingSince, sessionLabel())
+                    RecordingForegroundService.show(
+                        context, RecordingForegroundService.Phase.PROCESSING, recordingSince, sessionLabel(), running = true
+                    )
                 }
                 else -> if (running) {
                     running = false

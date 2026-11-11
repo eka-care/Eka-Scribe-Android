@@ -680,6 +680,15 @@ object EkaScribe {
         requireRepository().updateSessionResult(sessionId, updatedData)
     }
 
+    /**
+     * The formatted note the website opens, or null when the document has only markdown.
+     * A failure means the copy could not be read, so a later save must not replace it.
+     */
+    suspend fun getNoteFormatting(sessionId: String, documentId: String): Result<String?> =
+        withContext(Dispatchers.IO) {
+            requireRepository().getNoteFormatting(sessionId, documentId)
+        }
+
     // ---- Template APIs ----
 
     /**
@@ -796,9 +805,14 @@ object EkaScribe {
      * The session must exist on the server (fails right after [startSession] while offline;
      * retry later). Sessions API sessions only.
      */
-    suspend fun setSessionContextText(sessionId: String, text: String): Result<Unit> =
+    suspend fun setSessionContextText(
+        sessionId: String,
+        text: String,
+        /** The editor's TipTap document, which the website's context editor opens; null keeps its copy. */
+        tiptapJson: String? = null,
+    ): Result<Unit> =
         withContext(Dispatchers.IO) {
-            requireRepository().setSessionContextText(sessionId, text)
+            requireRepository().setSessionContextText(sessionId, text, tiptapJson)
         }
 
     // ---- Patient / delete ----

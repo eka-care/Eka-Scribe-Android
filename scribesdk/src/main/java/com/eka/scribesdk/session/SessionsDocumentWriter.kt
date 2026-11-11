@@ -15,6 +15,7 @@ import com.eka.scribesdk.data.remote.models.responses.readableMessage
 import com.eka.scribesdk.data.remote.services.SessionsApiService
 import com.google.gson.Gson
 import com.google.gson.JsonObject
+import com.google.gson.JsonParser
 import com.haroldadmin.cnradapter.NetworkResponse
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
@@ -131,10 +132,18 @@ internal class SessionsDocumentWriter(
     suspend fun saveContextText(
         sessionId: String,
         text: String,
+        tiptapJson: String? = null,
         codec: Base64Codec = AndroidBase64Codec
     ): Result<Boolean> = save(
         sessionId,
-        listOf(SessionData(templateId = CONTEXT, documentId = contextPlaceholderId(sessionId), data = codec.encode(text)))
+        listOf(
+            SessionData(
+                templateId = CONTEXT,
+                documentId = contextPlaceholderId(sessionId),
+                data = codec.encode(text),
+                tiptapJson = tiptapJson,
+            )
+        )
     )
 
     /** The context document made for [sessionId] here, created on first use. */
@@ -171,6 +180,11 @@ internal class SessionsDocumentWriter(
                 false
             }
             if (ok) {
+                val json = item.tiptapJson
+                if (!json.isNullOrBlank()) {
+                    val formatted = saveTiptap(sessionId, item.documentId, json)
+                    if (formatted.isFailure) return formatted
+                }
                 logger.info(TAG, "Document saved: ${item.documentId} (session $sessionId)")
                 return Result.success(true)
             }
@@ -252,6 +266,50 @@ internal class SessionsDocumentWriter(
 
             is NetworkResponse.NetworkError -> logger.warn(TAG, "Unpublish failed for $documentId", response.error)
             is NetworkResponse.UnknownError -> logger.warn(TAG, "Unpublish failed for $documentId", response.error)
+        }
+    }
+
+    /** The formatted note, or null when this document has none. */
+    suspend fun readTiptap(documentId: String): Result<String?> =
+        when (val response = apiService.getDocument(documentId)) {
+            is NetworkResponse.Success -> {
+                val json = response.body.data?.tiptapJson
+                val text = when {
+                    json == null || json.isJsonNull -> null
+                    json.isJsonObject -> json.toString()
+                    json.isJsonPrimitive && json.asJsonPrimitive.isString -> json.asString
+                    else -> null
+                }
+                Result.success(text)
+            }
+
+            is NetworkResponse.ServerError ->
+                Result.failure(Exception(response.body.readableMessage("Get document failed (HTTP ${response.code})")))
+
+            is NetworkResponse.NetworkError -> Result.failure(response.error)
+            is NetworkResponse.UnknownError -> Result.failure(response.error)
+        }
+
+    /** Writes the copy the website opens. The markdown PUT is a separate call. */
+    private suspend fun saveTiptap(sessionId: String, documentId: String, json: String): Result<Boolean> {
+        val parsed = try {
+            JsonParser.parseString(json)
+        } catch (e: Exception) {
+            return Result.failure(Exception("Couldn't save the formatted note"))
+        }
+        if (!parsed.isJsonObject) return Result.failure(Exception("Couldn't save the formatted note"))
+        val request = JsonObject().apply {
+            addProperty("session_id", sessionId)
+            addProperty("document_id", documentId)
+            add("tiptap_json", parsed)
+        }
+        return when (val response = apiService.saveTiptapDocument("true", request)) {
+            is NetworkResponse.Success -> Result.success(true)
+            is NetworkResponse.ServerError ->
+                Result.failure(Exception(response.body.readableMessage("Save formatted note failed (HTTP ${response.code})")))
+
+            is NetworkResponse.NetworkError -> Result.failure(response.error)
+            is NetworkResponse.UnknownError -> Result.failure(response.error)
         }
     }
 

@@ -62,6 +62,16 @@ internal interface SessionsApiService {
     ): NetworkResponse<DocumentEnvelopeResponse, SessionsErrorResponse>
 
     /**
+     * Same update as [upsertDocument], with `?tiptap_json=true` and `tiptap_json` in the body.
+     * That is the formatted copy the website opens.
+     */
+    @POST("voice/api/v1/documents")
+    suspend fun saveTiptapDocument(
+        @Query("tiptap_json") tiptapJson: String,
+        @Body request: JsonObject
+    ): NetworkResponse<DocumentEnvelopeResponse, SessionsErrorResponse>
+
+    /**
      * Get Document: metadata plus `presigned_url`, a GET URL for the stored text.
      * Docs: /ekascribe/api-reference/documents/get-document
      */

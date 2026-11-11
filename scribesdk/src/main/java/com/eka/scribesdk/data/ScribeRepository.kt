@@ -116,6 +116,18 @@ internal class ScribeRepository(
         }
     }
 
+    suspend fun getNoteFormatting(sessionId: String, documentId: String): Result<String?> {
+        val writer = sessionsDocumentWriter
+        if (writer == null || !usesSessionsApi(sessionId)) {
+            return Result.failure(UnsupportedOperationException("Formatted notes need the Sessions API"))
+        }
+        return try {
+            writer.readTiptap(documentId)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     suspend fun updateSessionResult(
         sessionId: String,
         updatedData: List<SessionData>
@@ -316,13 +328,13 @@ internal class ScribeRepository(
 
     // ---- Context text (Sessions API only) ----
 
-    suspend fun setSessionContextText(sessionId: String, text: String): Result<Unit> {
+    suspend fun setSessionContextText(sessionId: String, text: String, tiptapJson: String? = null): Result<Unit> {
         val writer = sessionsDocumentWriter
         if (writer == null || !usesSessionsApi(sessionId)) {
             return Result.failure(UnsupportedOperationException("Context text is only supported for Sessions API sessions"))
         }
         return try {
-            writer.saveContextText(sessionId, text).map { }
+            writer.saveContextText(sessionId, text, tiptapJson).map { }
         } catch (e: Exception) {
             Result.failure(e)
         }

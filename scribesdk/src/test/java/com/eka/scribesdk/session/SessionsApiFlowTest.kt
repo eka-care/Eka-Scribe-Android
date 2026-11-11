@@ -91,6 +91,8 @@ internal class SessionsApiFlowTest {
         val getResponses = ArrayDeque<NetworkResponse<GetSessionResponse, SessionsErrorResponse>>()
         var getCalls = 0
         val upsertBodies = mutableListOf<JsonObject>()
+        val tiptapQueries = mutableListOf<String>()
+        val tiptapBodies = mutableListOf<JsonObject>()
         var upsertResponse: NetworkResponse<DocumentEnvelopeResponse, SessionsErrorResponse>? = null
         /** null = the call throws, like a network failure. */
         var documentsResponse: NetworkResponse<JsonObject, SessionsErrorResponse>? = null
@@ -114,6 +116,9 @@ internal class SessionsApiFlowTest {
 
         override suspend fun upsertDocument(request: JsonObject) =
             upsertResponse!!.also { upsertBodies += request }
+
+        override suspend fun saveTiptapDocument(tiptapJson: String, request: JsonObject) =
+            upsertResponse!!.also { tiptapQueries += tiptapJson; tiptapBodies += request }
 
         override suspend fun getSessionAudio(sessionId: String) =
             audioResponse!!.also { audioCalls++ }
@@ -1062,10 +1067,31 @@ internal class SessionsApiFlowTest {
         val puts = mutableListOf<String>()
         val writer = SessionsDocumentWriter(api, NoOpLogger()) { _, body -> puts += body; true }
 
-        assertTrue(writer.saveContextText(SESSION_ID, "Known diabetic", JvmCodec).isSuccess)
+        assertTrue(writer.saveContextText(SESSION_ID, "Known diabetic", codec = JvmCodec).isSuccess)
 
         assertEquals("context", api.upsertBodies.single { it.has("type") }["type"].asString)
         assertEquals(listOf(JvmCodec.encode("Known diabetic")), puts)
+        assertTrue(api.tiptapBodies.isEmpty())
+    }
+
+    @Test
+    fun `saveContextText also stores the formatted copy the website's context editor opens`() = runTest {
+        val api = FakeSessionsApi().apply {
+            upsertResponse = netSuccess(
+                DocumentEnvelopeResponse(
+                    "success",
+                    DocumentEnvelopeResponse.DocumentData("ctx-new", SESSION_ID, "success", "https://s3.example/put")
+                )
+            )
+        }
+        val writer = SessionsDocumentWriter(api, NoOpLogger()) { _, _ -> true }
+        val doc = """{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Known diabetic"}]}]}"""
+
+        assertTrue(writer.saveContextText(SESSION_ID, "Known diabetic", doc, JvmCodec).isSuccess)
+
+        val body = api.tiptapBodies.single()
+        assertEquals("ctx-new", body["document_id"].asString)
+        assertEquals("doc", body["tiptap_json"].asJsonObject["type"].asString)
     }
 
     @Test
@@ -1083,6 +1109,25 @@ internal class SessionsApiFlowTest {
         assertEquals("unpublished", webhook["status"].asString)
         assertEquals("doc-1", api.upsertBodies[1]["document_id"].asString)
         assertEquals(listOf("https://s3.example/put"), puts)
+    }
+
+    @Test
+    fun `document writer stores the formatted copy the website opens`() = runTest {
+        val api = FakeSessionsApi().apply { upsertResponse = uploadUrlOk() }
+        val writer = SessionsDocumentWriter(api, NoOpLogger()) { _, _ -> true }
+        val doc = """{"type":"doc","content":[]}"""
+
+        val result = writer.save(
+            SESSION_ID,
+            listOf(SessionData(templateId = "t1", documentId = "doc-1", data = "SGVsbG8=", tiptapJson = doc))
+        )
+
+        assertTrue(result.isSuccess)
+        assertEquals(listOf("true"), api.tiptapQueries)
+        val body = api.tiptapBodies.single()
+        assertEquals(SESSION_ID, body["session_id"].asString)
+        assertEquals("doc-1", body["document_id"].asString)
+        assertEquals("doc", body["tiptap_json"].asJsonObject["type"].asString)
     }
 
     @Test

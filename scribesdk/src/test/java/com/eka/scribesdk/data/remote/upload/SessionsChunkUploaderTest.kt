@@ -236,6 +236,7 @@ internal class SessionsChunkUploaderTest {
         override suspend fun patchSession(sessionId: String, request: JsonObject) = error("not used")
         override suspend fun endSession(sessionId: String, request: JsonObject) = error("not used")
         override suspend fun upsertDocument(request: JsonObject) = error("not used")
+        override suspend fun saveTiptapDocument(tiptapJson: String, request: JsonObject) = error("not used")
         override suspend fun getDocument(documentId: String) = error("not used")
         override suspend fun listSessionDocuments(sessionId: String) = error("not used")
         override suspend fun processTemplate(sessionId: String, templateId: String) = error("not used")
