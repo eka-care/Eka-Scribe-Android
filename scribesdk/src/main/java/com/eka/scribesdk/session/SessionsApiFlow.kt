@@ -55,6 +55,7 @@ internal class SessionsApiFlow(
         private const val STATUS_CANCELLED = "cancelled"
         private const val USER_STATUS_RECORDING_STARTED = "recording_started"
         private const val AUDIO_DURATION = "audio_duration"
+        private const val VISIT_ID = "visit_id"
 
         // Same cadence as the web client: every 2s; give up after 2 minutes
         private const val POLL_INTERVAL_MS = 2_000L
@@ -71,6 +72,13 @@ internal class SessionsApiFlow(
 
     private val modePatches = ConcurrentHashMap<String, ModePatch>()
 
+    /**
+     * Patients set with [updatePatientDetails] while the session may not exist on the server yet.
+     * createSession sends the latest one, and the PATCH after create carries it too, so an update
+     * made while create is in flight is not lost.
+     */
+    private val pendingPatients = ConcurrentHashMap<String, PatientDetail>()
+
     /** `POST /sessions`; `PATCH session_mode` follows in the background. On success the stage moves to STOP. */
     suspend fun createSession(sessionId: String, sessionConfig: SessionConfig): TransactionResult {
         val request = CreateSessionRequest(
@@ -79,7 +87,7 @@ internal class SessionsApiFlow(
             templates = toTemplateIds(sessionConfig),
             model = sessionConfig.modelType,
             languageHint = toLanguageHint(sessionConfig.languages),
-            patientDetails = toPatientDetails(sessionConfig.patientDetails),
+            patientDetails = toPatientDetails(pendingPatients[sessionId] ?: sessionConfig.patientDetails),
             additionalData = toAdditionalData(sessionConfig)
         )
 
@@ -125,7 +133,14 @@ internal class SessionsApiFlow(
         // Sent in the background so recording starts after one call; endSession waits for it.
         // user_status = recording_started as the web sends it, so a session that never reaches
         // End shows on web as "recording started" (recommit offered), not as a fresh session
-        val modeRequest = PatchSessionRequest(sessionMode = sessionConfig.mode, userStatus = USER_STATUS_RECORDING_STARTED)
+        // Read after the stage moved to STOP: an updatePatientDetails that saw INIT is picked up here
+        val pendingPatient = pendingPatients[sessionId]
+        val modeRequest = PatchSessionRequest(
+            sessionMode = sessionConfig.mode,
+            userStatus = USER_STATUS_RECORDING_STARTED,
+            patientDetails = pendingPatient?.let { toPatientDetails(it) },
+            additionalData = pendingPatient?.visitId?.takeIf { it.isNotBlank() }?.let { mapOf(VISIT_ID to it) }
+        )
         modePatches[sessionId] = ModePatch(
             modeRequest,
             backgroundScope.async { patchSessionMode(sessionId, modeRequest, retry = false) }
@@ -181,6 +196,8 @@ internal class SessionsApiFlow(
                 if (retry is TransactionResult.Error) return retry // End is retried later, mode first
             }
             modePatches.remove(sessionId)
+            // The create body and its PATCH carried any patient set before the session existed
+            pendingPatients.remove(sessionId)
         }
 
         val uploadedCount = dataManager.getUploadedChunks(sessionId).size
@@ -264,6 +281,37 @@ internal class SessionsApiFlow(
         return !results.transcript.isNullOrEmpty() ||
             results.custom.orEmpty().any { it?.status in USABLE_STATES } ||
             results.integration.orEmpty().any { it?.status in USABLE_STATES }
+    }
+
+    /**
+     * Sets or replaces the session's patient (`PATCH /sessions/{id}` with patient_details), e.g. a
+     * patient picked during or after a recording started without one. An empty [PatientDetail]
+     * removes the patient.
+     *
+     * Before the session exists on the server (stage INIT: create not done yet, offline, or
+     * pending recovery) the patient is kept and sent by createSession / its follow-up PATCH.
+     */
+    suspend fun updatePatientDetails(sessionId: String, patient: PatientDetail): TransactionResult {
+        // Empty patient = clear it, sent as patient_details: {} like the web SDK's remove
+        val details = toPatientDetails(patient) ?: emptyMap()
+
+        // Order matters: record first, then read the stage (createSession does the reverse)
+        pendingPatients[sessionId] = patient
+        val stage = dataManager.getSession(sessionId)?.uploadStage
+        if (stage == TransactionStage.INIT.name) {
+            logger.info(TAG, "Patient for $sessionId kept until the session is created")
+            return TransactionResult.Success()
+        }
+
+        val result = patchSession(
+            sessionId,
+            PatchSessionRequest(
+                patientDetails = details,
+                additionalData = patient.visitId?.takeIf { it.isNotBlank() }?.let { mapOf(VISIT_ID to it) }
+            )
+        )
+        if (result is TransactionResult.Success) pendingPatients.remove(sessionId, patient)
+        return result
     }
 
     /** Marks the session cancelled on the server. Best effort: failures are only logged. */

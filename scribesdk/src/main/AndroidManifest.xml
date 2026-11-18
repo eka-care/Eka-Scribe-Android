@@ -4,5 +4,16 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Keeps the mic live while the app is in the background or the screen is locked -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <!-- Upload and note processing after End, so they are not killed in the background -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
+    <application>
+        <service
+            android:name="com.eka.scribesdk.recorder.RecordingForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="microphone|dataSync" />
+    </application>
 </manifest>

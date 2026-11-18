@@ -21,11 +21,14 @@ import com.eka.scribesdk.data.remote.upload.UploadResult
 import com.eka.scribesdk.pipeline.FullAudioResult
 import com.eka.scribesdk.pipeline.Pipeline
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.mockkStatic
+import io.mockk.verify
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -307,6 +310,7 @@ internal class SessionManagerTest {
         uploader: ChunkUploader = FakeChunkUploader()
     ): SessionManager {
         val pipelineFactory = mockk<Pipeline.Factory>(relaxed = true)
+        every { pipeline.micSilenced } returns MutableStateFlow(false)
 
         coEvery { tm.initTransaction(any(), any(), any()) } returns TransactionResult.Success(
             "folder",
@@ -316,6 +320,7 @@ internal class SessionManagerTest {
         every { pipeline.voiceActivityFlow } returns emptyFlow()
         every { pipeline.audioQualityFlow } returns emptyFlow()
         every { pipeline.audioFocusFlow } returns emptyFlow()
+        every { pipeline.micSilenced } returns MutableStateFlow(false)
 
         return SessionManager(
             dataManager = dm,
@@ -334,6 +339,7 @@ internal class SessionManagerTest {
         every { pipeline.voiceActivityFlow } returns emptyFlow()
         every { pipeline.audioQualityFlow } returns emptyFlow()
         every { pipeline.audioFocusFlow } returns emptyFlow()
+        every { pipeline.micSilenced } returns MutableStateFlow(false)
         coEvery { pipeline.stop() } throws RuntimeException("Pipeline crash")
 
         val manager = createManagerWithSuccessInit(pipeline = pipeline)
@@ -344,6 +350,24 @@ internal class SessionManagerTest {
         Thread.sleep(200)
 
         assertEquals(SessionState.ERROR, manager.currentState)
+    }
+
+    @Test
+    fun `stop with no audio fails at once with NO_AUDIO_CAPTURED and cancels on the server`() = runTest {
+        val tm = mockk<TransactionManager>(relaxed = true)
+        val callback = mockk<EkaScribeCallback>(relaxed = true)
+        val manager = createManagerWithSuccessInit(tm = tm, dm = FakeDataManager(chunkCount = 0))
+        manager.setCallback(callback)
+        manager.start(mockContext)
+        Thread.sleep(200)
+
+        manager.stop()
+        Thread.sleep(200)
+
+        assertEquals(SessionState.ERROR, manager.currentState)
+        coVerify { tm.cancelSession(any()) }
+        coVerify(exactly = 0) { tm.stopTransaction(any()) }
+        verify { callback.onSessionFailed(any(), match { it.code == ErrorCode.NO_AUDIO_CAPTURED }) }
     }
 
     @Test
@@ -555,6 +579,7 @@ internal class SessionManagerTest {
         every { pipeline.voiceActivityFlow } returns emptyFlow()
         every { pipeline.audioQualityFlow } returns emptyFlow()
         every { pipeline.audioFocusFlow } returns emptyFlow()
+        every { pipeline.micSilenced } returns MutableStateFlow(false)
 
             val tempFile = File.createTempFile("test_audio", ".mp3")
         tempFile.deleteOnExit()
@@ -729,7 +754,7 @@ internal class SessionManagerTest {
     // FAKES
     // =====================================================================
 
-    private class FakeDataManager : DataManager {
+    private class FakeDataManager(private val chunkCount: Int = 1) : DataManager {
         override suspend fun saveSession(session: SessionEntity) {}
         override suspend fun saveChunk(chunk: AudioChunkEntity) {}
         override suspend fun getSession(sessionId: String): SessionEntity? = null
@@ -739,7 +764,7 @@ internal class SessionManagerTest {
         override suspend fun markInProgress(chunkId: String) {}
         override suspend fun markUploaded(chunkId: String) {}
         override suspend fun markFailed(chunkId: String) {}
-        override suspend fun getChunkCount(sessionId: String) = 0
+        override suspend fun getChunkCount(sessionId: String) = chunkCount
         override fun sessionFlow(sessionId: String): Flow<SessionEntity?> = emptyFlow()
         override suspend fun deleteSession(sessionId: String) {}
         override suspend fun updateUploadStage(sessionId: String, stage: String) {}

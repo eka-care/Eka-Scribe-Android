@@ -62,6 +62,16 @@ internal interface SessionsApiService {
     ): NetworkResponse<DocumentEnvelopeResponse, SessionsErrorResponse>
 
     /**
+     * Same update as [upsertDocument], with `?tiptap_json=true` and `tiptap_json` in the body.
+     * That is the formatted copy the website opens.
+     */
+    @POST("voice/api/v1/documents")
+    suspend fun saveTiptapDocument(
+        @Query("tiptap_json") tiptapJson: String,
+        @Body request: JsonObject
+    ): NetworkResponse<DocumentEnvelopeResponse, SessionsErrorResponse>
+
+    /**
      * Get Document: metadata plus `presigned_url`, a GET URL for the stored text.
      * Docs: /ekascribe/api-reference/documents/get-document
      */
@@ -114,4 +124,15 @@ internal interface SessionsApiService {
     suspend fun getSession(
         @Path("session_id") sessionId: String
     ): NetworkResponse<GetSessionResponse, SessionsErrorResponse>
+
+    /**
+     * Publish Document: sends the note to the EMR (same as publishDocument in the web SDK).
+     * The response is read loosely; the publish state is read back with [getDocument] if needed.
+     */
+    @POST("voice/api/v1/sessions/{session_id}/documents/{document_id}/publish")
+    suspend fun publishDocument(
+        @Path("session_id") sessionId: String,
+        @Path("document_id") documentId: String,
+        @Body request: JsonObject
+    ): NetworkResponse<JsonObject, SessionsErrorResponse>
 }

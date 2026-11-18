@@ -150,8 +150,8 @@ buildConfigField("String", "COG_URL", "\"${configProps["COG_URL"]}\"")
 ### `sdk.properties` — SDK version
 
 ```properties
-SDK_VERSION_NAME=4.4.0
-SDK_BUILD_NUMBER=2
+SDK_VERSION_NAME=4.5.0
+SDK_BUILD_NUMBER=3
 ```
 
 Update `SDK_VERSION_NAME` (and bump `SDK_BUILD_NUMBER`) before tagging a release on GitHub. The SDK sends both to the server: `sdk_version` in a Sessions API session's `additional_data`, and the `sdk-version-name` / `sdk-version` headers host apps add.

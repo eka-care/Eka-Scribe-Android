@@ -32,6 +32,9 @@ internal data class PatchSessionRequest(
     val userStatus: String? = null,
     @SerializedName("processing_status")
     val processingStatus: String? = null,
+    /** Same keys as the create body (oid, name, age, gender). */
+    @SerializedName("patient_details")
+    val patientDetails: Map<String, String>? = null,
     /** Merged into the session's additional_data by the server. */
     @SerializedName("additional_data")
     val additionalData: Map<String, Any>? = null

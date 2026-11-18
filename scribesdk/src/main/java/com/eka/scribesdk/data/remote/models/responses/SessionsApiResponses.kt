@@ -122,6 +122,9 @@ internal data class DocumentEnvelopeResponse(
         /** Content URL, valid for a short time: PUT after create/update, GET from Get Document. */
         @SerializedName("presigned_url")
         val presignedUrl: String?,
+        /** Formatted note the website opens. Absent when the note has only markdown. */
+        @SerializedName("tiptap_json")
+        val tiptapJson: JsonElement? = null,
         /** `custom`, `context`, `transcript`, `integration`. */
         @SerializedName("document_type")
         val documentType: String? = null,

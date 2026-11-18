@@ -67,6 +67,48 @@ internal class TransactionManager(
     }
 
     /**
+     * Sets the session's patient. Sessions API only: legacy transactions take the patient at init
+     * and have no update call.
+     *
+     * For a session on this device the saved metadata is updated as well, so a create that runs
+     * later (offline, crash recovery) sends the new patient.
+     */
+    suspend fun updatePatientDetails(sessionId: String, patient: PatientDetail): TransactionResult {
+        val session = dataManager.getSession(sessionId)
+        val flow = sessionsApiFlow
+        val onSessionsApi = if (session != null) session.apiFlow == ApiFlow.SESSIONS_V1 else useSessionsApi
+        if (flow == null || !onSessionsApi) {
+            return TransactionResult.Error("Updating the patient is only supported for Sessions API sessions")
+        }
+
+        session?.sessionMetadata?.let { json ->
+            try {
+                val request = gson.fromJson(json, InitTransactionRequest::class.java)
+                val updated = request.copy(
+                    patientDetails = PatientDetails(
+                        age = patient.age,
+                        biologicalSex = patient.biologicalSex,
+                        name = patient.name,
+                        patientId = patient.patientId,
+                        visitId = patient.visitId
+                    )
+                )
+                dataManager.updateSessionMetadata(sessionId, gson.toJson(updated))
+            } catch (e: Exception) {
+                logger.warn(TAG, "Could not update saved patient for $sessionId", e)
+            }
+        }
+
+        return flow.updatePatientDetails(sessionId, patient)
+    }
+
+    /** Removes a session's audio chunks and DB rows from this device. */
+    suspend fun deleteLocalSession(sessionId: String) {
+        dataManager.getAllChunks(sessionId).forEach { deleteFile(File(it.filePath), logger) }
+        dataManager.deleteSession(sessionId) // chunk rows cascade
+    }
+
+    /**
      * Call the init transaction API before recording starts.
      * Builds the s3_url and serializes the request for recovery.
      */
