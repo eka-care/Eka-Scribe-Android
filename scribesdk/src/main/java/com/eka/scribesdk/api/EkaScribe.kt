@@ -113,6 +113,7 @@ object EkaScribe {
     private var audioFileProcessor: AudioFileProcessor? = null
     private var sessionAudioDownloader: SessionAudioDownloader? = null
     private var recordingGuard: RecordingGuard? = null
+    private var recordingController: RecordingServiceController? = null
     /** Outlives init/destroy so the app can collect it before the SDK is ready. */
     private val _recordingAlert = MutableStateFlow<RecordingAlert?>(null)
     private val initialized = MutableStateFlow(false)
@@ -355,6 +356,7 @@ object EkaScribe {
         }
         sessionManager?.let { manager ->
             sdkScope.launch { manager.stateFlow.collect { recordingService.onState(it) } }
+            recordingController = recordingService
             // Forgotten End, low battery, mic taken by another app
             val guard = RecordingGuard(
                 context = context.applicationContext,
@@ -531,6 +533,14 @@ object EkaScribe {
         runCatching { transactionManager?.cancelSession(sessionId) }
         Unit
     }
+
+    /**
+     * How long the current recording has run, or how long the last one ran once it ended, with
+     * paused time left out. It comes from the recorder's clock, so it stays right when the app is
+     * in the background, its screen is recreated, or the recording is ended from the notification.
+     * 0 before the first recording.
+     */
+    fun getRecordedDurationMs(): Long = recordingController?.recordedMs() ?: 0L
 
     fun isRecording(): Boolean {
         return sessionManager?.currentState == SessionState.RECORDING

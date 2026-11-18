@@ -360,8 +360,29 @@ internal class RecordingServiceController(
     private var state = SessionState.IDLE
     private var alert: RecordingAlert? = null
     /** Elapsed-realtime the recording would have started at, with paused time taken out. */
-    private var recordingSince = 0L
-    private var pausedAt = 0L
+    @Volatile private var recordingSince = 0L
+    @Volatile private var pausedAt = 0L
+    /** When the recording ended (End, notification Stop, time limit); 0 while it runs. */
+    @Volatile private var stoppedAt = 0L
+
+    /**
+     * How long the recording has run, paused time left out, from the recorder's own clock. Stops
+     * growing once the recording ends and keeps that value until the next session starts.
+     */
+    fun recordedMs(): Long {
+        val since = recordingSince
+        if (since == 0L) return 0L
+        val end = when {
+            stoppedAt != 0L -> stoppedAt
+            pausedAt != 0L -> pausedAt
+            else -> SystemClock.elapsedRealtime()
+        }
+        return (end - since).coerceAtLeast(0L)
+    }
+
+    private fun markStopped(now: Long) {
+        if (running && stoppedAt == 0L) stoppedAt = if (pausedAt != 0L) pausedAt else now
+    }
 
     /** An alert to show on the recording notification; rings once when it first appears. */
     fun onAlert(alert: RecordingAlert?) {
@@ -381,10 +402,19 @@ internal class RecordingServiceController(
         val now = SystemClock.elapsedRealtime()
         try {
             when (state) {
+                // A new session: the last one's duration no longer applies
+                SessionState.STARTING -> if (!running) {
+                    recordingSince = 0L
+                    pausedAt = 0L
+                    stoppedAt = 0L
+                }
                 SessionState.RECORDING -> {
                     val firstStart = !running
                     when {
-                        firstStart -> recordingSince = now
+                        firstStart -> {
+                            recordingSince = now
+                            stoppedAt = 0L
+                        }
                         pausedAt != 0L -> recordingSince += now - pausedAt
                     }
                     pausedAt = 0L
@@ -398,11 +428,13 @@ internal class RecordingServiceController(
                 }
                 // Already in the foreground from recording: carry on through upload and processing
                 SessionState.STOPPING, SessionState.PROCESSING -> if (running) {
+                    markStopped(now)
                     RecordingForegroundService.show(
                         context, RecordingForegroundService.Phase.PROCESSING, recordingSince, sessionLabel(), running = true
                     )
                 }
                 else -> if (running) {
+                    markStopped(now)
                     running = false
                     pausedAt = 0L
                     RecordingForegroundService.hide(context)
