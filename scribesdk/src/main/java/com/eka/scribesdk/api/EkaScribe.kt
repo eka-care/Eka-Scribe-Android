@@ -908,6 +908,10 @@ object EkaScribe {
     // ---- Lifecycle ----
 
     fun destroy() {
+        // Stop the recording notification first: the state collector that would hide it is
+        // cancelled with sdkScope below and may never see the session end
+        recordingController?.release()
+        recordingController = null
         sessionManager?.destroy()
         sessionManager = null
         recordingGuard = null

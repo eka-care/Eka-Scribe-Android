@@ -380,6 +380,16 @@ internal class RecordingServiceController(
         return (end - since).coerceAtLeast(0L)
     }
 
+    /** The SDK is going away (EkaScribe.destroy): never leave the recording notification behind. */
+    fun release() {
+        if (!running) return
+        markStopped(SystemClock.elapsedRealtime())
+        running = false
+        pausedAt = 0L
+        runCatching { RecordingForegroundService.hide(context) }
+            .onFailure { logger.warn(TAG, "Recording service release: ${it.message}") }
+    }
+
     private fun markStopped(now: Long) {
         if (running && stoppedAt == 0L) stoppedAt = if (pausedAt != 0L) pausedAt else now
     }
