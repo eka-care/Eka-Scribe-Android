@@ -1,5 +1,6 @@
 package com.eka.scribesdk.api
 
+import com.eka.scribesdk.api.models.ActiveSession
 import com.eka.scribesdk.recorder.RecordingForegroundService
 import com.eka.scribesdk.recorder.RecordingServiceController
 import android.content.Context
@@ -541,6 +542,20 @@ object EkaScribe {
      * 0 before the first recording.
      */
     fun getRecordedDurationMs(): Long = recordingController?.recordedMs() ?: 0L
+
+    /**
+     * The recording that is still going (starting, recording or paused), or null. The app's screen
+     * can be recreated while a recording runs in the background; use this to show it again.
+     */
+    fun getActiveSession(): ActiveSession? {
+        val manager = sessionManager ?: return null
+        val state = manager.currentState
+        if (state != SessionState.STARTING && state != SessionState.RECORDING && state != SessionState.PAUSED) {
+            return null
+        }
+        val id = manager.currentSessionId ?: return null
+        return ActiveSession(sessionId = id, state = state, patient = manager.currentSessionConfig?.patientDetails)
+    }
 
     fun isRecording(): Boolean {
         return sessionManager?.currentState == SessionState.RECORDING
