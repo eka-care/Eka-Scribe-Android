@@ -43,6 +43,16 @@ android {
             )
             buildConfigField(
                 "String",
+                "DEVELOPER_URL_DEV",
+                "\"${config["DEVELOPER_URL_DEV"]}\""
+            )
+            buildConfigField(
+                "String",
+                "COG_URL_DEV",
+                "\"${config["COG_URL_DEV"]}\""
+            )
+            buildConfigField(
+                "String",
                 "OUTPUT_DIR",
                 "\"${config["OUTPUT_DIR"]}\""
             )
@@ -74,6 +84,16 @@ android {
                 "String",
                 "DEVELOPER_URL",
                 "\"${config["DEVELOPER_URL"]}\""
+            )
+            buildConfigField(
+                "String",
+                "DEVELOPER_URL_DEV",
+                "\"${config["DEVELOPER_URL_DEV"]}\""
+            )
+            buildConfigField(
+                "String",
+                "COG_URL_DEV",
+                "\"${config["COG_URL_DEV"]}\""
             )
             buildConfigField(
                 "String",

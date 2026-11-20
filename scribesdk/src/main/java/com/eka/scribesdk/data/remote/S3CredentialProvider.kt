@@ -22,7 +22,8 @@ data class S3Credentials(
  */
 internal class S3CredentialProvider(
     private val apiService: ScribeApiService,
-    private val logger: Logger
+    private val logger: Logger,
+    private val cogUrl: String = BuildConfig.COG_URL,
 ) {
     companion object {
         private const val TAG = "S3CredentialProvider"
@@ -50,7 +51,7 @@ internal class S3CredentialProvider(
     }
 
     private suspend fun fetchCredentials(): S3Credentials? {
-        val url = BuildConfig.COG_URL + "credentials"
+        val url = cogUrl + "credentials"
         return try {
             when (val response = apiService.getS3Config(url)) {
                 is NetworkResponse.Success -> {
