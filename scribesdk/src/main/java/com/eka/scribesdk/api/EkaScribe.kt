@@ -154,7 +154,7 @@ object EkaScribe {
                 appId = enrichedNetworkConfig.appId,
                 service = "ekascribe_cog_service",
             ).create(
-                serviceUrl = BuildConfig.COG_URL,
+                serviceUrl = config.environment.cogUrl,
                 serviceClass = ScribeApiService::class.java
             )
 
@@ -164,7 +164,7 @@ object EkaScribe {
                 appId = enrichedNetworkConfig.appId,
                 service = "ekascribe_session_service",
             ).create(
-                serviceUrl = BuildConfig.DEVELOPER_URL,
+                serviceUrl = config.environment.developerUrl,
                 serviceClass = ScribeApiService::class.java
             )
         apiService = developerApiService
@@ -175,7 +175,7 @@ object EkaScribe {
                 appId = enrichedNetworkConfig.appId,
                 service = "ekascribe_sessions_v1_service",
             ).create(
-                serviceUrl = BuildConfig.DEVELOPER_URL,
+                serviceUrl = config.environment.developerUrl,
                 serviceClass = SessionsApiService::class.java
             )
 
@@ -192,6 +192,7 @@ object EkaScribe {
 
         val credentialProvider = S3CredentialProvider(
             apiService = cogApiService,
+            cogUrl = config.environment.cogUrl,
             logger = logger
         )
 

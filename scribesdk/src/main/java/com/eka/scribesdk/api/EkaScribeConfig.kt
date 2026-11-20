@@ -11,6 +11,8 @@ import com.eka.scribesdk.encoder.AudioFormat
  * @param networkConfig network and authentication configuration
  * @param useSessionsApi create new sessions on the EkaScribe Sessions API (`/voice/v1/sessions`)
  *        instead of the transaction APIs + S3 upload. Sessions already started keep their own flow.
+ * @param environment scribe backend to call (default [ScribeEnvironment.PROD]). Must match the
+ *        environment the host app's auth token comes from.
  **/
 data class EkaScribeConfig(
     val clientId: String,
@@ -19,6 +21,7 @@ data class EkaScribeConfig(
     val debugMode: Boolean = false,
     val networkConfig: NetworkConfig,
     val useSessionsApi: Boolean = false,
+    val environment: ScribeEnvironment = ScribeEnvironment.PROD,
 ) {
     companion object {
         internal const val SAMPLE_RATE = 16000
